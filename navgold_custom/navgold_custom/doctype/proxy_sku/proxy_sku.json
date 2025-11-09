@@ -7,8 +7,10 @@
  "engine": "InnoDB",
  "field_order": [
   "item",
+  "asin",
   "column_break_fojg",
   "uom",
+  "is_active",
   "section_break_yaut",
   "naming_series"
  ],
@@ -37,12 +39,24 @@
   {
    "fieldname": "section_break_yaut",
    "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "asin",
+   "fieldtype": "Link",
+   "label": "ASIN",
+   "options": "Amazon ASIN"
+  },
+  {
+   "default": "0",
+   "fieldname": "is_active",
+   "fieldtype": "Check",
+   "label": "Is Active?"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-11-07 11:10:31.468031",
+ "modified": "2025-11-08 11:01:27.443378",
  "modified_by": "Administrator",
  "module": "Navgold Custom",
  "name": "Proxy SKU",

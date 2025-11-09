@@ -2,7 +2,7 @@
  "actions": [],
  "allow_rename": 1,
  "autoname": "field:asin",
- "creation": "2025-11-07 07:11:28.019528",
+ "creation": "2025-11-08 11:00:33.468302",
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
@@ -21,7 +21,7 @@
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2025-11-07 11:09:35.380613",
+ "modified": "2025-11-08 13:52:16.317228",
  "modified_by": "Administrator",
  "module": "Navgold Custom",
  "name": "Amazon ASIN",
@@ -43,7 +43,7 @@
  ],
  "row_format": "Dynamic",
  "rows_threshold_for_grid_search": 20,
- "sort_field": "modified",
+ "sort_field": "creation",
  "sort_order": "DESC",
  "states": []
 }
