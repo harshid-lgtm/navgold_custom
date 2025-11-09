@@ -9,10 +9,10 @@
 from datetime import datetime, timedelta
 
 import frappe
+import pytz
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import add_days, getdate, now_datetime, today, get_date_str
-import pytz
+from frappe.utils import add_days, get_date_str, getdate, now_datetime, today
 
 
 class AmazonSPAPISettings(Document):
@@ -28,8 +28,7 @@ class AmazonSPAPISettings(Document):
 			frappe.throw(frappe._("Value for <b>Max Retry Limit</b> must be less than or equal to 5."))
 
 	def save(self):
-		super(AmazonSPAPISettings, self).save()
-
+		super().save()
 
 	def validate_after_date(self):
 		if datetime.strptime(add_days(today(), -60), "%Y-%m-%d") > datetime.strptime(
@@ -42,6 +41,7 @@ class AmazonSPAPISettings(Document):
 		from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_repository import (
 			get_orders,
 		)
+
 		if self.is_active == 1:
 			job_name = f"Get Amazon Orders - {self.name}"
 
@@ -58,24 +58,21 @@ class AmazonSPAPISettings(Document):
 				now=frappe.flags.in_test,
 			)
 
-
 			frappe.msgprint(_("Order details will be fetched in the background."))
 		else:
-			frappe.msgprint(
-				_("Please enable the Amazon SP API Settings {0}.").format(frappe.bold(self.name))
-			)
+			frappe.msgprint(_("Please enable the Amazon SP API Settings {0}.").format(frappe.bold(self.name)))
 
 
 # Called via a hook in every hour.
 def schedule_get_order_details():
 	current_datetime = now_datetime()
 
-	yesterday_23 = (current_datetime - timedelta(days=1)).replace(
-		hour=23, minute=0, second=0, microsecond=0
-	)
+	yesterday_23 = (current_datetime - timedelta(days=1)).replace(hour=23, minute=0, second=0, microsecond=0)
 	today_01 = current_datetime.replace(hour=1, minute=0, second=0, microsecond=0)
 
-	if yesterday_23 <= current_datetime < today_01: # Makes it so that the hourly scheduler won't work at midnight and the daily one will
+	if (
+		yesterday_23 <= current_datetime < today_01
+	):  # Makes it so that the hourly scheduler won't work at midnight and the daily one will
 		return
 
 	from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_repository import (
@@ -100,6 +97,7 @@ def schedule_get_order_details():
 	for amz_setting in amz_settings:
 		get_orders(amz_setting_name=amz_setting.name, last_updated_after=current_date)
 
+
 # Called via a hook every day to sync data of the previous day.
 def schedule_get_order_details_daily():
 	from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_repository import (
@@ -116,13 +114,21 @@ def schedule_get_order_details_daily():
 
 	for amz_setting in amz_settings:
 		get_orders(amz_setting_name=amz_setting.name, last_updated_after=from_date)
-		frappe.enqueue("navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api_settings.enq_si_submit", queue="long")
+		frappe.enqueue(
+			"navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api_settings.enq_si_submit",
+			queue="long",
+		)
 
-def enq_si_submit(sales_orders = []):
+
+def enq_si_submit(sales_orders=None):
 	if not sales_orders:
-		sales_invoices = frappe.db.get_all("Sales Invoice", {"docstatus":0, "amazon_order_id":["is", "set"]}, pluck="name")
+		sales_invoices = frappe.db.get_all(
+			"Sales Invoice", {"docstatus": 0, "amazon_order_id": ["is", "set"]}, pluck="name"
+		)
 	else:
-		sales_invoices = frappe.db.get_all("Sales Invoice Item", {"sales_order":["in", sales_orders]}, pluck="parent")
+		sales_invoices = frappe.db.get_all(
+			"Sales Invoice Item", {"sales_order": ["in", sales_orders]}, pluck="parent"
+		)
 	for sales_invoice in sales_invoices:
 		sales_invoice = frappe.get_doc("Sales Invoice", sales_invoice)
 		frappe.db.savepoint("before_testing_si_submit")
@@ -130,5 +136,7 @@ def enq_si_submit(sales_orders = []):
 			sales_invoice.submit()
 		except Exception as e:
 			frappe.db.rollback(save_point="before_testing_si_submit")
-			if not frappe.db.exists("Amazon Failed Invoice Record", {"invoice_id":sales_invoice.name}):
-				frappe.get_doc({"doctype":"Amazon Failed Invoice Record", "invoice_id":sales_invoice.name, "error":e}).insert()
+			if not frappe.db.exists("Amazon Failed Invoice Record", {"invoice_id": sales_invoice.name}):
+				frappe.get_doc(
+					{"doctype": "Amazon Failed Invoice Record", "invoice_id": sales_invoice.name, "error": e}
+				).insert()
