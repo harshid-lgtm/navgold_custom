@@ -25,7 +25,7 @@ def transfer_barcodes(doc, method=None):
 				serial_doc.transfer_document_no = doc.name
 				serial_doc.save()
 	frappe.msgprint(
-		"Serial Numbers are now Transferred",
+		frappe._("Serial Numbers are now Transferred"),
 		alert=True,
 	)
 

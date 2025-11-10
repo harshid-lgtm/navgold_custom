@@ -247,16 +247,6 @@ doctype_js = {
 }
 
 doc_events = {
-	"Sales Invoice": {
-		"validate": "navgold_custom.navgold_custom.custom_script.sales_invoice.sales_invoice.validate",
-		"before_submit": "navgold_custom.navgold_custom.custom_script.sales_invoice.sales_invoice.before_submit",
-		"on_cancel": "navgold_custom.navgold_custom.custom_script.sales_invoice.sales_invoice.on_cancel",
-	},
-	"Purchase Receipt": {
-		"before_validate": "navgold_custom.navgold_custom.custom_script.purchase_receipt.purchase_receipt.create_barcodes",
-		"before_submit": "navgold_custom.navgold_custom.custom_script.purchase_receipt.purchase_receipt.activate_barcodes",
-		"on_cancel": "navgold_custom.navgold_custom.custom_script.purchase_receipt.purchase_receipt.delete_barcodes",
-	},
 	"Stock Entry": {
 		"before_validate": "navgold_custom.navgold_custom.custom_script.purchase_receipt.purchase_receipt.create_barcodes",
 		"before_submit": "navgold_custom.navgold_custom.custom_script.stock_entry.stock_entry.transfer_barcodes",

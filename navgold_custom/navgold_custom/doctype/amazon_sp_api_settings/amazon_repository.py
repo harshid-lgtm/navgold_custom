@@ -409,7 +409,6 @@ class AmazonRepository:
 				order_id=order_id,
 				next_token=next_token,
 			)
-		print(final_order_items)
 		return final_order_items
 
 	def create_sales_order(self, order) -> str | None:

@@ -87,7 +87,7 @@ function hanlde_retry_btn(frm) {
 			title: 'Sync by Order ID',
 			fields: [
 				{
-					label: 'Amazon SP API Settings',
+					label: _('Amazon SP API Settings'),
 					fieldname: 'sp_api_settings',
 					fieldtype: 'Link',
 					options: 'Amazon SP API Settings',
@@ -96,7 +96,7 @@ function hanlde_retry_btn(frm) {
 					hidden: 1,
 				},
 				{
-					label: 'Amazon Order IDs',
+					label: _('Amazon Order IDs'),
 					fieldname: 'amazon_order_ids',
 					fieldtype: 'Small Text',
 					reqd: 1,

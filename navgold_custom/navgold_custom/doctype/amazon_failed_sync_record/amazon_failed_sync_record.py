@@ -41,7 +41,7 @@ class AmazonFailedSyncRecord(Document):
 				try:
 					so = get_order(amz_setting_name=amz_setting_name, amazon_order_ids=self.amazon_order_id)
 				except Exception as e:
-					print(e)
+					frappe.log_error(e)
 		if so:
 			return so
 		else:

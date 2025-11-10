@@ -21,7 +21,7 @@ function handle_custom_buttons(frm) {
 	if (!frm.is_new()) {
 		if (frm.doc.amazon_order_id && !frm.doc.replaced_order_id) {
 			frm
-				.add_custom_button('Retry', () => {
+				.add_custom_button(_('Retry'), () => {
 					retry_fetching(frm);
 				})
 				.addClass('btn-primary');
@@ -38,7 +38,7 @@ function handle_custom_buttons(frm) {
 						// checking if the replaced so is already created from another source
 						if (!r.message.name) {
 							frm.add_custom_button(
-								'Sales Order',
+								_('Sales Order'),
 								() => {
 									create_replaced_so(frm);
 								},
@@ -58,7 +58,7 @@ function handle_custom_buttons(frm) {
 						// checking if the replaced jv is already created from another source
 						if (!r.message.name) {
 							frm.add_custom_button(
-								'Journal Entry',
+								_('Journal Entry'),
 								() => {
 									create_replaced_jv(frm);
 								},
