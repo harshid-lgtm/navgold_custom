@@ -33,12 +33,12 @@ frappe.ui.form.on('Amazon SP API Settings', {
 });
 
 function hanlde_retry_btn(frm) {
-	frm.add_custom_button('Get Order', () => {
+	frm.add_custom_button(__('Get Order'), () => {
 		const d = new frappe.ui.Dialog({
-			title: 'Sync by Order ID',
+			title: __('Sync by Order ID'),
 			fields: [
 				{
-					label: 'Amazon SP API Settings',
+					label: __('Amazon SP API Settings'),
 					fieldname: 'sp_api_settings',
 					fieldtype: 'Link',
 					options: 'Amazon SP API Settings',
@@ -47,7 +47,7 @@ function hanlde_retry_btn(frm) {
 					hidden: 1,
 				},
 				{
-					label: 'Amazon Order ID',
+					label: __('Amazon Order ID'),
 					fieldname: 'amazon_order_id',
 					fieldtype: 'Data',
 					reqd: 1,
@@ -82,12 +82,12 @@ function hanlde_retry_btn(frm) {
 		d.show();
 	});
 
-	frm.add_custom_button('Get Orders', () => {
+	frm.add_custom_button(__('Get Orders'), () => {
 		const d = new frappe.ui.Dialog({
 			title: 'Sync by Order ID',
 			fields: [
 				{
-					label: _('Amazon SP API Settings'),
+					label: __('Amazon SP API Settings'),
 					fieldname: 'sp_api_settings',
 					fieldtype: 'Link',
 					options: 'Amazon SP API Settings',
@@ -96,7 +96,7 @@ function hanlde_retry_btn(frm) {
 					hidden: 1,
 				},
 				{
-					label: _('Amazon Order IDs'),
+					label: __('Amazon Order IDs'),
 					fieldname: 'amazon_order_ids',
 					fieldtype: 'Small Text',
 					reqd: 1,
