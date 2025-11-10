@@ -1,272 +1,272 @@
 {
- "actions": [],
- "allow_rename": 1,
- "creation": "2025-11-04 06:52:50.994753",
- "doctype": "DocType",
- "engine": "InnoDB",
- "field_order": [
-  "section_break_brdn",
-  "amended_from",
-  "basic_details_section",
-  "supplier_name",
-  "supplier_type",
-  "currency",
-  "column_break_kboz",
-  "supplier_assigned_id",
-  "vat_number",
-  "address_section",
-  "address_1",
-  "address_2",
-  "column_break_pmrk",
-  "citytown",
-  "postal_code",
-  "country",
-  "contact_section",
-  "companys_website",
-  "companys_phone",
-  "companys_email",
-  "column_break_qwaz",
-  "contact_person",
-  "contact_persons_phone",
-  "contact_persons_email",
-  "organic_products_section",
-  "sells_organic_products",
-  "column_break_czhp",
-  "organic_certificate",
-  "organic_certificate_na_reason",
-  "additional_details_section",
-  "credit_limit",
-  "default_lead_time",
-  "minimum_order_value",
-  "column_break_pbzg",
-  "other_details"
- ],
- "fields": [
-  {
-   "fieldname": "section_break_brdn",
-   "fieldtype": "Section Break"
-  },
-  {
-   "fieldname": "amended_from",
-   "fieldtype": "Link",
-   "label": "Amended From",
-   "no_copy": 1,
-   "options": "Vendor Onboarding",
-   "print_hide": 1,
-   "read_only": 1,
-   "search_index": 1
-  },
-  {
-   "fieldname": "basic_details_section",
-   "fieldtype": "Section Break",
-   "label": "Basic Details"
-  },
-  {
-   "fieldname": "supplier_name",
-   "fieldtype": "Data",
-   "in_list_view": 1,
-   "label": "Supplier Name",
-   "reqd": 1
-  },
-  {
-   "fieldname": "supplier_type",
-   "fieldtype": "Select",
-   "in_list_view": 1,
-   "label": "Supplier Type",
-   "options": "Company\nIndividual\nPartner",
-   "reqd": 1
-  },
-  {
-   "default": "GBP",
-   "fieldname": "currency",
-   "fieldtype": "Link",
-   "label": "Currency",
-   "options": "Currency"
-  },
-  {
-   "fieldname": "column_break_kboz",
-   "fieldtype": "Column Break"
-  },
-  {
-   "description": "Please enter the unique Customer ID assigned to Navgold Ltd (Superfood UK) by you",
-   "fieldname": "supplier_assigned_id",
-   "fieldtype": "Data",
-   "label": "Supplier Assigned ID"
-  },
-  {
-   "fieldname": "vat_number",
-   "fieldtype": "Data",
-   "label": "VAT Number"
-  },
-  {
-   "fieldname": "address_section",
-   "fieldtype": "Section Break",
-   "label": "Address"
-  },
-  {
-   "fieldname": "address_1",
-   "fieldtype": "Data",
-   "label": "Address 1"
-  },
-  {
-   "fieldname": "address_2",
-   "fieldtype": "Data",
-   "label": "Address 2"
-  },
-  {
-   "fieldname": "column_break_pmrk",
-   "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "citytown",
-   "fieldtype": "Data",
-   "label": "City/Town"
-  },
-  {
-   "fieldname": "postal_code",
-   "fieldtype": "Data",
-   "label": "Postal Code"
-  },
-  {
-   "fieldname": "country",
-   "fieldtype": "Link",
-   "in_list_view": 1,
-   "label": "Country",
-   "options": "Country",
-   "reqd": 1
-  },
-  {
-   "fieldname": "contact_section",
-   "fieldtype": "Section Break",
-   "label": "Contact"
-  },
-  {
-   "fieldname": "companys_website",
-   "fieldtype": "Data",
-   "label": "Company's Website"
-  },
-  {
-   "fieldname": "companys_phone",
-   "fieldtype": "Data",
-   "label": "Company's Phone"
-  },
-  {
-   "fieldname": "companys_email",
-   "fieldtype": "Data",
-   "label": "Company's Email"
-  },
-  {
-   "fieldname": "column_break_qwaz",
-   "fieldtype": "Column Break"
-  },
-  {
-   "description": "(Full Name)",
-   "fieldname": "contact_person",
-   "fieldtype": "Data",
-   "label": "Contact Person"
-  },
-  {
-   "fieldname": "contact_persons_phone",
-   "fieldtype": "Data",
-   "label": "Contact Person's Phone"
-  },
-  {
-   "fieldname": "contact_persons_email",
-   "fieldtype": "Data",
-   "label": "Contact Person's Email"
-  },
-  {
-   "fieldname": "organic_products_section",
-   "fieldtype": "Section Break",
-   "label": "Organic Products"
-  },
-  {
-   "default": "No",
-   "fieldname": "sells_organic_products",
-   "fieldtype": "Select",
-   "in_list_view": 1,
-   "label": "Sells Organic Products",
-   "options": "Yes\nNo\nNot Applicable",
-   "reqd": 1
-  },
-  {
-   "fieldname": "column_break_czhp",
-   "fieldtype": "Column Break"
-  },
-  {
-   "depends_on": "eval: doc.sells_organic_products == 'Yes'",
-   "fieldname": "organic_certificate",
-   "fieldtype": "Attach",
-   "label": "Organic Certificate",
-   "mandatory_depends_on": "eval: doc.sells_organic_products == 'Yes'"
-  },
-  {
-   "depends_on": "eval: doc.sells_organic_products == 'Not Applicable'",
-   "fieldname": "organic_certificate_na_reason",
-   "fieldtype": "Small Text",
-   "label": "Organic Certificate NA Reason",
-   "mandatory_depends_on": "eval: doc.sells_organic_products == 'Not Applicable'"
-  },
-  {
-   "fieldname": "additional_details_section",
-   "fieldtype": "Section Break",
-   "label": "Additional Details"
-  },
-  {
-   "fieldname": "credit_limit",
-   "fieldtype": "Currency",
-   "label": "Credit Limit"
-  },
-  {
-   "fieldname": "default_lead_time",
-   "fieldtype": "Int",
-   "label": "Default Lead Time (in Days)",
-   "non_negative": 1
-  },
-  {
-   "description": "(Minimum amount at which shipping will be free)",
-   "fieldname": "minimum_order_value",
-   "fieldtype": "Currency",
-   "label": "Minimum Order Value",
-   "non_negative": 1
-  },
-  {
-   "fieldname": "column_break_pbzg",
-   "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "other_details",
-   "fieldtype": "Small Text",
-   "label": "Other Details"
-  }
- ],
- "grid_page_length": 50,
- "index_web_pages_for_search": 1,
- "is_submittable": 1,
- "links": [],
- "modified": "2025-11-04 07:41:34.311050",
- "modified_by": "Administrator",
- "module": "Navgold Custom",
- "name": "Vendor Onboarding",
- "owner": "Administrator",
- "permissions": [
-  {
-   "create": 1,
-   "delete": 1,
-   "email": 1,
-   "export": 1,
-   "print": 1,
-   "read": 1,
-   "report": 1,
-   "role": "System Manager",
-   "share": 1,
-   "submit": 1,
-   "write": 1
-  }
- ],
- "row_format": "Dynamic",
- "rows_threshold_for_grid_search": 20,
- "sort_field": "modified",
- "sort_order": "DESC",
- "states": []
+	"actions": [],
+	"allow_rename": 1,
+	"creation": "2025-11-04 06:52:50.994753",
+	"doctype": "DocType",
+	"engine": "InnoDB",
+	"field_order": [
+		"section_break_brdn",
+		"amended_from",
+		"basic_details_section",
+		"supplier_name",
+		"supplier_type",
+		"currency",
+		"column_break_kboz",
+		"supplier_assigned_id",
+		"vat_number",
+		"address_section",
+		"address_1",
+		"address_2",
+		"column_break_pmrk",
+		"citytown",
+		"postal_code",
+		"country",
+		"contact_section",
+		"companys_website",
+		"companys_phone",
+		"companys_email",
+		"column_break_qwaz",
+		"contact_person",
+		"contact_persons_phone",
+		"contact_persons_email",
+		"organic_products_section",
+		"sells_organic_products",
+		"column_break_czhp",
+		"organic_certificate",
+		"organic_certificate_na_reason",
+		"additional_details_section",
+		"credit_limit",
+		"default_lead_time",
+		"minimum_order_value",
+		"column_break_pbzg",
+		"other_details"
+	],
+	"fields": [
+		{
+			"fieldname": "section_break_brdn",
+			"fieldtype": "Section Break"
+		},
+		{
+			"fieldname": "amended_from",
+			"fieldtype": "Link",
+			"label": "Amended From",
+			"no_copy": 1,
+			"options": "Vendor Onboarding",
+			"print_hide": 1,
+			"read_only": 1,
+			"search_index": 1
+		},
+		{
+			"fieldname": "basic_details_section",
+			"fieldtype": "Section Break",
+			"label": "Basic Details"
+		},
+		{
+			"fieldname": "supplier_name",
+			"fieldtype": "Data",
+			"in_list_view": 1,
+			"label": "Supplier Name",
+			"reqd": 1
+		},
+		{
+			"fieldname": "supplier_type",
+			"fieldtype": "Select",
+			"in_list_view": 1,
+			"label": "Supplier Type",
+			"options": "Company\nIndividual\nPartner",
+			"reqd": 1
+		},
+		{
+			"default": "GBP",
+			"fieldname": "currency",
+			"fieldtype": "Link",
+			"label": "Currency",
+			"options": "Currency"
+		},
+		{
+			"fieldname": "column_break_kboz",
+			"fieldtype": "Column Break"
+		},
+		{
+			"description": "Please enter the unique Customer ID assigned to Navgold Ltd (Superfood UK) by you",
+			"fieldname": "supplier_assigned_id",
+			"fieldtype": "Data",
+			"label": "Supplier Assigned ID"
+		},
+		{
+			"fieldname": "vat_number",
+			"fieldtype": "Data",
+			"label": "VAT Number"
+		},
+		{
+			"fieldname": "address_section",
+			"fieldtype": "Section Break",
+			"label": "Address"
+		},
+		{
+			"fieldname": "address_1",
+			"fieldtype": "Data",
+			"label": "Address 1"
+		},
+		{
+			"fieldname": "address_2",
+			"fieldtype": "Data",
+			"label": "Address 2"
+		},
+		{
+			"fieldname": "column_break_pmrk",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "citytown",
+			"fieldtype": "Data",
+			"label": "City/Town"
+		},
+		{
+			"fieldname": "postal_code",
+			"fieldtype": "Data",
+			"label": "Postal Code"
+		},
+		{
+			"fieldname": "country",
+			"fieldtype": "Link",
+			"in_list_view": 1,
+			"label": "Country",
+			"options": "Country",
+			"reqd": 1
+		},
+		{
+			"fieldname": "contact_section",
+			"fieldtype": "Section Break",
+			"label": "Contact"
+		},
+		{
+			"fieldname": "companys_website",
+			"fieldtype": "Data",
+			"label": "Company's Website"
+		},
+		{
+			"fieldname": "companys_phone",
+			"fieldtype": "Data",
+			"label": "Company's Phone"
+		},
+		{
+			"fieldname": "companys_email",
+			"fieldtype": "Data",
+			"label": "Company's Email"
+		},
+		{
+			"fieldname": "column_break_qwaz",
+			"fieldtype": "Column Break"
+		},
+		{
+			"description": "(Full Name)",
+			"fieldname": "contact_person",
+			"fieldtype": "Data",
+			"label": "Contact Person"
+		},
+		{
+			"fieldname": "contact_persons_phone",
+			"fieldtype": "Data",
+			"label": "Contact Person's Phone"
+		},
+		{
+			"fieldname": "contact_persons_email",
+			"fieldtype": "Data",
+			"label": "Contact Person's Email"
+		},
+		{
+			"fieldname": "organic_products_section",
+			"fieldtype": "Section Break",
+			"label": "Organic Products"
+		},
+		{
+			"default": "No",
+			"fieldname": "sells_organic_products",
+			"fieldtype": "Select",
+			"in_list_view": 1,
+			"label": "Sells Organic Products",
+			"options": "Yes\nNo\nNot Applicable",
+			"reqd": 1
+		},
+		{
+			"fieldname": "column_break_czhp",
+			"fieldtype": "Column Break"
+		},
+		{
+			"depends_on": "eval: doc.sells_organic_products == 'Yes'",
+			"fieldname": "organic_certificate",
+			"fieldtype": "Attach",
+			"label": "Organic Certificate",
+			"mandatory_depends_on": "eval: doc.sells_organic_products == 'Yes'"
+		},
+		{
+			"depends_on": "eval: doc.sells_organic_products == 'Not Applicable'",
+			"fieldname": "organic_certificate_na_reason",
+			"fieldtype": "Small Text",
+			"label": "Organic Certificate NA Reason",
+			"mandatory_depends_on": "eval: doc.sells_organic_products == 'Not Applicable'"
+		},
+		{
+			"fieldname": "additional_details_section",
+			"fieldtype": "Section Break",
+			"label": "Additional Details"
+		},
+		{
+			"fieldname": "credit_limit",
+			"fieldtype": "Currency",
+			"label": "Credit Limit"
+		},
+		{
+			"fieldname": "default_lead_time",
+			"fieldtype": "Int",
+			"label": "Default Lead Time (in Days)",
+			"non_negative": 1
+		},
+		{
+			"description": "(Minimum amount at which shipping will be free)",
+			"fieldname": "minimum_order_value",
+			"fieldtype": "Currency",
+			"label": "Minimum Order Value",
+			"non_negative": 1
+		},
+		{
+			"fieldname": "column_break_pbzg",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "other_details",
+			"fieldtype": "Small Text",
+			"label": "Other Details"
+		}
+	],
+	"grid_page_length": 50,
+	"index_web_pages_for_search": 1,
+	"is_submittable": 1,
+	"links": [],
+	"modified": "2025-11-04 07:41:34.311050",
+	"modified_by": "Administrator",
+	"module": "Navgold Custom",
+	"name": "Vendor Onboarding",
+	"owner": "Administrator",
+	"permissions": [
+		{
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "System Manager",
+			"share": 1,
+			"submit": 1,
+			"write": 1
+		}
+	],
+	"row_format": "Dynamic",
+	"rows_threshold_for_grid_search": 20,
+	"sort_field": "modified",
+	"sort_order": "DESC",
+	"states": []
 }
