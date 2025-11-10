@@ -9,7 +9,7 @@
 frappe.ui.form.on('Amazon SP API Settings', {
 	refresh(frm) {
 		frm.trigger('set_queries');
-		hanlde_retry_btn(frm);
+		handle_retry_btn(frm);
 	},
 	set_queries(frm) {
 		frm.set_query('warehouse', () => {
@@ -32,7 +32,7 @@ frappe.ui.form.on('Amazon SP API Settings', {
 	},
 });
 
-function hanlde_retry_btn(frm) {
+function handle_retry_btn(frm) {
 	frm.add_custom_button(__('Get Order'), () => {
 		const d = new frappe.ui.Dialog({
 			title: __('Sync by Order ID'),

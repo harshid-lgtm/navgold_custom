@@ -93,11 +93,8 @@ jobs:
           bench get-app navgold_custom $GITHUB_WORKSPACE
           bench setup requirements --dev
           bench get-app erpnext
-          bench get-app payments
-          bench get-app webshop
           bench new-site --db-root-password root --admin-password admin test_site
           bench --site test_site install-app erpnext
-          bench --site test_site install-app webshop
           bench --site test_site install-app navgold_custom
           bench build
         env:

@@ -31,7 +31,7 @@ from navgold_custom.navgold_custom.utils import format_date_time_to_london
 class AmazonRepository:
 	def __init__(self, amz_setting: str | AmazonSPAPISettings) -> None:
 		if isinstance(amz_setting, str):
-			amz_setting = frappe.get_doc("Amazon SP API Settings", amz_setting)
+			amz_setting = frappe.get_cached_doc("Amazon SP API Settings", amz_setting)
 
 		self.amz_setting = amz_setting
 		self.instance_params = dict(
@@ -1058,8 +1058,8 @@ class AmazonRepository:
 									jv_doc.flags.ignore_mandatory = True
 									jv_doc.save(ignore_permissions=True)
 									jv_doc.submit()
-								except Exception:
-									pass
+								except Exception as e:
+									frappe.log_error(e)
 
 				if charges_and_fees.get("additional_discount"):
 					so.discount_amount = float(charges_and_fees.get("additional_discount")) * -1
@@ -1258,6 +1258,6 @@ def create_stock_entry(sales_invoice):
 @frappe.whitelist()
 def create_stock_entries_for_sis(names):
 	"""method to bulk create stock entries for draft sales invoices"""
-	names = json.loads(names)
+	names = frappe.parse_json(names)
 	for name in names:
 		create_stock_entry(name)

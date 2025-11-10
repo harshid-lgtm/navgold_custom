@@ -260,9 +260,6 @@ doc_events = {
 		"before_submit": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.sales_order_before_submit",
 	},
 }
-override_whitelisted_methods = {
-	"erpnext.selling.doctype.sales_order.sales_order.make_sales_invoice": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.make_sales_invoice"
-}
 
 after_install = "navgold_custom.install.after_install"
 after_migrate = "navgold_custom.setup.after_migrate"

@@ -50,7 +50,7 @@ class AmazonFailedSyncRecord(Document):
 	@frappe.whitelist()
 	def create_replaced_so(self):
 		if self.payload and not self.replaced_so:
-			data = json.loads(self.payload)
+			data = frappe.parse_json(self.payload)
 			so_doc = frappe.get_doc(data)
 			so_doc.taxes = []
 			so_doc.flags.ignore_mandatory = True
@@ -69,7 +69,7 @@ class AmazonFailedSyncRecord(Document):
 	@frappe.whitelist()
 	def create_replaced_jv(self):
 		if self.payload and not self.replaced_jv and self.grand_total:
-			data = json.loads(self.payload)
+			data = frappe.parse_json(self.payload)
 			jv_doc = frappe.new_doc("Journal Entry")
 			jv_doc.voucher_type = "Journal Entry"
 			jv_doc.posting_date = self.posting_date

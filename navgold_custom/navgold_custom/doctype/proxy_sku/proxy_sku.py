@@ -21,12 +21,6 @@ class ProxySKU(Document):
 		uom: DF.Link | None
 	# end: auto-generated types
 
-	pass
-	# def before_insert(self):
-	# 	if not self.naming_series:
-	# 		self.naming_series = f"{self.item}-{self.uom}-.####"
-	# class ProxySKU(Document):
-
 	def autoname(self):
 		# Allow manually set name to persist
 		if getattr(self, "_user_provided_name", None):
