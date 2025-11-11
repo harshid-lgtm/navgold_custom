@@ -236,9 +236,31 @@ app_license = "mit"
 # ]
 
 # Automatically update python controller files with type annotations for this app.
-# export_python_type_annotations = True
+export_python_type_annotations = True
 
 # default_log_clearing_doctypes = {
 # 	"Logging DocType Name": 30  # days to retain logs
 # }
 
+doctype_js = {
+	"Sales Order": "navgold_custom/custom_script/sales_order/sales_order.js",
+}
+
+doc_events = {
+	"Stock Entry": {
+		"before_validate": "navgold_custom.navgold_custom.custom_script.purchase_receipt.purchase_receipt.create_barcodes",
+		"before_submit": "navgold_custom.navgold_custom.custom_script.stock_entry.stock_entry.transfer_barcodes",
+		"before_insert": "navgold_custom.navgold_custom.custom_script.stock_entry.stock_entry.before_insert_custom",
+	},
+	"Sales Order": {
+		"validate": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.sales_order_validate",
+		"on_update": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.sales_order_on_update",
+		"after_insert": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.sales_order_after_insert",
+		"after_delete": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.sales_order_after_delete",
+		"before_submit": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.sales_order_before_submit",
+	},
+}
+
+after_install = "navgold_custom.install.after_install"
+after_migrate = "navgold_custom.setup.after_migrate"
+before_uninstall = "navgold_custom.setup.before_uninstall"
