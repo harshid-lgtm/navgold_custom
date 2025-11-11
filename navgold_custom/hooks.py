@@ -257,7 +257,10 @@ doc_events = {
 		"on_update": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.sales_order_on_update",
 		"after_insert": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.sales_order_after_insert",
 		"after_delete": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.sales_order_after_delete",
-		"before_submit": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.sales_order_before_submit",
+		# "before_submit": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.sales_order_before_submit",
+	},
+	"Item": {
+		"validate": "navgold_custom.navgold_custom.custom_script.item.item.set_default_uom_conversion_factor"
 	},
 }
 

@@ -1,0 +1,126 @@
+{
+	"actions": [],
+	"allow_rename": 1,
+	"autoname": "format: {supplier}-{item}-{uom}",
+	"creation": "2025-11-10 20:01:09.006416",
+	"doctype": "DocType",
+	"engine": "InnoDB",
+	"field_order": [
+		"item",
+		"supplier",
+		"uom",
+		"stock_qty",
+		"supplier_part_number",
+		"column_break_wjxq",
+		"currency",
+		"price",
+		"unit_price",
+		"item_price",
+		"purchase_blocked"
+	],
+	"fields": [
+		{
+			"fieldname": "item",
+			"fieldtype": "Link",
+			"in_list_view": 1,
+			"label": "Item",
+			"options": "Item",
+			"reqd": 1,
+			"set_only_once": 1
+		},
+		{
+			"fieldname": "supplier",
+			"fieldtype": "Link",
+			"in_list_view": 1,
+			"label": "Supplier",
+			"options": "Supplier",
+			"reqd": 1,
+			"set_only_once": 1
+		},
+		{
+			"fieldname": "uom",
+			"fieldtype": "Link",
+			"in_list_view": 1,
+			"label": "UOM",
+			"options": "UOM",
+			"reqd": 1,
+			"set_only_once": 1
+		},
+		{
+			"fieldname": "stock_qty",
+			"fieldtype": "Data",
+			"in_list_view": 1,
+			"label": "Stock Qty",
+			"reqd": 1
+		},
+		{
+			"fieldname": "column_break_wjxq",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "currency",
+			"fieldtype": "Link",
+			"label": "Currency",
+			"options": "Currency",
+			"reqd": 1
+		},
+		{
+			"fieldname": "price",
+			"fieldtype": "Currency",
+			"label": "Price",
+			"reqd": 1
+		},
+		{
+			"fieldname": "unit_price",
+			"fieldtype": "Currency",
+			"label": "Unit Price",
+			"read_only": 1
+		},
+		{
+			"fieldname": "item_price",
+			"fieldtype": "Link",
+			"label": "Item Price",
+			"options": "Item Price",
+			"read_only": 1
+		},
+		{
+			"fieldname": "supplier_part_number",
+			"fieldtype": "Data",
+			"label": "Supplier Part Number"
+		},
+		{
+			"default": "0",
+			"fieldname": "purchase_blocked",
+			"fieldtype": "Check",
+			"label": "Purchase Blocked?"
+		}
+	],
+	"grid_page_length": 50,
+	"index_web_pages_for_search": 1,
+	"links": [],
+	"modified": "2025-11-11 16:48:41.514184",
+	"modified_by": "Administrator",
+	"module": "Navgold Custom",
+	"name": "Supplier Item Price and Stock",
+	"naming_rule": "Expression",
+	"owner": "Administrator",
+	"permissions": [
+		{
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "System Manager",
+			"share": 1,
+			"write": 1
+		}
+	],
+	"row_format": "Dynamic",
+	"rows_threshold_for_grid_search": 20,
+	"sort_field": "creation",
+	"sort_order": "DESC",
+	"states": []
+}

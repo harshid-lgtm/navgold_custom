@@ -104,9 +104,10 @@ def sales_order_after_delete(doc, method):
 			temp_stock_transfer_doc.delete()
 
 
-def sales_order_before_submit(doc, method):
-	if doc.amazon_order_id:
-		validate_amazon_so_submit()
+# def sales_order_before_submit(doc, method):
+# pass
+# if doc.amazon_order_id:
+# 	validate_amazon_so_submit(doc)
 
 
 def validate_amazon_so_submit(doc):
