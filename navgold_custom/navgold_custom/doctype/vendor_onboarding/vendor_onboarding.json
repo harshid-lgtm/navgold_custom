@@ -6,6 +6,8 @@
 	"engine": "InnoDB",
 	"field_order": [
 		"section_break_brdn",
+		"column_break_tkmn",
+		"column_break_ofro",
 		"amended_from",
 		"basic_details_section",
 		"supplier_name",
@@ -14,6 +16,7 @@
 		"column_break_kboz",
 		"supplier_assigned_id",
 		"vat_number",
+		"supplier",
 		"address_section",
 		"address_1",
 		"address_2",
@@ -44,7 +47,8 @@
 	"fields": [
 		{
 			"fieldname": "section_break_brdn",
-			"fieldtype": "Section Break"
+			"fieldtype": "Section Break",
+			"label": "Connections"
 		},
 		{
 			"fieldname": "amended_from",
@@ -73,7 +77,7 @@
 			"fieldtype": "Select",
 			"in_list_view": 1,
 			"label": "Supplier Type",
-			"options": "Company\nIndividual\nPartner",
+			"options": "Company\nIndividual\nPartnership",
 			"reqd": 1
 		},
 		{
@@ -238,13 +242,28 @@
 			"fieldname": "other_details",
 			"fieldtype": "Small Text",
 			"label": "Other Details"
+		},
+		{
+			"allow_on_submit": 1,
+			"fieldname": "supplier",
+			"fieldtype": "Link",
+			"label": "Supplier",
+			"options": "Supplier"
+		},
+		{
+			"fieldname": "column_break_ofro",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "column_break_tkmn",
+			"fieldtype": "Column Break"
 		}
 	],
 	"grid_page_length": 50,
 	"index_web_pages_for_search": 1,
 	"is_submittable": 1,
 	"links": [],
-	"modified": "2025-11-04 07:41:34.311050",
+	"modified": "2025-11-08 11:21:14.651770",
 	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Vendor Onboarding",
