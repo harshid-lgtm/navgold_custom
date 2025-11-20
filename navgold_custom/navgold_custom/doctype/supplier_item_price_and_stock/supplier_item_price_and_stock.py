@@ -18,9 +18,10 @@ class SupplierItemPriceandStock(Document):
 		currency: DF.Link
 		item: DF.Link
 		item_price: DF.Link | None
+		normalized_qty: DF.Int
 		price: DF.Currency
 		purchase_blocked: DF.Check
-		stock_qty: DF.Data
+		stock_qty: DF.Int
 		supplier: DF.Link
 		supplier_part_number: DF.Data | None
 		unit_price: DF.Currency
@@ -35,6 +36,12 @@ class SupplierItemPriceandStock(Document):
 			"UOM Conversion Detail", {"parent": self.item, "uom": self.uom}, "conversion_factor"
 		)
 		self.unit_price = self.price / uom_conversion_factor
+
+	def calculate_normalized_qty(self):
+		uom_conversion_factor = frappe.db.get_value(
+			"UOM Conversion Detail", {"parent": self.item, "uom": self.uom}, "conversion_factor"
+		)
+		self.normalized_qty = self.stock_qty * uom_conversion_factor
 
 	def populate_item_price(self):
 		# Assuming we have only one active amz setting at a time..
@@ -70,6 +77,12 @@ class SupplierItemPriceandStock(Document):
 		self.item_price = item_price.name
 
 	def validate(self):
+		# Item - Supplier combo should be unique
+		if frappe.db.exists(
+			"Supplier Item Price And Stock",
+			{"item": self.item, "supplier": self.supplier, "name": ["!=", self.name]},
+		):
+			frappe.throw(_(f"Entry with {self.supplier} and {self.item} already exists"))
 		if not self.item_price:
 			self.populate_item_price()
 		if self.get_value_before_save("price") != self.price:
@@ -88,3 +101,5 @@ class SupplierItemPriceandStock(Document):
 			item_price.price_list_rate = self.price
 			item_price.save()
 			self.calculate_unit_price()
+		if self.get_value_before_save("stock_qty") != self.stock_qty:
+			self.calculate_normalized_qty()

@@ -258,6 +258,7 @@ doc_events = {
 		"after_insert": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.sales_order_after_insert",
 		"after_delete": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.sales_order_after_delete",
 		# "before_submit": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.sales_order_before_submit",
+		"on_submit": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.create_material_request",
 	},
 	"Item": {
 		"validate": "navgold_custom.navgold_custom.custom_script.item.item.set_default_uom_conversion_factor"

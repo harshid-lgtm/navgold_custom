@@ -1072,6 +1072,7 @@ class AmazonRepository:
 
 				try:
 					so.save(ignore_permissions=True)
+					so.submit()
 					frappe.db.commit()
 				except Exception as e:
 					frappe.log_error(

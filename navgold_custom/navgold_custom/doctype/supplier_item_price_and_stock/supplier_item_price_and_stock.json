@@ -6,6 +6,11 @@
 	"doctype": "DocType",
 	"engine": "InnoDB",
 	"field_order": [
+		"normalized_value_section",
+		"normalized_qty",
+		"column_break_porq",
+		"unit_price",
+		"section_break_pasj",
 		"item",
 		"supplier",
 		"uom",
@@ -14,7 +19,6 @@
 		"column_break_wjxq",
 		"currency",
 		"price",
-		"unit_price",
 		"item_price",
 		"purchase_blocked"
 	],
@@ -48,7 +52,7 @@
 		},
 		{
 			"fieldname": "stock_qty",
-			"fieldtype": "Data",
+			"fieldtype": "Int",
 			"in_list_view": 1,
 			"label": "Stock Qty",
 			"reqd": 1
@@ -93,12 +97,31 @@
 			"fieldname": "purchase_blocked",
 			"fieldtype": "Check",
 			"label": "Purchase Blocked?"
+		},
+		{
+			"fieldname": "normalized_qty",
+			"fieldtype": "Int",
+			"label": "Normalized Qty",
+			"read_only": 1
+		},
+		{
+			"fieldname": "normalized_value_section",
+			"fieldtype": "Section Break",
+			"label": "Normalized Value"
+		},
+		{
+			"fieldname": "column_break_porq",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "section_break_pasj",
+			"fieldtype": "Section Break"
 		}
 	],
 	"grid_page_length": 50,
 	"index_web_pages_for_search": 1,
 	"links": [],
-	"modified": "2025-11-11 16:48:41.514184",
+	"modified": "2025-11-16 22:29:22.078493",
 	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Supplier Item Price and Stock",

@@ -7,15 +7,10 @@
 # For license information, please see license.txt
 
 import frappe
-from erpnext.accounts.party import get_party_account
-from erpnext.setup.doctype.item_group.item_group import get_item_group_defaults
-from erpnext.stock.doctype.item.item import get_item_defaults
+from erpnext.selling.doctype.sales_order.sales_order import make_material_request
 from erpnext.stock.stock_ledger import get_stock_balance
 from frappe import _
-from frappe.contacts.doctype.address.address import get_company_address
-from frappe.model.mapper import get_mapped_doc
-from frappe.model.utils import get_fetch_values
-from frappe.utils import cint, flt
+from frappe.utils import flt, getdate, nowdate
 
 
 # Used for recalled orders, Amazon append's S at the start of ID
@@ -172,3 +167,75 @@ def enq_si_submit(sales_invoice):
 	if not insufficient_stock:
 		sales_invoice.flags.ignore_links = True
 		sales_invoice.submit()
+
+
+def create_material_request(doc, method):
+	items_needing_stock = {}
+
+	for item in doc.items:
+		projected_qty = flt(item.projected_qty)
+		ordered_qty = flt(item.qty)
+
+		if projected_qty < ordered_qty:
+			if projected_qty >= 1:
+				required_qty = ordered_qty - projected_qty
+			else:
+				required_qty = ordered_qty
+
+			if required_qty <= 0:
+				continue
+
+			delivery_date = getdate(item.delivery_date) if item.delivery_date else getdate(doc.delivery_date)
+			today = getdate(nowdate())
+
+			schedule_date = delivery_date if delivery_date > today else today
+
+			items_needing_stock[item.name] = {"required_qty": required_qty, "schedule_date": schedule_date}
+
+	if not items_needing_stock:
+		return
+
+	try:
+		mr = make_material_request(doc.name)
+
+		updated_items = []
+		for mr_item in mr.items:
+			if mr_item.sales_order_item in items_needing_stock:
+				item_data = items_needing_stock[mr_item.sales_order_item]
+
+				mr_item.qty = item_data["required_qty"]
+				mr_item.stock_qty = flt(mr_item.qty) * flt(mr_item.conversion_factor)
+				mr_item.amount = flt(mr_item.qty) * flt(mr_item.rate)
+				mr_item.schedule_date = item_data["schedule_date"]
+
+				updated_items.append(mr_item)
+
+		mr.items = updated_items
+
+		if not mr.items:
+			return
+
+		mr.material_request_type = "Purchase"
+
+		mr.schedule_date = max([item.schedule_date for item in mr.items])
+
+		mr.insert()
+		mr.submit()
+
+		frappe.msgprint(
+			_("Material Request {0} created for items with insufficient stock").format(
+				frappe.utils.get_link_to_form("Material Request", mr.name)
+			),
+			alert=True,
+			indicator="green",
+		)
+
+		return mr
+
+	except Exception as e:
+		frappe.log_error(message=frappe.get_traceback(), title=f"Auto MR Creation Failed - SO {doc.name}")
+		frappe.msgprint(
+			_("Could not create Material Request automatically: {0}").format(str(e)),
+			alert=True,
+			indicator="red",
+		)
