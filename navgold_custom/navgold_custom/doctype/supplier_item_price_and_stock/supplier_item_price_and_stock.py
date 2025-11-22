@@ -44,8 +44,7 @@ class SupplierItemPriceandStock(Document):
 		self.normalized_qty = self.stock_qty * uom_conversion_factor
 
 	def populate_item_price(self):
-		# Assuming we have only one active amz setting at a time..
-		amz_setting = frappe.get_last_doc("Amazon SP API Settings", {"is_active": 1})
+		price_list = frappe.db.get_single_value("Navgold Settings", "buying_price_list")
 		try:
 			item_price = frappe.get_last_doc(
 				"Item Price",
@@ -54,7 +53,7 @@ class SupplierItemPriceandStock(Document):
 					"uom": self.uom,
 					"buying": 1,
 					"supplier": self.supplier,
-					"price_list": amz_setting.price_list,
+					"price_list": price_list,
 				},
 				order_by="creation",
 			)
@@ -70,7 +69,7 @@ class SupplierItemPriceandStock(Document):
 					"uom": self.uom,
 					"buying": 1,
 					"supplier": self.supplier,
-					"price_list": amz_setting.price_list,
+					"price_list": price_list,
 					"price_list_rate": self.price,
 				}
 			).insert()
@@ -86,7 +85,8 @@ class SupplierItemPriceandStock(Document):
 		if not self.item_price:
 			self.populate_item_price()
 		if self.get_value_before_save("price") != self.price:
-			amz_setting = frappe.get_last_doc("Amazon SP API Settings", {"is_active": 1})
+			price_list = frappe.db.get_single_value("Navgold Settings", "buying_price_list")
+
 			item_price = frappe.get_last_doc(
 				"Item Price",
 				{
@@ -94,7 +94,7 @@ class SupplierItemPriceandStock(Document):
 					"uom": self.uom,
 					"buying": 1,
 					"supplier": self.supplier,
-					"price_list": amz_setting.price_list,
+					"price_list": price_list,
 				},
 				order_by="creation",
 			)
