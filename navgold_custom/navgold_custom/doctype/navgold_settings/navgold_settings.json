@@ -1,0 +1,44 @@
+{
+	"actions": [],
+	"allow_rename": 1,
+	"creation": "2025-11-22 12:34:03.456420",
+	"doctype": "DocType",
+	"engine": "InnoDB",
+	"field_order": ["buying_price_list"],
+	"fields": [
+		{
+			"fieldname": "buying_price_list",
+			"fieldtype": "Link",
+			"in_list_view": 1,
+			"label": "Buying Price List",
+			"options": "Price List",
+			"reqd": 1
+		}
+	],
+	"grid_page_length": 50,
+	"index_web_pages_for_search": 1,
+	"issingle": 1,
+	"links": [],
+	"modified": "2025-11-22 12:37:56.948109",
+	"modified_by": "Administrator",
+	"module": "Navgold Custom",
+	"name": "Navgold Settings",
+	"owner": "Administrator",
+	"permissions": [
+		{
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"print": 1,
+			"read": 1,
+			"role": "System Manager",
+			"share": 1,
+			"write": 1
+		}
+	],
+	"row_format": "Dynamic",
+	"rows_threshold_for_grid_search": 20,
+	"sort_field": "creation",
+	"sort_order": "DESC",
+	"states": []
+}
