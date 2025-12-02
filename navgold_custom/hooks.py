@@ -244,6 +244,9 @@ export_python_type_annotations = True
 
 doctype_js = {
 	"Sales Order": "navgold_custom/custom_script/sales_order/sales_order.js",
+	"Purchase Receipt": [
+		"navgold_custom/custom_script/purchase_receipt/purchase_receipt.js",
+	],
 }
 
 doc_events = {
