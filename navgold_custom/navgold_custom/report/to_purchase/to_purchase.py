@@ -326,20 +326,18 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 			if qty_to_order <= 0:
 				continue
 
+			# Ensure schedule_date is always a string for consistent comparison
 			schedule_date = mr["schedule_date"] or frappe.utils.today()
-
-			if isinstance(schedule_date, str):
-				schedule_date_str = schedule_date
-			else:
-				schedule_date_str = str(schedule_date)
+			if not isinstance(schedule_date, str):
+				schedule_date = str(schedule_date)
 
 			today_str = frappe.utils.today()
 
-			if schedule_date_str < today_str:
+			if schedule_date < today_str:
 				schedule_date = today_str
 
-			if not earliest_date or schedule_date_str < earliest_date:
-				earliest_date = schedule_date_str
+			if not earliest_date or schedule_date < earliest_date:
+				earliest_date = schedule_date
 
 			po.append(
 				"items",
