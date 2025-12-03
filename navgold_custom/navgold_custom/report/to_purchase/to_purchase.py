@@ -129,7 +129,7 @@ def get_data(filters):
 		if pending > 0:
 			items_needed[item] = items_needed.get(item, 0) + pending
 
-	supplier_list = (
+	supplier_list_query = (
 		frappe.qb.from_(supplier_item_price_and_stock)
 		.select(
 			supplier_item_price_and_stock.item,
@@ -146,7 +146,15 @@ def get_data(filters):
 			& (supplier_item_price_and_stock.stock_qty > 0)
 			& (supplier_item_price_and_stock.item.isin(list(items_needed)))
 		)
-		.orderby(supplier_item_price_and_stock.item, supplier_item_price_and_stock.unit_price)
+	)
+
+	if filters.get("supplier"):
+		supplier_list_query = supplier_list_query.where(
+			supplier_item_price_and_stock.supplier == filters.get("supplier")
+		)
+
+	supplier_list = supplier_list_query.orderby(
+		supplier_item_price_and_stock.item, supplier_item_price_and_stock.unit_price
 	).run(as_dict=True)
 
 	results = []
