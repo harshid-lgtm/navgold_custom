@@ -3,9 +3,13 @@
 
 frappe.query_reports['To Purchase'] = {
 	filters: [
-		// Add your filters here if needed
+		{
+			fieldname: 'supplier',
+			label: __('Supplier'),
+			fieldtype: 'Link',
+			options: 'Supplier',
+		},
 	],
-
 	onload: (report) => {
 		// To remove 1 row selected msg
 		setTimeout(() => {
