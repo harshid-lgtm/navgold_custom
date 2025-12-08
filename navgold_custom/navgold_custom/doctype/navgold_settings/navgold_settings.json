@@ -4,7 +4,11 @@
 	"creation": "2025-11-22 12:34:03.456420",
 	"doctype": "DocType",
 	"engine": "InnoDB",
-	"field_order": ["buying_price_list"],
+	"field_order": [
+		"buying_price_list",
+		"column_break_zziq",
+		"tote_weight_limit"
+	],
 	"fields": [
 		{
 			"fieldname": "buying_price_list",
@@ -13,13 +17,23 @@
 			"label": "Buying Price List",
 			"options": "Price List",
 			"reqd": 1
+		},
+		{
+			"fieldname": "column_break_zziq",
+			"fieldtype": "Column Break"
+		},
+		{
+			"default": "20",
+			"fieldname": "tote_weight_limit",
+			"fieldtype": "Int",
+			"label": "Tote Weight Limit"
 		}
 	],
 	"grid_page_length": 50,
 	"index_web_pages_for_search": 1,
 	"issingle": 1,
 	"links": [],
-	"modified": "2025-11-22 12:37:56.948109",
+	"modified": "2025-12-08 23:16:29.327676",
 	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Navgold Settings",
