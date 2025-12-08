@@ -44,7 +44,6 @@ def get_open_sales_orders_for_delivery(customer=None, company=None):
 		if flt(so.per_picked) >= 100 and flt(so.per_delivered) >= 100:
 			continue
 
-		# Get all items for this sales order
 		so_items = frappe.db.get_all(
 			"Sales Order Item",
 			filters={
