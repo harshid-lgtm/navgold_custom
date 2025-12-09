@@ -169,7 +169,14 @@ def enq_si_submit(sales_invoice):
 		sales_invoice.submit()
 
 
-def create_material_request(doc, method):
+def sales_order_on_submit(doc, method):
+	if doc.fulfillment_channel == "MFN":
+		create_material_request(doc)
+	else:
+		doc.update_status("Closed")
+
+
+def create_material_request(doc):
 	items_needing_stock = {}
 
 	for item in doc.items:
