@@ -15,6 +15,7 @@ class NavgoldSettings(Document):
 		from frappe.types import DF
 
 		buying_price_list: DF.Link
+		tote_weight_limit: DF.Int
 	# end: auto-generated types
 
 	pass

@@ -247,13 +247,14 @@ doctype_js = {
 	"Purchase Receipt": [
 		"navgold_custom/custom_script/purchase_receipt/purchase_receipt.js",
 	],
+	"Pick List": ["navgold_custom/custom_script/pick_list/pick_list.js"],
 }
 
 doc_events = {
 	"Stock Entry": {
-		"before_validate": "navgold_custom.navgold_custom.custom_script.purchase_receipt.purchase_receipt.create_barcodes",
-		"before_submit": "navgold_custom.navgold_custom.custom_script.stock_entry.stock_entry.transfer_barcodes",
-		"before_insert": "navgold_custom.navgold_custom.custom_script.stock_entry.stock_entry.before_insert_custom",
+		# "before_validate": "navgold_custom.navgold_custom.custom_script.purchase_receipt.purchase_receipt.create_barcodes",
+		# "before_submit": "navgold_custom.navgold_custom.custom_script.stock_entry.stock_entry.transfer_barcodes",
+		# "before_insert": "navgold_custom.navgold_custom.custom_script.stock_entry.stock_entry.before_insert_custom",
 	},
 	"Sales Order": {
 		"validate": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.sales_order_validate",
@@ -265,6 +266,9 @@ doc_events = {
 	},
 	"Item": {
 		"validate": "navgold_custom.navgold_custom.custom_script.item.item.set_default_uom_conversion_factor"
+	},
+	"Pick List": {
+		"validate": "navgold_custom.navgold_custom.custom_script.pick_list.pick_list.sort_item_locations_by_walk_route"
 	},
 }
 
