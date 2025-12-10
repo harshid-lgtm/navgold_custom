@@ -6,6 +6,7 @@
 	"engine": "InnoDB",
 	"field_order": [
 		"buying_price_list",
+		"generate_proxy_skus",
 		"column_break_zziq",
 		"tote_weight_limit"
 	],
@@ -27,13 +28,18 @@
 			"fieldname": "tote_weight_limit",
 			"fieldtype": "Int",
 			"label": "Tote Weight Limit"
+		},
+		{
+			"fieldname": "generate_proxy_skus",
+			"fieldtype": "Button",
+			"label": "Generate Proxy Skus"
 		}
 	],
 	"grid_page_length": 50,
 	"index_web_pages_for_search": 1,
 	"issingle": 1,
 	"links": [],
-	"modified": "2025-12-08 23:16:29.327676",
+	"modified": "2025-12-09 23:34:24.774372",
 	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Navgold Settings",

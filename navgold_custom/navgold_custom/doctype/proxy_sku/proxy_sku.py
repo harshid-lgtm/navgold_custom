@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import frappe
+from frappe import _
 from frappe.model.document import Document
 
 
@@ -37,3 +38,36 @@ class ProxySKU(Document):
 		# Preserve user-specified name before frappe resets it
 		if self.name and self.name != f"New {self.doctype}":
 			self._user_provided_name = self.name
+
+	def validate(self):
+		existing = frappe.db.exists(
+			"Proxy SKU",
+			{
+				"item": self.item,
+				"uom": self.uom,
+				"is_active": 1,
+				"name": ["!=", self.name],
+			},
+		)
+		if existing:
+			frappe.throw(
+				_(f"Active Proxy SKU for Item {self.item} with UOM {self.uom} already exists: {existing}"),
+				title=_("Duplicate Proxy SKU"),
+			)
+
+	@frappe.whitelist()
+	def create_next_proxy_sku(self):
+		self.is_active = 0
+		self.save()
+
+		doc = frappe.new_doc("Proxy SKU")
+		doc.update(
+			{
+				"item": self.item,
+				"uom": self.uom,
+				"asin": self.asin,
+				"is_active": 1,
+			}
+		)
+		doc.insert(ignore_permissions=True)
+		return {"name": doc.name}
