@@ -53,4 +53,5 @@ def generate_proxy_skus_batch(start, batch):
 				doc.insert(ignore_permissions=True)
 		except Exception as e:
 			frappe.log_error(f"Error creating Proxy SKU for {uom.parent} - {uom.uom}", str(e))
+	# nosemgrep
 	frappe.db.commit()
