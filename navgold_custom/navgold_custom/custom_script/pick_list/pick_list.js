@@ -53,14 +53,14 @@ frappe.ui.form.on('Pick List', {
 			fields: [
 				{
 					fieldname: 'weight_limit_display',
-					label: __('Weight Limit (kg)'),
+					label: __('Weight Limit (In grams)'),
 					fieldtype: 'Data',
 					read_only: 1,
 					default: weight_limit,
 				},
 				{
 					fieldname: 'selected_weight_display',
-					label: __('Selected Total Weight (kg)'),
+					label: __('Selected Total Weight (In grams)'),
 					fieldtype: 'Data',
 					read_only: 1,
 					default: '0.00',
@@ -117,7 +117,7 @@ frappe.ui.form.on('Pick List', {
 						<th>Sales Order</th>
 						<th>Customer</th>
 						<th>Delivery Date</th>
-						<th>Total Weight (kg)</th>
+						<th>Total Weight (g)</th>
 						<th>Pending Items</th>
 					</tr>
 				</thead>
