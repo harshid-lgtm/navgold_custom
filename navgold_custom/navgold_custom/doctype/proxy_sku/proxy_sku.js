@@ -9,7 +9,8 @@ frappe.ui.form.on('Proxy SKU', {
 				doc: frm.doc,
 				method: 'create_next_proxy_sku',
 			});
-			window.location.href = `/desk/proxy-sku/${response.message.name}`;
+			frappe.set_route('Form', 'Proxy SKU', response.message.name);
+			frappe.msgprint(__('Next Proxy SKU Created'));
 		});
 	},
 });

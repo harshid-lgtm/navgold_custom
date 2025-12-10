@@ -69,5 +69,4 @@ class ProxySKU(Document):
 				"is_active": 1,
 			}
 		)
-		doc.insert(ignore_permissions=True)
-		return {"name": doc.name}
+		return doc.insert(ignore_permissions=True)
