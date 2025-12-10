@@ -369,7 +369,6 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 
 	if len(po.items) > 0:
 		po.insert(ignore_permissions=True)
-		po.submit()
 		return po
 
 	return None
