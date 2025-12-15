@@ -20,7 +20,8 @@
 		"currency",
 		"price",
 		"item_price",
-		"purchase_blocked"
+		"purchase_blocked",
+		"rank"
 	],
 	"fields": [
 		{
@@ -117,12 +118,19 @@
 		{
 			"fieldname": "section_break_pasj",
 			"fieldtype": "Section Break"
+		},
+		{
+			"fieldname": "rank",
+			"fieldtype": "Int",
+			"label": "Rank",
+			"non_negative": 1,
+			"read_only": 1
 		}
 	],
 	"grid_page_length": 50,
 	"index_web_pages_for_search": 1,
 	"links": [],
-	"modified": "2025-12-09 23:29:20.770365",
+	"modified": "2025-12-15 17:41:12.422997",
 	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Supplier Item Price and Stock",
