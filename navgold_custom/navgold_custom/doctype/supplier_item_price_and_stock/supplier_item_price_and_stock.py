@@ -1,6 +1,8 @@
 # Copyright (c) 2025, developers@buildwithhussain.com and contributors
 # For license information, please see license.txt
 
+from collections import defaultdict
+
 import frappe
 from frappe import DoesNotExistError, _
 from frappe.model.document import Document
@@ -21,6 +23,7 @@ class SupplierItemPriceandStock(Document):
 		normalized_qty: DF.Int
 		price: DF.Currency
 		purchase_blocked: DF.Check
+		rank: DF.Int
 		stock_qty: DF.Int
 		supplier: DF.Link
 		supplier_part_number: DF.Data | None
@@ -103,3 +106,75 @@ class SupplierItemPriceandStock(Document):
 			self.calculate_unit_price()
 		if self.get_value_before_save("stock_qty") != self.stock_qty:
 			self.calculate_normalized_qty()
+
+	def on_update(self):
+		if (
+			self.get_value_before_save("price") != self.price
+			or self.get_value_before_save("purchase_blocked") != self.purchase_blocked
+		):
+			update_supplier_rank()
+
+
+@frappe.whitelist()
+def update_supplier_rank():
+	frappe.enqueue(
+		"navgold_custom.navgold_custom.doctype.supplier_item_price_and_stock.supplier_item_price_and_stock._update_supplier_rank",
+		now=True,
+	)
+
+
+def _update_supplier_rank():
+	records = frappe.db.get_all(
+		"Supplier Item Price and Stock",
+		fields=["name", "item", "uom", "unit_price", "purchase_blocked"],
+	)
+
+	if not records:
+		return
+
+	groups = defaultdict(list)
+	blocked = []
+
+	for record in records:
+		if record.purchase_blocked:
+			blocked.append(record.name)
+		else:
+			groups[(record.item, record.uom)].append(record)
+
+	try:
+		if blocked:
+			frappe.db.set_value(
+				"Supplier Item Price and Stock",
+				{"name": ["in", blocked]},
+				"rank",
+				0,
+			)
+
+		for group_records in groups.values():
+			update_rank_by_unit_price(group_records)
+	except Exception as e:
+		frappe.log_error(title="Error updating supplier rank", message=e)
+
+
+def update_rank_by_unit_price(group_records):
+	"""After sorting we use for loop to handle ties, if the sorted list is [10, 10, 20, 30, 30], ranks should be [1, 1, 2, 3, 3] instead of [1, 2, 3, 4, 5]"""
+
+	group_records.sort(key=lambda x: x.unit_price or 0)
+	doc_updates = {}
+	rank = 1
+	prev_price = None
+
+	for i, record in enumerate(group_records):
+		price = record.unit_price or 0
+
+		if prev_price is not None and price > prev_price:
+			rank = i + 1
+
+		doc_updates[record.name] = {"rank": rank}
+		prev_price = price
+
+	frappe.db.bulk_update(
+		"Supplier Item Price and Stock",
+		doc_updates,
+		update_modified=False,
+	)
