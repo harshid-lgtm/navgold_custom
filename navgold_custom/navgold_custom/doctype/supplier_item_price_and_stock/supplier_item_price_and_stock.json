@@ -21,7 +21,9 @@
 		"price",
 		"item_price",
 		"purchase_blocked",
-		"rank"
+		"rank",
+		"section_break_hkks",
+		"offers"
 	],
 	"fields": [
 		{
@@ -125,12 +127,22 @@
 			"label": "Rank",
 			"non_negative": 1,
 			"read_only": 1
+		},
+		{
+			"fieldname": "section_break_hkks",
+			"fieldtype": "Section Break"
+		},
+		{
+			"fieldname": "offers",
+			"fieldtype": "Table",
+			"label": "Offers",
+			"options": "Supplier Offer"
 		}
 	],
 	"grid_page_length": 50,
 	"index_web_pages_for_search": 1,
 	"links": [],
-	"modified": "2025-12-15 17:41:12.422997",
+	"modified": "2025-12-16 15:48:35.338315",
 	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Supplier Item Price and Stock",

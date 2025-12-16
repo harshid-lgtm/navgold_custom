@@ -17,10 +17,13 @@ class SupplierItemPriceandStock(Document):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
+		from navgold_custom.navgold_custom.doctype.supplier_offer.supplier_offer import SupplierOffer
+
 		currency: DF.Link
 		item: DF.Link
 		item_price: DF.Link | None
 		normalized_qty: DF.Int
+		offers: DF.Table[SupplierOffer]
 		price: DF.Currency
 		purchase_blocked: DF.Check
 		rank: DF.Int
