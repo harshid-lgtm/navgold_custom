@@ -15,14 +15,14 @@ material_request_status_list = ["Pending", "Partially Ordered", "Partially Recei
 
 def execute(filters: dict | None = None):
 	"""Return columns and data for the report."""
-	columns = get_columns()
 	data = get_data(filters)
+	columns = get_columns(data)
 	return columns, data
 
 
-def get_columns() -> list[dict]:
+def get_columns(data: list[dict]) -> list[dict]:
 	"""Return columns for the report."""
-	return [
+	columns = [
 		{
 			"label": _("Item Code"),
 			"fieldname": "item_code",
@@ -41,6 +41,12 @@ def get_columns() -> list[dict]:
 			"fieldname": "supplier",
 			"fieldtype": "Link",
 			"options": "Supplier",
+			"width": 200,
+		},
+		{
+			"label": _("Rank"),
+			"fieldname": "supplier_rank",
+			"fieldtype": "Int",
 			"width": 200,
 		},
 		{
@@ -94,6 +100,30 @@ def get_columns() -> list[dict]:
 			"width": 150,
 		},
 	]
+	# Dynamically add offer columns (Child table rows)
+	max_offers = 0
+	for row in data:
+		if row.get("offers"):
+			max_offers = max(max_offers, len(row["offers"]))
+
+	for i in range(max_offers):
+		if i == 0:
+			month_label = "This Month"
+		elif i == 1:
+			month_label = "Next Month"
+		else:
+			month_label = f"In {i} Months"
+
+		columns.append(
+			{
+				"label": _(month_label),
+				"fieldname": f"offer_{i}",
+				"fieldtype": "Data",
+				"width": 150,
+			}
+		)
+
+	return columns
 
 
 # Adds supplier to list until the required qty is satified
@@ -140,6 +170,7 @@ def get_data(filters):
 			supplier_item_price_and_stock.normalized_qty,
 			supplier_item_price_and_stock.uom,
 			supplier_item_price_and_stock.name,
+			supplier_item_price_and_stock.rank,
 		)
 		.where(
 			(supplier_item_price_and_stock.purchase_blocked != 1)
@@ -156,6 +187,9 @@ def get_data(filters):
 	supplier_list = supplier_list_query.orderby(
 		supplier_item_price_and_stock.item, supplier_item_price_and_stock.unit_price
 	).run(as_dict=True)
+
+	if supplier_list:
+		offers_by_parent = get_offers_by_supplier(supplier_list)
 
 	results = []
 
@@ -175,21 +209,27 @@ def get_data(filters):
 
 		item_remaining[item_code] = remaining - allocated
 
-		results.append(
-			{
-				"item_code": item_code,
-				"total_required_qty": total_required,
-				"supplier": s["supplier"],
-				"supplier_uom": s["uom"],
-				"available_stock_uom": s["stock_qty"],
-				"available_stock_normalized": available_normalized,
-				"allocated_qty": allocated,
-				"remaining_qty": remaining - allocated,
-				"unit_price": s["unit_price"],
-				"uom_price": s["price"],
-				"ref_doc": s["name"],
-			}
-		)
+		offers = offers_by_parent.get(s["name"], [])
+
+		row = {
+			"item_code": item_code,
+			"total_required_qty": total_required,
+			"supplier": s["supplier"],
+			"supplier_uom": s["uom"],
+			"available_stock_uom": s["stock_qty"],
+			"available_stock_normalized": available_normalized,
+			"allocated_qty": allocated,
+			"remaining_qty": remaining - allocated,
+			"unit_price": s["unit_price"],
+			"uom_price": s["price"],
+			"ref_doc": s["name"],
+			"supplier_rank": s["rank"],
+			"offers": offers,
+		}
+		for i, offer in enumerate(offers):
+			row[f"offer_{i}"] = offer
+
+		results.append(row)
 
 	return results
 
@@ -305,6 +345,7 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 	for item_data in data["items"]:
 		item_code = item_data.get("item_code")
 		available_stock_uom = flt(item_data.get("available_stock_uom", 0))
+		allocated_qty = flt(item_data.get("allocated_qty", 0))
 		supplier_uom = item_data.get("supplier_uom")
 		uom_price = flt(item_data.get("uom_price", 0))
 
@@ -314,22 +355,17 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 		if not mrs_for_item:
 			continue
 
-		supplier_uom_remaining = available_stock_uom
+		allocated_qty_in_supplier_uom = (
+			math.ceil(allocated_qty / conversion_factor) if conversion_factor > 0 else allocated_qty
+		)
+
+		supplier_uom_remaining = allocated_qty_in_supplier_uom
 
 		for mr in mrs_for_item:
 			if supplier_uom_remaining <= 0:
 				break
 
-			mr_needs_normalized = mr["pending_qty"]
-
-			# conversion to next ceiling since supplier may not sell in unit UOM
-			mr_needs_uom = (
-				math.ceil(mr_needs_normalized / conversion_factor)
-				if conversion_factor > 0
-				else mr_needs_normalized
-			)
-
-			qty_to_order = min(mr_needs_uom, supplier_uom_remaining)
+			qty_to_order = min(allocated_qty_in_supplier_uom, supplier_uom_remaining)
 
 			if qty_to_order <= 0:
 				continue
@@ -363,7 +399,11 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 				},
 			)
 			supplier_uom_remaining -= qty_to_order
-		update_supplier_stock_after_po(supplier, supplier_uom, item_code, supplier_uom_remaining)
+		# Todo: check this logic
+		# Calculate new stock: original stock minus what we actually ordered
+		total_ordered = allocated_qty_in_supplier_uom - supplier_uom_remaining
+		new_stock = max(0, available_stock_uom - total_ordered)
+		update_supplier_stock_after_po(supplier, supplier_uom, item_code, new_stock)
 
 	po.schedule_date = earliest_date or frappe.utils.today()
 
@@ -390,3 +430,23 @@ def update_supplier_stock_after_po(supplier, supplier_uom, item_code, remaining_
 	)
 	supplier_item_price_and_stock.stock_qty = remaining_stock
 	supplier_item_price_and_stock.save()
+
+
+def get_offers_by_supplier(supplier_list):
+	supplier_offer = DocType("Supplier Offer")
+	offers_by_parent = {}
+	parent_names = [s["name"] for s in supplier_list]
+	offers_data = (
+		frappe.qb.from_(supplier_offer)
+		.select(supplier_offer.parent, supplier_offer.offer, supplier_offer.idx)
+		.where(supplier_offer.parent.isin(parent_names))
+		.orderby(supplier_offer.parent, supplier_offer.idx)
+	).run(as_dict=True)
+
+	# Group offers by parent
+	for offer in offers_data:
+		parent = offer["parent"]
+		if parent not in offers_by_parent:
+			offers_by_parent[parent] = []
+		offers_by_parent[parent].append(offer["offer"])
+	return offers_by_parent
