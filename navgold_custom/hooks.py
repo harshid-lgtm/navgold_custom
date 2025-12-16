@@ -275,3 +275,9 @@ doc_events = {
 after_install = "navgold_custom.install.after_install"
 after_migrate = "navgold_custom.setup.after_migrate"
 before_uninstall = "navgold_custom.setup.before_uninstall"
+
+scheduler_events = {
+	"daily": [
+		"navgold_custom.navgold_custom.doctype.supplier_item_price_and_stock.supplier_item_price_and_stock._update_supplier_rank"
+	],
+}

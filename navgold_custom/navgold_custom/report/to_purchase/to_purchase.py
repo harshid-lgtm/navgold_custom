@@ -305,6 +305,7 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 	for item_data in data["items"]:
 		item_code = item_data.get("item_code")
 		available_stock_uom = flt(item_data.get("available_stock_uom", 0))
+		allocated_qty = flt(item_data.get("allocated_qty", 0))
 		supplier_uom = item_data.get("supplier_uom")
 		uom_price = flt(item_data.get("uom_price", 0))
 
@@ -314,22 +315,17 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 		if not mrs_for_item:
 			continue
 
-		supplier_uom_remaining = available_stock_uom
+		allocated_qty_in_supplier_uom = (
+			math.ceil(allocated_qty / conversion_factor) if conversion_factor > 0 else allocated_qty
+		)
+
+		supplier_uom_remaining = allocated_qty_in_supplier_uom
 
 		for mr in mrs_for_item:
 			if supplier_uom_remaining <= 0:
 				break
 
-			mr_needs_normalized = mr["pending_qty"]
-
-			# conversion to next ceiling since supplier may not sell in unit UOM
-			mr_needs_uom = (
-				math.ceil(mr_needs_normalized / conversion_factor)
-				if conversion_factor > 0
-				else mr_needs_normalized
-			)
-
-			qty_to_order = min(mr_needs_uom, supplier_uom_remaining)
+			qty_to_order = min(allocated_qty_in_supplier_uom, supplier_uom_remaining)
 
 			if qty_to_order <= 0:
 				continue
@@ -363,7 +359,11 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 				},
 			)
 			supplier_uom_remaining -= qty_to_order
-		update_supplier_stock_after_po(supplier, supplier_uom, item_code, supplier_uom_remaining)
+		# Todo: check this logic
+		# Calculate new stock: original stock minus what we actually ordered
+		total_ordered = allocated_qty_in_supplier_uom - supplier_uom_remaining
+		new_stock = max(0, available_stock_uom - total_ordered)
+		update_supplier_stock_after_po(supplier, supplier_uom, item_code, new_stock)
 
 	po.schedule_date = earliest_date or frappe.utils.today()
 
