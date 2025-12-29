@@ -365,13 +365,15 @@ class AmazonRepository:
 			}
 		).insert(ignore_permissions=True)
 
-	def get_item_code(self, order_item, order_id) -> str | None:
+	def get_item_code_and_uom(self, order_item, order_id) -> tuple[str, str] | None:
 		try:
 			if frappe.db.exists(
 				"Proxy SKU",
 				{"name": order_item["SellerSKU"], "is_active": 1, "asin": ["!=", None]},
 			):
-				return frappe.db.get_value("Proxy SKU", order_item["SellerSKU"], "item")
+				return frappe.db.get_value(
+					"Proxy SKU", order_item["SellerSKU"], ["item", "uom"], as_dict=True
+				)
 
 			if frappe.db.exists(
 				"Proxy SKU",
@@ -381,7 +383,7 @@ class AmazonRepository:
 				proxy_sku.asin = order_item["ASIN"]
 				proxy_sku.is_active = 1
 				proxy_sku.save()
-				return proxy_sku.item
+				return {"item": proxy_sku.item, "uom": proxy_sku.uom}
 
 		except Exception:
 			frappe.log_error(
@@ -419,12 +421,12 @@ class AmazonRepository:
 						zero_qty_flag = True
 						actual_qty = order_item.get("ProductInfo").get("NumberOfItems")
 					item_rate = item_amount / item_qty
-					item_code = self.get_item_code(order_item, order_id)
-					if not item_code:
+					item_code_and_uom = self.get_item_code_and_uom(order_item, order_id)
+					if not item_code_and_uom:
 						return []
 					final_order_items.append(
 						{
-							"item_code": item_code,
+							"item_code": item_code_and_uom["item"],
 							"item_name": order_item.get("SellerSKU"),
 							"description": order_item.get("Title"),
 							"rate": item_rate,
@@ -432,10 +434,9 @@ class AmazonRepository:
 							"qty": item_qty,
 							"amount": item_rate * item_qty,
 							"base_amount": item_rate * item_qty,
-							"uom": "Nos",
+							"uom": item_code_and_uom["uom"],
 							"stock_uom": "Nos",
 							"warehouse": warehouse,
-							"conversion_factor": 1.0,
 							"allow_zero_valuation_rate": 1,
 							"total_order_value": total_order_value,
 							"zero_qty_flag": zero_qty_flag,
