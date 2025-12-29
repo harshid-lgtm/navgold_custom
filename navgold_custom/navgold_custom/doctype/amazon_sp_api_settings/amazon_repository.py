@@ -288,7 +288,7 @@ class AmazonRepository:
 			return uom.uom_name
 
 		def get_or_create_item(seller_sku, amazon_item) -> str:
-			if frappe.db.exists("Proxy SKU", {"name": seller_sku,"is_active":1}):
+			if frappe.db.exists("Proxy SKU", {"name": seller_sku, "is_active": 1}):
 				return frappe.db.get_value("Proxy SKU", {"name": seller_sku}, "item")
 			if frappe.db.exists("Item", {"name": seller_sku}):
 				return frappe.db.get_value("Item", {"name": seller_sku}, "name")
@@ -356,29 +356,28 @@ class AmazonRepository:
 		):
 			return
 
-		frappe.get_doc({
-			"doctype": "Amazon Unmapped SKU",
-			"proxy_sku": order_item["SellerSKU"],
-			"asin": order_item["ASIN"],
-			"amazon_order_id": order_id
-		}).insert(ignore_permissions=True)
+		frappe.get_doc(
+			{
+				"doctype": "Amazon Unmapped SKU",
+				"proxy_sku": order_item["SellerSKU"],
+				"asin": order_item["ASIN"],
+				"amazon_order_id": order_id,
+			}
+		).insert(ignore_permissions=True)
+
 	def get_item_code(self, order_item, order_id) -> str | None:
 		try:
 			if frappe.db.exists(
 				"Proxy SKU",
 				{"name": order_item["SellerSKU"], "is_active": 1, "asin": ["!=", None]},
 			):
-				return frappe.db.get_value(
-					"Proxy SKU", order_item["SellerSKU"], "item"
-				)
+				return frappe.db.get_value("Proxy SKU", order_item["SellerSKU"], "item")
 
 			if frappe.db.exists(
 				"Proxy SKU",
 				{"name": order_item["SellerSKU"], "is_active": 1, "asin": None},
 			):
-				proxy_sku = frappe.get_cached_doc(
-					"Proxy SKU", order_item["SellerSKU"]
-				)
+				proxy_sku = frappe.get_cached_doc("Proxy SKU", order_item["SellerSKU"])
 				proxy_sku.asin = order_item["ASIN"]
 				proxy_sku.save()
 				return proxy_sku.item
@@ -390,8 +389,7 @@ class AmazonRepository:
 			)
 		self.create_unmapped_sku(order_item, order_id)
 		return None
-	
-	
+
 	def get_order_items(self, order_id) -> list:
 		orders = self.get_orders_instance()
 		order_items_payload = self.call_sp_api_method(sp_api_method=orders.get_order_items, order_id=order_id)
