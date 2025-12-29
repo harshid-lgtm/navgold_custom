@@ -39,21 +39,22 @@ class ProxySKU(Document):
 		if self.name and self.name != f"New {self.doctype}":
 			self._user_provided_name = self.name
 
-	def validate(self):
-		existing = frappe.db.exists(
-			"Proxy SKU",
-			{
-				"item": self.item,
-				"uom": self.uom,
-				"is_active": 1,
-				"name": ["!=", self.name],
-			},
-		)
-		if existing:
-			frappe.throw(
-				_(f"Active Proxy SKU for Item {self.item} with UOM {self.uom} already exists: {existing}"),
-				title=_("Duplicate Proxy SKU"),
-			)
+	# def validate(self):
+	# 	existing = frappe.db.exists(
+	# 		"Proxy SKU",
+	# 		{
+	# 			"item": self.item,
+	# 			"uom": self.uom,
+	# 			"is_active": 1,
+	# 			"name": ["!=", self.name],
+	# 			"asin": ["!=", None],
+	# 		},
+	# 	)
+	# 	if existing:
+	# 		frappe.throw(
+	# 			_(f"Active Proxy SKU for Item {self.item} with UOM {self.uom} already exists: {existing}"),
+	# 			title=_("Duplicate Proxy SKU"),
+	# 		)
 
 	@frappe.whitelist()
 	def create_next_proxy_sku(self):

@@ -47,7 +47,8 @@ def sales_order_after_insert(doc, method):
 		and doc.amazon_order_id
 		and doc.amazon_order_status != "Canceled"
 	):
-		create_temporary_stock_transfer()
+		# create_temporary_stock_transfer()
+		pass
 
 
 def create_temporary_stock_transfer(doc):
