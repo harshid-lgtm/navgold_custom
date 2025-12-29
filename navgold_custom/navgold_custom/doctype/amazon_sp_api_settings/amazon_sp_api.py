@@ -210,6 +210,16 @@ class Orders(SPAPI):
 		append_to_base_uri = f"/{order_id}"
 		return self.make_request(append_to_base_uri=append_to_base_uri)
 
+	def get_order_buyer_info(self, order_id: str) -> dict:
+		"""Returns the buyer information for the order indicated by the specified order ID."""
+		append_to_base_uri = f"/{order_id}/buyerInfo"
+		return self.make_request(append_to_base_uri=append_to_base_uri)
+
+	def get_order_address(self, order_id: str) -> dict:
+		"""Returns the shipping address for the order indicated by the specified order ID."""
+		append_to_base_uri = f"/{order_id}/address"
+		return self.make_request(append_to_base_uri=append_to_base_uri)
+
 
 class CatalogItems(SPAPI):
 	"""Amazon Catalog Items API"""

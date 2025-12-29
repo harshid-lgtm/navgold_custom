@@ -453,93 +453,104 @@ class AmazonRepository:
 			)
 		return final_order_items
 
-	def create_sales_order(self, order) -> str | None:
-		def create_customer(order) -> str:
-			order_customer_name = order.get("AmazonOrderId", "")
+	def create_customer(self, order) -> str:
+		customer = self.get_orders_instance().get_order_buyer_info(order.get("AmazonOrderId"))
+		customer = customer.get("payload")
+		order_customer_name = customer.get("BuyerName") or customer.get("AmazonOrderId")
 
-			existing_customer_name = frappe.db.get_value(
-				"Customer", filters={"name": order_customer_name}, fieldname="name"
-			)
+		existing_customer_name = frappe.db.get_value(
+			"Customer", filters={"name": order_customer_name}, fieldname="name"
+		)
 
-			if existing_customer_name:
-				filters = [
-					["Dynamic Link", "link_doctype", "=", "Customer"],
-					["Dynamic Link", "link_name", "=", existing_customer_name],
-					["Dynamic Link", "parenttype", "=", "Contact"],
-				]
+		if existing_customer_name:
+			filters = [
+				["Dynamic Link", "link_doctype", "=", "Customer"],
+				["Dynamic Link", "link_name", "=", existing_customer_name],
+				["Dynamic Link", "parenttype", "=", "Contact"],
+			]
 
-				existing_contacts = frappe.get_list("Contact", filters)
+			existing_contacts = frappe.get_list("Contact", filters)
 
-				if not existing_contacts:
-					new_contact = frappe.new_doc("Contact")
-					new_contact.first_name = order_customer_name
-					new_contact.append(
-						"links",
-						{"link_doctype": "Customer", "link_name": existing_customer_name},
-					)
-					new_contact.insert()
-
-				return existing_customer_name
-			else:
-				new_customer = frappe.new_doc("Customer")
-				new_customer.customer_name = order_customer_name
-				new_customer.customer_group = self.amz_setting.customer_group
-				new_customer.territory = self.amz_setting.territory
-				new_customer.customer_type = self.amz_setting.customer_type
-				new_customer.save()
-
+			if not existing_contacts:
 				new_contact = frappe.new_doc("Contact")
 				new_contact.first_name = order_customer_name
-				new_contact.append("links", {"link_doctype": "Customer", "link_name": new_customer.name})
-
+				new_contact.append(
+					"links",
+					{"link_doctype": "Customer", "link_name": existing_customer_name},
+				)
+				new_contact.append("email_ids", {"email_id": customer.get("BuyerEmail")})
 				new_contact.insert()
 
-				return new_customer.name
+			return existing_customer_name
+		else:
+			new_customer = frappe.new_doc("Customer")
+			new_customer.customer_name = order_customer_name
+			new_customer.customer_group = self.amz_setting.customer_group
+			new_customer.territory = self.amz_setting.territory
+			new_customer.customer_type = self.amz_setting.customer_type
+			new_customer.save()
 
-		def create_address(order, customer_name) -> str | None:
-			shipping_address = order.get("ShippingAddress")
+			new_contact = frappe.new_doc("Contact")
+			new_contact.first_name = order_customer_name
+			new_contact.append("links", {"link_doctype": "Customer", "link_name": new_customer.name})
 
-			if not shipping_address:
-				return
-			else:
-				make_address = frappe.new_doc("Address")
-				make_address.address_line1 = shipping_address.get("AddressLine1", "Not Provided")
-				make_address.city = shipping_address.get("City", "Not Provided")
-				amazon_state = shipping_address.get("StateOrRegion")
-				if frappe.db.get_single_value("Amazon SP API Settings", "map_state_data"):
-					if frappe.db.exists("Amazon State Mapping", {"amazon_state": amazon_state}):
-						make_address.state = frappe.db.get_value(
-							"Amazon State Mapping", {"amazon_state": amazon_state}, "state"
-						)
-					else:
-						failed_sync_record = frappe.new_doc("Amazon Failed Sync Record")
-						failed_sync_record.amazon_order_id = order_id
-						failed_sync_record.remarks = f"No State Mapping found for {amazon_state}"
-						failed_sync_record.save(ignore_permissions=True)
-						return
-				else:
-					make_address.state = amazon_state
-				make_address.pincode = shipping_address.get("PostalCode")
+			new_contact.insert()
 
-				filters = [
-					["Dynamic Link", "link_doctype", "=", "Customer"],
-					["Dynamic Link", "link_name", "=", customer_name],
-					["Dynamic Link", "parenttype", "=", "Address"],
-				]
-				existing_address = frappe.get_list("Address", filters)
+			return new_customer.name
 
-				for address in existing_address:
-					address_doc = frappe.get_doc("Address", address["name"])
-					if (
-						address_doc.address_line1 == make_address.address_line1
-						and address_doc.pincode == make_address.pincode
-					):
-						return address
+	def create_address(self, order, customer_name) -> str | None:
+		shipping_address = self.get_orders_instance().get_order_address(order.get("AmazonOrderId"))
+		shipping_address = shipping_address.get("payload")
+		shipping_address = shipping_address.get("ShippingAddress")
+		# In case of canceled orders address may not be present
+		if not shipping_address:
+			return
+		existing_address = frappe.db.exists(
+			"Address",
+			{
+				"address_title": shipping_address.get("Name", ""),
+				"address_line1": shipping_address.get("AddressLine1", "Not Provided"),
+				"address_line2": shipping_address.get("AddressLine2", ""),
+				"city": shipping_address.get("City", ""),
+				"state": shipping_address.get("StateOrRegion", ""),
+				"pincode": shipping_address.get("PostalCode", ""),
+				"address_type": "Shipping",
+			},
+		)
+		if existing_address:
+			return
+		else:
+			make_address = frappe.new_doc("Address")
+			make_address.address_line1 = shipping_address.get("AddressLine1", "Not Provided")
+			make_address.address_line2 = shipping_address.get("AddressLine2", "")
+			make_address.city = shipping_address.get("City", "")
+			make_address.state = shipping_address.get("StateOrRegion", "")
+			make_address.pincode = shipping_address.get("PostalCode", "")
+			make_address.address_title = shipping_address.get("Name", "")
+			make_address.country = frappe.db.get_value(
+				"Country", filters={"code": shipping_address.get("CountryCode", "")}, fieldname="name"
+			)
 
-				make_address.append("links", {"link_doctype": "Customer", "link_name": customer_name})
-				make_address.address_type = "Shipping"
-				make_address.insert()
+			filters = [
+				["Dynamic Link", "link_doctype", "=", "Customer"],
+				["Dynamic Link", "link_name", "=", customer_name],
+				["Dynamic Link", "parenttype", "=", "Address"],
+			]
+			existing_address = frappe.get_list("Address", filters)
 
+			for address in existing_address:
+				address_doc = frappe.get_doc("Address", address["name"])
+				if (
+					address_doc.address_line1 == make_address.address_line1
+					and address_doc.pincode == make_address.pincode
+				):
+					return address
+
+			make_address.append("links", {"link_doctype": "Customer", "link_name": customer_name})
+			make_address.address_type = "Shipping"
+			make_address.insert()
+
+	def create_sales_order(self, order) -> str | None:
 		def get_refunds(self, order_id, order_date, amazon_order_amount=0) -> dict:
 			finances = self.get_finances_instance()
 			financial_events_payload = self.call_sp_api_method(
@@ -921,8 +932,8 @@ class AmazonRepository:
 			else:
 				so = frappe.get_doc("Sales Order", so_id)
 
-			customer_name = create_customer(order)
-			create_address(order, customer_name)
+			customer_name = self.create_customer(order)
+			self.create_address(order, customer_name)
 
 			delivery_date = format_date_time_to_london(order.get("LatestShipDate"))
 			transaction_date = format_date_time_to_london(order.get("PurchaseDate"))
