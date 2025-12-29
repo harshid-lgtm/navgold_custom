@@ -16,7 +16,6 @@ class AmazonUnmappedSKU(Document):
 
 		amazon_order_id: DF.Data | None
 		asin: DF.Data | None
-		pack_of: DF.Int
 		proxy_sku: DF.Data | None
 	# end: auto-generated types
 

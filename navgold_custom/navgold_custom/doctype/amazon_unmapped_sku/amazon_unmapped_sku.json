@@ -4,13 +4,7 @@
 	"creation": "2025-12-29 03:01:53.594438",
 	"doctype": "DocType",
 	"engine": "InnoDB",
-	"field_order": [
-		"amazon_order_id",
-		"asin",
-		"column_break_bset",
-		"proxy_sku",
-		"pack_of"
-	],
+	"field_order": ["amazon_order_id", "asin", "column_break_bset", "proxy_sku"],
 	"fields": [
 		{
 			"fieldname": "amazon_order_id",
@@ -27,11 +21,6 @@
 			"label": "Proxy SKU"
 		},
 		{
-			"fieldname": "pack_of",
-			"fieldtype": "Int",
-			"label": "Pack Of"
-		},
-		{
 			"fieldname": "asin",
 			"fieldtype": "Data",
 			"label": "ASIN"
@@ -40,7 +29,7 @@
 	"grid_page_length": 50,
 	"index_web_pages_for_search": 1,
 	"links": [],
-	"modified": "2025-12-29 03:15:57.638561",
+	"modified": "2025-12-29 04:54:54.621652",
 	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Amazon Unmapped SKU",

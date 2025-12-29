@@ -9,7 +9,9 @@
 		"column_break_zziq",
 		"tote_weight_limit",
 		"proxy_skus_section",
-		"generate_proxy_skus"
+		"generate_proxy_skus",
+		"column_break_zqvs",
+		"multiple_active_item_uom"
 	],
 	"fields": [
 		{
@@ -39,13 +41,24 @@
 			"fieldname": "proxy_skus_section",
 			"fieldtype": "Section Break",
 			"label": "Proxy SKUs"
+		},
+		{
+			"fieldname": "column_break_zqvs",
+			"fieldtype": "Column Break"
+		},
+		{
+			"default": "1",
+			"description": "Multiple Active Proxy SKU per Item UOM",
+			"fieldname": "multiple_active_item_uom",
+			"fieldtype": "Check",
+			"label": "Multiple Active Item UOM"
 		}
 	],
 	"grid_page_length": 50,
 	"index_web_pages_for_search": 1,
 	"issingle": 1,
 	"links": [],
-	"modified": "2025-12-10 11:42:54.577818",
+	"modified": "2025-12-29 05:52:39.586988",
 	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Navgold Settings",

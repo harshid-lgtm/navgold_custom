@@ -375,10 +375,11 @@ class AmazonRepository:
 
 			if frappe.db.exists(
 				"Proxy SKU",
-				{"name": order_item["SellerSKU"], "is_active": 1, "asin": None},
+				{"name": order_item["SellerSKU"]},
 			):
 				proxy_sku = frappe.get_cached_doc("Proxy SKU", order_item["SellerSKU"])
 				proxy_sku.asin = order_item["ASIN"]
+				proxy_sku.is_active = 1
 				proxy_sku.save()
 				return proxy_sku.item
 
