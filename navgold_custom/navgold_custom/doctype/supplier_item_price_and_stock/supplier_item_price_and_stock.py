@@ -19,6 +19,7 @@ class SupplierItemPriceandStock(Document):
 
 		from navgold_custom.navgold_custom.doctype.supplier_offer.supplier_offer import SupplierOffer
 
+		barcode: DF.Data | None
 		currency: DF.Link
 		item: DF.Link
 		item_price: DF.Link | None

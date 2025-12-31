@@ -16,6 +16,7 @@
 		"uom",
 		"stock_qty",
 		"supplier_part_number",
+		"barcode",
 		"column_break_wjxq",
 		"currency",
 		"price",
@@ -137,16 +138,21 @@
 			"fieldtype": "Table",
 			"label": "Offers",
 			"options": "Supplier Offer"
+		},
+		{
+			"fieldname": "barcode",
+			"fieldtype": "Data",
+			"label": "Barcode"
 		}
 	],
 	"grid_page_length": 50,
 	"index_web_pages_for_search": 1,
 	"links": [],
-	"modified": "2025-12-16 15:48:35.338315",
+	"modified": "2025-12-30 18:34:51.236271",
 	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Supplier Item Price and Stock",
-	"naming_rule": "Expression",
+	"naming_rule": "Expression (old style)",
 	"owner": "Administrator",
 	"permissions": [
 		{
