@@ -11,7 +11,7 @@ from frappe.utils.caching import redis_cache
 from frappe.utils.csvutils import build_csv_response, get_csv_content_from_google_sheets, read_csv_content
 from frappe.utils.xlsxutils import read_xlsx_file_from_attached_file
 
-TEMPLATE_COLUMNS = ["Supplier Part Number", "Stock", "UOM", "Price", "Barcode"]
+TEMPLATE_COLUMNS = ("Supplier Part Number", "Stock Qty", "UOM", "Price", "Barcode")
 
 
 class SupplierStockImport(Document):
@@ -243,8 +243,7 @@ def export_errored_rows(docname):
 
 	errored_data = frappe.parse_json(doc.errored_rows)
 
-	headers = ["Supplier Part Number", "Stock Qty", "UOM", "Price", "Barcode", "Error"]
-	errored_data.insert(0, headers)
+	errored_data.insert(0, [*TEMPLATE_COLUMNS, "Error"])
 	build_csv_response(errored_data, f"Errored Rows - {docname}.csv")
 
 
