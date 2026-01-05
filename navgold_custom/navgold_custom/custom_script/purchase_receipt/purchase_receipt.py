@@ -132,8 +132,19 @@ def get_open_pos_for_item(supplier, item_code):
 	return result
 
 
+def get_or_create_batch(batch_no, expiry_date, item_code):
+	batch_exists = frappe.db.exists("Batch", batch_no)
+	if batch_exists:
+		frappe.db.set_value("Batch", batch_no, "expiry_date", expiry_date)
+		return batch_no
+	batch_doc = frappe.get_doc(
+		{"doctype": "Batch", "batch_id": batch_no, "item": item_code, "expiry_date": expiry_date}
+	).insert(ignore_permissions=True)
+	return batch_doc.name
+
+
 @frappe.whitelist()
-def add_scanned_po_item_to_pr(po_name, po_item_name, qty, warehouse, target_pr_doc):
+def add_scanned_po_item_to_pr(po_name, po_item_name, qty, warehouse, batch_no, expiry_date, target_pr_doc):
 	args = {"filtered_children": [po_item_name]}
 
 	updated_doc = make_purchase_receipt(source_name=po_name, target_doc=target_pr_doc, args=json.dumps(args))
@@ -144,7 +155,7 @@ def add_scanned_po_item_to_pr(po_name, po_item_name, qty, warehouse, target_pr_d
 			item.amount = (flt(item.qty)) * flt(item.rate)
 			item.base_amount = (flt(item.qty)) * flt(item.rate) * flt(item.conversion_factor)
 			item.stock_qty = flt(qty) * flt(item.conversion_factor)
-
+			item.batch_no = get_or_create_batch(batch_no, expiry_date, item.item_code)
 			if warehouse:
 				item.warehouse = warehouse
 

@@ -19,12 +19,6 @@ def after_install():
 	create_custom_fields(get_purchase_receipt_custom_fields(), ignore_validate=True)
 	create_custom_fields(get_stock_entry_custom_fields(), ignore_validate=True)
 
-	# Creating Property setters
-	create_property_setters(get_purchase_receipt_item_property_setters())
-	create_property_setters(get_stock_entry_detail_property_setters())
-	create_property_setters(get_stock_entry_property_setters())
-	create_property_setters(get_item_property_setters())
-
 
 def after_migrate():
 	after_install()
@@ -519,93 +513,3 @@ def create_property_setters(property_setter_datas):
 		property_setter.update(property_setter_data)
 		property_setter.flags.ignore_permissions = True
 		property_setter.insert()
-
-
-def get_purchase_receipt_item_property_setters():
-	return [
-		{
-			"doctype_or_field": "DocField",
-			"doc_type": "Purchase Receipt Item",
-			"field_name": "section_break_45",
-			"property": "hidden",
-			"value": 1,
-		},
-		{
-			"doctype_or_field": "DocField",
-			"doc_type": "Purchase Receipt Item",
-			"field_name": "section_break_3vxt",
-			"property": "hidden",
-			"value": 1,
-		},
-	]
-
-
-def get_stock_entry_detail_property_setters():
-	return [
-		{
-			"doctype_or_field": "DocField",
-			"doc_type": "Stock Entry Detail",
-			"field_name": "serial_no_batch",
-			"property": "hidden",
-			"value": 1,
-		},
-		{
-			"doctype_or_field": "DocField",
-			"doc_type": "Stock Entry Detail",
-			"field_name": "section_break_rdtg",
-			"property": "hidden",
-			"value": 1,
-		},
-	]
-
-
-def get_stock_entry_property_setters():
-	return [
-		{
-			"doctype_or_field": "DocField",
-			"doc_type": "Stock Entry",
-			"field_name": "sales_invoice_no",
-			"property": "depends_on",
-			"value": "from_return_invoice",
-		},
-		{
-			"doctype_or_field": "DocField",
-			"doc_type": "Stock Entry",
-			"field_name": "sales_invoice_no",
-			"property": "read_only",
-			"value": 1,
-		},
-		{
-			"doctype_or_field": "DocField",
-			"doc_type": "Stock Entry",
-			"field_name": "sales_invoice_no",
-			"property": "allow_on_submit",
-			"value": 1,
-		},
-	]
-
-
-def get_item_property_setters():
-	return [
-		{
-			"doctype_or_field": "DocField",
-			"doc_type": "Item",
-			"field_name": "is_stock_item",
-			"property": "default",
-			"value": 1,
-		},
-		{
-			"doctype_or_field": "DocField",
-			"doc_type": "Item",
-			"field_name": "is_sales_item",
-			"property": "default",
-			"value": 1,
-		},
-		{
-			"doctype_or_field": "DocField",
-			"doc_type": "Item",
-			"field_name": "is_purchase_item",
-			"property": "default",
-			"value": 1,
-		},
-	]

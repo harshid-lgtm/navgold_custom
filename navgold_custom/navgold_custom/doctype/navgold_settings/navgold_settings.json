@@ -11,7 +11,9 @@
 		"proxy_skus_section",
 		"generate_proxy_skus",
 		"column_break_zqvs",
-		"multiple_active_item_uom"
+		"multiple_active_item_uom",
+		"batch_section",
+		"min_shelf_expiry_in_days"
 	],
 	"fields": [
 		{
@@ -52,13 +54,26 @@
 			"fieldname": "multiple_active_item_uom",
 			"fieldtype": "Check",
 			"label": "Multiple Active Item UOM"
+		},
+		{
+			"fieldname": "batch_section",
+			"fieldtype": "Section Break",
+			"label": "Batch"
+		},
+		{
+			"default": "1",
+			"fieldname": "min_shelf_expiry_in_days",
+			"fieldtype": "Int",
+			"label": "Min Shelf Expiry (In Days)",
+			"non_negative": 1,
+			"reqd": 1
 		}
 	],
 	"grid_page_length": 50,
 	"index_web_pages_for_search": 1,
 	"issingle": 1,
 	"links": [],
-	"modified": "2025-12-29 05:52:39.586988",
+	"modified": "2026-01-05 12:57:26.818979",
 	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Navgold Settings",

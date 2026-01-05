@@ -17,6 +17,7 @@ class NavgoldSettings(Document):
 		from frappe.types import DF
 
 		buying_price_list: DF.Link
+		min_shelf_expiry_in_days: DF.Int
 		multiple_active_item_uom: DF.Check
 		tote_weight_limit: DF.Int
 	# end: auto-generated types

@@ -92,7 +92,7 @@ frappe.ui.form.on('Pick List', {
 				if (selected_weight > weight_limit) {
 					frappe.confirm(
 						__(
-							'Selected weight ({0} kg) exceeds the limit ({1} kg). Do you want to proceed?',
+							'Selected weight ({0} g) exceeds the limit ({1} g). Do you want to proceed?',
 							[selected_weight.toFixed(2), weight_limit],
 						),
 						() => {
