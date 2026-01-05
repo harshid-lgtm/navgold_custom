@@ -15,6 +15,7 @@
 		"google_sheets_url",
 		"column_break_vjhj",
 		"download_template",
+		"use_supplier_part_number",
 		"section_break_status",
 		"status",
 		"column_break_status",
@@ -138,12 +139,19 @@
 			"hidden": 1,
 			"label": "Errored Rows",
 			"read_only": 1
+		},
+		{
+			"default": "0",
+			"depends_on": "eval:!doc.__islocal",
+			"fieldname": "use_supplier_part_number",
+			"fieldtype": "Check",
+			"label": "Use Supplier Part Number"
 		}
 	],
 	"grid_page_length": 50,
 	"index_web_pages_for_search": 1,
 	"links": [],
-	"modified": "2025-12-31 06:37:33.163712",
+	"modified": "2026-01-05 10:09:30.132373",
 	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Supplier Stock Import",

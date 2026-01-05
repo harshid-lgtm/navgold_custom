@@ -33,6 +33,7 @@ class SupplierStockImport(Document):
 		successful_imports: DF.Int
 		supplier: DF.Link
 		total_rows: DF.Int
+		use_supplier_part_number: DF.Check
 	# end: auto-generated types
 
 	def validate(self):
@@ -172,13 +173,19 @@ class SupplierStockImport(Document):
 		barcode = row[4] if len(row) > 4 else None
 
 		uom = self.get_uom_from_barcode_and_conversion_factor(barcode, uom)
-		if not barcode:
-			raise ValueError("Barcode is required")
+		if self.use_supplier_part_number:
+			if not supplier_part_number:
+				raise ValueError(
+					"Supplier Part Number is required when 'Use Supplier Part Number' is checked"
+				)
+		else:
+			if not barcode:
+				raise ValueError("Barcode is required")
 
 		if not uom:
 			raise ValueError("UOM is required")
 
-		existing_record = self.get_existing_record(barcode, uom)
+		existing_record = self.get_existing_record(supplier_part_number, barcode, uom)
 
 		if existing_record:
 			self.update_record(existing_record, stock_qty, price, supplier_part_number)
@@ -191,7 +198,17 @@ class SupplierStockImport(Document):
 			new_name = self.create_record(item, uom, stock_qty, price, supplier_part_number, barcode)
 			self.append_log(f"Row {row_idx-1}: Created {new_name}")
 
-	def get_existing_record(self, barcode, uom):
+	def get_existing_record(self, supplier_part_number, barcode, uom):
+		if self.use_supplier_part_number:
+			return frappe.db.get_value(
+				"Supplier Item Price and Stock",
+				{
+					"supplier": self.supplier,
+					"supplier_part_number": supplier_part_number,
+					"uom": uom,
+				},
+				"name",
+			)
 		return frappe.db.get_value(
 			"Supplier Item Price and Stock",
 			{"supplier": self.supplier, "barcode": barcode, "uom": uom},
