@@ -29,6 +29,8 @@ class SupplierStockImport(Document):
 		failed_imports: DF.Int
 		google_sheets_url: DF.Data | None
 		import_log: DF.LongText | None
+		import_price: DF.Check
+		import_stock: DF.Check
 		status: DF.Literal["Pending", "In Progress", "Success", "Partial Success", "Error"]
 		successful_imports: DF.Int
 		supplier: DF.Link
@@ -220,8 +222,10 @@ class SupplierStockImport(Document):
 
 	def update_record(self, name, stock_qty, price, supplier_part_number):
 		record = frappe.get_cached_doc("Supplier Item Price and Stock", name)
-		record.stock_qty = stock_qty
-		record.price = price
+		if self.import_stock:
+			record.stock_qty = stock_qty
+		if self.import_price:
+			record.price = price
 		if supplier_part_number:
 			record.supplier_part_number = supplier_part_number
 		record.save(ignore_permissions=True)

@@ -16,6 +16,8 @@
 		"column_break_vjhj",
 		"download_template",
 		"use_supplier_part_number",
+		"import_price",
+		"import_stock",
 		"section_break_status",
 		"status",
 		"column_break_status",
@@ -31,6 +33,7 @@
 			"fieldname": "supplier",
 			"fieldtype": "Link",
 			"in_list_view": 1,
+			"in_standard_filter": 1,
 			"label": "Supplier",
 			"options": "Supplier",
 			"reqd": 1,
@@ -146,12 +149,26 @@
 			"fieldname": "use_supplier_part_number",
 			"fieldtype": "Check",
 			"label": "Use Supplier Part Number"
+		},
+		{
+			"default": "1",
+			"depends_on": "eval:!doc.__islocal",
+			"fieldname": "import_price",
+			"fieldtype": "Check",
+			"label": "Import Price?"
+		},
+		{
+			"default": "1",
+			"depends_on": "eval:!doc.__islocal",
+			"fieldname": "import_stock",
+			"fieldtype": "Check",
+			"label": "Import Stock?"
 		}
 	],
 	"grid_page_length": 50,
 	"index_web_pages_for_search": 1,
 	"links": [],
-	"modified": "2026-01-05 10:09:30.132373",
+	"modified": "2026-01-05 10:34:45.515365",
 	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Supplier Stock Import",
