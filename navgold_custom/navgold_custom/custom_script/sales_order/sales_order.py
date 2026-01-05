@@ -205,7 +205,7 @@ def create_material_request(doc):
 
 	try:
 		mr = make_material_request(doc.name)
-
+		mr.custom_is_amazon_pending = doc.amazon_order_status == "Pending"
 		updated_items = []
 		for mr_item in mr.items:
 			if mr_item.sales_order_item in items_needing_stock:

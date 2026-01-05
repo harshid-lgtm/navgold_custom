@@ -11,6 +11,11 @@ frappe.query_reports['To Purchase'] = {
 			fieldtype: 'Link',
 			options: 'Supplier',
 		},
+		{
+			fieldname: 'is_amazon_pending',
+			label: __('Pending Sales Order'),
+			fieldtype: 'Check',
+		},
 	],
 	onload: (report) => {
 		edited_quantities = {};

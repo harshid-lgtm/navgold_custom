@@ -143,6 +143,7 @@ def get_data(filters):
 		.where(
 			(material_request.material_request_type == "Purchase")
 			& (material_request.status.isin(material_request_status_list))
+			& (material_request.custom_is_amazon_pending == frappe.cint(filters.get("is_amazon_pending", 0)))
 		)
 	).run(as_dict=True)
 
@@ -158,7 +159,8 @@ def get_data(filters):
 
 		if pending > 0:
 			items_needed[item] = items_needed.get(item, 0) + pending
-
+	if not items_needed:
+		return []
 	supplier_list_query = (
 		frappe.qb.from_(supplier_item_price_and_stock)
 		.select(
@@ -409,6 +411,7 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 
 	if len(po.items) > 0:
 		po.insert(ignore_permissions=True)
+		po.submit()
 		return po
 
 	return None
