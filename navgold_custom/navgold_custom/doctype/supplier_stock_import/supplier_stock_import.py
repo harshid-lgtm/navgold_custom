@@ -11,6 +11,10 @@ from frappe.utils.caching import redis_cache
 from frappe.utils.csvutils import build_csv_response, get_csv_content_from_google_sheets, read_csv_content
 from frappe.utils.xlsxutils import read_xlsx_file_from_attached_file
 
+from navgold_custom.navgold_custom.doctype.supplier_item_price_and_stock.supplier_item_price_and_stock import (
+	update_supplier_rank,
+)
+
 TEMPLATE_COLUMNS = ("Supplier Part Number", "Stock Qty", "UOM", "Price", "Barcode")
 
 
@@ -277,4 +281,5 @@ def run_import(docname):
 	doc = frappe.get_cached_doc("Supplier Stock Import", docname)
 	doc.process_import()
 	doc.save()
+	update_supplier_rank()
 	frappe.publish_realtime("supplier_import_refresh", {"docname": docname})
