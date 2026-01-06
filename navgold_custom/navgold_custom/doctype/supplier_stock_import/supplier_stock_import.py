@@ -138,6 +138,10 @@ class SupplierStockImport(Document):
 					},
 				)
 
+			# Commit every 100 rows
+			if row_idx % 100 == 0:
+				frappe.db.commit()
+
 		self.errored_rows = json.dumps(errored_rows_data) if errored_rows_data else ""
 
 		if self.failed_imports == 0:
@@ -245,6 +249,7 @@ class SupplierStockImport(Document):
 				"purchase_blocked": 0,
 			}
 		)
+		doc.flags.single_entry = False
 		doc.insert(ignore_permissions=True)
 		return doc.name
 

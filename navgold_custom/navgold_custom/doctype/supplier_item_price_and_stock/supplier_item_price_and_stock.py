@@ -84,39 +84,27 @@ class SupplierItemPriceandStock(Document):
 
 	def validate(self):
 		# Item - Supplier combo should be unique
-		if frappe.db.exists(
-			"Supplier Item Price And Stock",
-			{"item": self.item, "supplier": self.supplier, "name": ["!=", self.name]},
-		):
-			frappe.throw(_(f"Entry with {self.supplier} and {self.item} already exists"))
+		if getattr(self.flags, "single_entry", True):
+			if frappe.db.exists(
+				"Supplier Item Price And Stock",
+				{"item": self.item, "supplier": self.supplier, "name": ["!=", self.name]},
+			):
+				frappe.throw(_(f"Entry with {self.supplier} and {self.item} already exists"))
 		if not self.item_price:
 			self.populate_item_price()
 		if self.get_value_before_save("price") != self.price:
-			price_list = frappe.db.get_single_value("Navgold Settings", "buying_price_list")
-
-			item_price = frappe.get_last_doc(
-				"Item Price",
-				{
-					"item_code": self.item,
-					"uom": self.uom,
-					"buying": 1,
-					"supplier": self.supplier,
-					"price_list": price_list,
-				},
-				order_by="creation",
-			)
-			item_price.price_list_rate = self.price
-			item_price.save()
+			frappe.db.set_value("Item Price", self.item_price, "price_list_rate", self.price)
 			self.calculate_unit_price()
 		if self.get_value_before_save("stock_qty") != self.stock_qty:
 			self.calculate_normalized_qty()
 
 	def on_update(self):
-		if (
-			self.get_value_before_save("price") != self.price
-			or self.get_value_before_save("purchase_blocked") != self.purchase_blocked
-		):
-			update_supplier_rank()
+		if getattr(self.flags, "single_entry", True):
+			if (
+				self.get_value_before_save("price") != self.price
+				or self.get_value_before_save("purchase_blocked") != self.purchase_blocked
+			):
+				update_supplier_rank()
 
 
 @frappe.whitelist()
