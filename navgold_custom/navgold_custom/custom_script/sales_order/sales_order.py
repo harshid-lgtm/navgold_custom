@@ -10,6 +10,7 @@ import frappe
 from erpnext.selling.doctype.sales_order.sales_order import make_material_request
 from erpnext.stock.stock_ledger import get_stock_balance
 from frappe import _
+from frappe.query_builder import Order
 from frappe.utils import flt, getdate, nowdate
 
 
@@ -173,7 +174,7 @@ def enq_si_submit(sales_invoice):
 def sales_order_on_submit(doc, method):
 	if doc.fulfillment_channel == "MFN":
 		create_material_request(doc)
-	else:
+	elif doc.fulfillment_channel == "AFN":
 		doc.update_status("Closed")
 
 
@@ -247,3 +248,118 @@ def create_material_request(doc):
 			alert=True,
 			indicator="red",
 		)
+
+
+def get_bins_with_projected_qty(item_code: str) -> list[dict]:
+	Bin = frappe.qb.DocType("Bin")
+	return (
+		frappe.qb.from_(Bin)
+		.select(
+			Bin.warehouse,
+			Bin.projected_qty,
+			Bin.actual_qty,
+		)
+		.where((Bin.item_code == item_code) & (Bin.projected_qty > 0))
+		.orderby(Bin.projected_qty, order=Order.desc)
+		.run(as_dict=True)
+	)
+
+
+def allocate_stock_for_item(
+	item_code: str, required_qty: float, default_warehouse: str, conversion_factor: float = 1.0
+) -> list[tuple[str, float]]:
+	bins = get_bins_with_projected_qty(item_code)
+	allocations = []
+	remaining_qty = flt(required_qty)
+	conversion_factor = flt(conversion_factor) or 1.0
+
+	for bin_data in bins:
+		if remaining_qty <= 0:
+			break
+
+		available_stock_uom = flt(bin_data.projected_qty)
+
+		whole_units_possible = int(available_stock_uom // conversion_factor)
+
+		if whole_units_possible <= 0:
+			continue
+
+		allocate_qty = min(whole_units_possible, remaining_qty)
+
+		if allocate_qty > 0:
+			allocations.append((bin_data.warehouse, allocate_qty))
+			remaining_qty -= allocate_qty
+
+	if remaining_qty > 0:
+		allocations.append((default_warehouse, remaining_qty))
+
+	return allocations
+
+
+def sales_order_before_submit(doc, method):
+	if not doc.amazon_order_id:
+		return
+
+	# Get default warehouse from Navgold Settings
+	default_warehouse = frappe.get_single_value("Navgold Settings", "default_stock_allocation_warehouse")
+
+	if not default_warehouse:
+		frappe.throw(
+			_(
+				"Please set a Default Stock Allocation Warehouse in Navgold Settings "
+				"or Warehouse in Amazon SP API Settings"
+			)
+		)
+
+	new_items = []
+
+	for item in doc.items:
+		item_code = item.item_code
+		required_qty = flt(item.qty)
+		conversion_factor = flt(item.conversion_factor) or 1.0
+
+		# Get stock allocations across warehouses (handles UOM conversion)
+		allocations = allocate_stock_for_item(item_code, required_qty, default_warehouse, conversion_factor)
+
+		if len(allocations) == 1:
+			# Single warehouse - just set the warehouse
+			warehouse, qty = allocations[0]
+			item.warehouse = warehouse
+			new_items.append(item)
+		else:
+			# Multiple warehouses - split the item
+			for idx, (warehouse, qty) in enumerate(allocations):
+				if idx == 0:
+					# Use the original item for first allocation
+					item.qty = qty
+					item.warehouse = warehouse
+					# Recalculate amount based on new qty
+					item.amount = flt(item.rate) * flt(qty)
+					new_items.append(item)
+				else:
+					# Create new item row for subsequent allocations
+					new_item = frappe.copy_doc(item)
+					new_item.qty = qty
+					new_item.warehouse = warehouse
+					new_item.amount = flt(item.rate) * flt(qty)
+					# Clear the name so it gets a new one
+					new_item.name = None
+					new_item.idx = None
+					new_items.append(new_item)
+
+	# Replace items with split items
+	doc.items = []
+	for idx, item in enumerate(new_items, start=1):
+		item.idx = idx
+		doc.append("items", item)
+
+	# Recalculate totals
+	doc.calculate_taxes_and_totals()
+
+	frappe.msgprint(
+		_("Stock allocated across {0} warehouse(s) for {1} item(s)").format(
+			len(set(i.warehouse for i in doc.items)), len(doc.items)
+		),
+		alert=True,
+		indicator="blue",
+	)

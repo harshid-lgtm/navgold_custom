@@ -19,6 +19,7 @@ class NavgoldSettings(Document):
 		buying_price_list: DF.Link
 		min_shelf_expiry_in_days: DF.Int
 		multiple_active_item_uom: DF.Check
+		subscribe_and_save_warehouse: DF.Link
 		tote_weight_limit: DF.Int
 	# end: auto-generated types
 

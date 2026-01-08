@@ -13,7 +13,11 @@
 		"column_break_zqvs",
 		"multiple_active_item_uom",
 		"batch_section",
-		"min_shelf_expiry_in_days"
+		"min_shelf_expiry_in_days",
+		"section_break_oarw",
+		"subscribe_and_save_warehouse",
+		"stock_allocation_section",
+		"default_stock_allocation_warehouse"
 	],
 	"fields": [
 		{
@@ -67,13 +71,36 @@
 			"label": "Min Shelf Expiry (In Days)",
 			"non_negative": 1,
 			"reqd": 1
+		},
+		{
+			"fieldname": "section_break_oarw",
+			"fieldtype": "Section Break"
+		},
+		{
+			"fieldname": "subscribe_and_save_warehouse",
+			"fieldtype": "Link",
+			"label": "Subscribe and Save Warehouse",
+			"options": "Warehouse",
+			"reqd": 1
+		},
+		{
+			"fieldname": "stock_allocation_section",
+			"fieldtype": "Section Break",
+			"label": "Stock Allocation"
+		},
+		{
+			"description": "Fallback warehouse when stock is insufficient across all warehouses during Sales Order submission",
+			"fieldname": "default_stock_allocation_warehouse",
+			"fieldtype": "Link",
+			"label": "Default Stock Allocation Warehouse",
+			"options": "Warehouse"
 		}
 	],
 	"grid_page_length": 50,
 	"index_web_pages_for_search": 1,
 	"issingle": 1,
 	"links": [],
-	"modified": "2026-01-05 12:57:26.818979",
+	"modified": "2026-01-06 18:02:44.024435",
 	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Navgold Settings",
