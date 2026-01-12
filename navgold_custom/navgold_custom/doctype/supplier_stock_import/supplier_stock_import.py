@@ -253,7 +253,7 @@ class SupplierStockImport(Document):
 				"purchase_blocked": 0,
 			}
 		)
-		doc.flags.single_entry = False
+		doc.flags.bulk_entry = True
 		doc.insert(ignore_permissions=True)
 		return doc.name
 

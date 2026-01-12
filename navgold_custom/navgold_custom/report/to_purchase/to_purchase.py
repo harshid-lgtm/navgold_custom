@@ -57,14 +57,8 @@ def get_columns(data: list[dict]) -> list[dict]:
 			"width": 150,
 		},
 		{
-			"label": _("Available Stock (UOM)"),
-			"fieldname": "available_stock_uom",
-			"fieldtype": "Float",
-			"width": 150,
-		},
-		{
-			"label": _("Available Stock (Normalized)"),
-			"fieldname": "available_stock_normalized",
+			"label": _("Available Stock"),
+			"fieldname": "available_stock",
 			"fieldtype": "Float",
 			"width": 150,
 		},
@@ -83,12 +77,6 @@ def get_columns(data: list[dict]) -> list[dict]:
 		{
 			"label": _("Unit Price"),
 			"fieldname": "unit_price",
-			"fieldtype": "Currency",
-			"width": 150,
-		},
-		{
-			"label": _("UOM Price"),
-			"fieldname": "uom_price",
 			"fieldtype": "Currency",
 			"width": 150,
 		},
@@ -169,7 +157,6 @@ def get_data(filters):
 			supplier_item_price_and_stock.unit_price,
 			supplier_item_price_and_stock.price,
 			supplier_item_price_and_stock.stock_qty,
-			supplier_item_price_and_stock.normalized_qty,
 			supplier_item_price_and_stock.uom,
 			supplier_item_price_and_stock.name,
 			supplier_item_price_and_stock.rank,
@@ -205,9 +192,9 @@ def get_data(filters):
 			continue
 
 		total_required = items_needed[item_code]
-		available_normalized = s["normalized_qty"]
+		available_stock = s["stock_qty"]
 
-		allocated = min(available_normalized, remaining)
+		allocated = min(available_stock, remaining)
 
 		item_remaining[item_code] = remaining - allocated
 
@@ -218,12 +205,10 @@ def get_data(filters):
 			"total_required_qty": total_required,
 			"supplier": s["supplier"],
 			"supplier_uom": s["uom"],
-			"available_stock_uom": s["stock_qty"],
-			"available_stock_normalized": available_normalized,
+			"available_stock": available_stock,
 			"allocated_qty": allocated,
 			"remaining_qty": remaining - allocated,
 			"unit_price": s["unit_price"],
-			"uom_price": s["price"],
 			"ref_doc": s["name"],
 			"supplier_rank": s["rank"],
 			"offers": offers,
@@ -346,10 +331,10 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 	# Based on each item and MR create a line item though n^2 but not many
 	for item_data in data["items"]:
 		item_code = item_data.get("item_code")
-		available_stock_uom = flt(item_data.get("available_stock_uom", 0))
+		available_stock = flt(item_data.get("available_stock", 0))
 		allocated_qty = flt(item_data.get("allocated_qty", 0))
 		supplier_uom = item_data.get("supplier_uom")
-		uom_price = flt(item_data.get("uom_price", 0))
+		unit_price = flt(item_data.get("unit_price", 0))
 
 		conversion_factor = get_conversion_factor(item_code, supplier_uom)
 
@@ -393,7 +378,7 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 					"uom": supplier_uom,
 					"stock_uom": supplier_uom,
 					"conversion_factor": conversion_factor,
-					"rate": uom_price,
+					"rate": unit_price,
 					"schedule_date": schedule_date,
 					"warehouse": warehouse,
 					"material_request": mr["material_request"],
@@ -404,7 +389,7 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 		# Todo: check this logic
 		# Calculate new stock: original stock minus what we actually ordered
 		total_ordered = allocated_qty_in_supplier_uom - supplier_uom_remaining
-		new_stock = max(0, available_stock_uom - total_ordered)
+		new_stock = max(0, available_stock - total_ordered)
 		update_supplier_stock_after_po(supplier, supplier_uom, item_code, new_stock)
 
 	po.schedule_date = earliest_date or frappe.utils.today()

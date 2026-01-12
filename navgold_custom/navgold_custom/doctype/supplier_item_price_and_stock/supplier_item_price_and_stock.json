@@ -6,10 +6,6 @@
 	"doctype": "DocType",
 	"engine": "InnoDB",
 	"field_order": [
-		"normalized_value_section",
-		"normalized_qty",
-		"column_break_porq",
-		"unit_price",
 		"section_break_pasj",
 		"item",
 		"supplier",
@@ -57,6 +53,7 @@
 			"set_only_once": 1
 		},
 		{
+			"description": "In Nos",
 			"fieldname": "stock_qty",
 			"fieldtype": "Int",
 			"in_list_view": 1,
@@ -75,16 +72,11 @@
 			"reqd": 1
 		},
 		{
+			"description": "Price is per Nos",
 			"fieldname": "price",
 			"fieldtype": "Currency",
 			"label": "Price",
 			"reqd": 1
-		},
-		{
-			"fieldname": "unit_price",
-			"fieldtype": "Currency",
-			"label": "Unit Price",
-			"read_only": 1
 		},
 		{
 			"fieldname": "item_price",
@@ -105,21 +97,6 @@
 			"fieldname": "purchase_blocked",
 			"fieldtype": "Check",
 			"label": "Purchase Blocked?"
-		},
-		{
-			"fieldname": "normalized_qty",
-			"fieldtype": "Int",
-			"label": "Normalized Qty",
-			"read_only": 1
-		},
-		{
-			"fieldname": "normalized_value_section",
-			"fieldtype": "Section Break",
-			"label": "Normalized Value"
-		},
-		{
-			"fieldname": "column_break_porq",
-			"fieldtype": "Column Break"
 		},
 		{
 			"fieldname": "section_break_pasj",
@@ -152,7 +129,7 @@
 	"grid_page_length": 50,
 	"index_web_pages_for_search": 1,
 	"links": [],
-	"modified": "2026-01-05 10:34:17.665559",
+	"modified": "2026-01-12 10:35:30.439482",
 	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Supplier Item Price and Stock",

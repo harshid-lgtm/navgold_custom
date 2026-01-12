@@ -58,11 +58,10 @@ frappe.query_reports['To Purchase'] = {
 				__('Create Purchase Orders for {0} selected items?', [
 					selected_rows.length,
 				]),
+				() => {
+					create_purchase_orders(selected_rows, report);
+				},
 			);
-
-			if (confirmed) {
-				create_purchase_orders(selected_rows, report);
-			}
 		});
 	},
 
@@ -93,7 +92,7 @@ frappe.query_reports['To Purchase'] = {
 						data-item-code="${data.item_code}"
 						data-supplier="${data.supplier}"
 						data-allocated="${data.allocated_qty}"
-						data-available="${data.available_stock_normalized}"
+						data-available="${data.available_stock}"
 						title="${__('Edit quantity')}"
 						onclick="window.edit_quantity(this)"
 					>

@@ -23,7 +23,6 @@ class SupplierItemPriceandStock(Document):
 		currency: DF.Link
 		item: DF.Link
 		item_price: DF.Link | None
-		normalized_qty: DF.Int
 		offers: DF.Table[SupplierOffer]
 		price: DF.Currency
 		purchase_blocked: DF.Check
@@ -31,24 +30,11 @@ class SupplierItemPriceandStock(Document):
 		stock_qty: DF.Int
 		supplier: DF.Link
 		supplier_part_number: DF.Data | None
-		unit_price: DF.Currency
 		uom: DF.Link
 	# end: auto-generated types
 
 	def before_insert(self):
 		self.populate_item_price()
-
-	def calculate_unit_price(self):
-		uom_conversion_factor = frappe.db.get_value(
-			"UOM Conversion Detail", {"parent": self.item, "uom": self.uom}, "conversion_factor"
-		)
-		self.unit_price = self.price / uom_conversion_factor
-
-	def calculate_normalized_qty(self):
-		uom_conversion_factor = frappe.db.get_value(
-			"UOM Conversion Detail", {"parent": self.item, "uom": self.uom}, "conversion_factor"
-		)
-		self.normalized_qty = self.stock_qty * uom_conversion_factor
 
 	def populate_item_price(self):
 		price_list = frappe.db.get_single_value("Navgold Settings", "buying_price_list")
@@ -94,12 +80,9 @@ class SupplierItemPriceandStock(Document):
 			self.populate_item_price()
 		if self.get_value_before_save("price") != self.price:
 			frappe.db.set_value("Item Price", self.item_price, "price_list_rate", self.price)
-			self.calculate_unit_price()
-		if self.get_value_before_save("stock_qty") != self.stock_qty:
-			self.calculate_normalized_qty()
 
 	def on_update(self):
-		if getattr(self.flags, "single_entry", True):
+		if not getattr(self.flags, "bulk_entry", False):
 			if (
 				self.get_value_before_save("price") != self.price
 				or self.get_value_before_save("purchase_blocked") != self.purchase_blocked
@@ -118,7 +101,7 @@ def update_supplier_rank():
 def _update_supplier_rank():
 	records = frappe.db.get_all(
 		"Supplier Item Price and Stock",
-		fields=["name", "item", "uom", "unit_price", "purchase_blocked"],
+		fields=["name", "item", "uom", "price", "purchase_blocked"],
 	)
 
 	if not records:
@@ -131,7 +114,7 @@ def _update_supplier_rank():
 		if record.purchase_blocked:
 			blocked.append(record.name)
 		else:
-			groups[(record.item, record.uom)].append(record)
+			groups[(record.item)].append(record)
 
 	try:
 		if blocked:
@@ -151,13 +134,13 @@ def _update_supplier_rank():
 def update_rank_by_unit_price(group_records):
 	"""After sorting we use for loop to handle ties, if the sorted list is [10, 10, 20, 30, 30], ranks should be [1, 1, 2, 3, 3] instead of [1, 2, 3, 4, 5]"""
 
-	group_records.sort(key=lambda x: x.unit_price or 0)
+	group_records.sort(key=lambda x: x.price or 0)
 	doc_updates = {}
 	rank = 1
 	prev_price = None
 
 	for i, record in enumerate(group_records):
-		price = record.unit_price or 0
+		price = record.price or 0
 
 		if prev_price is not None and price > prev_price:
 			rank = i + 1
