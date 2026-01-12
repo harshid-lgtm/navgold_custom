@@ -964,7 +964,7 @@ class AmazonRepository:
 				so.amazon_customer_type = "B2B"
 			else:
 				so.amazon_customer_type = "B2C"
-			so.set_warehouse = warehouse
+			# so.set_warehouse = warehouse
 			# Get order items from the Amazon API
 			items = self.get_order_items(order_id)
 
