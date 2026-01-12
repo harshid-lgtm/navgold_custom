@@ -34,6 +34,10 @@ class SupplierItemPriceandStock(Document):
 	# end: auto-generated types
 
 	def before_insert(self):
+		if not frappe.db.exists(
+			"UOM Conversion Detail", {"parenttype": "Item", "parent": self.item, "uom": self.uom}
+		):
+			self.create_item_uom()
 		self.populate_item_price()
 
 	def populate_item_price(self):
@@ -80,6 +84,16 @@ class SupplierItemPriceandStock(Document):
 			self.populate_item_price()
 		if self.get_value_before_save("price") != self.price:
 			frappe.db.set_value("Item Price", self.item_price, "price_list_rate", self.price)
+
+	def create_item_uom(self):
+		item = frappe.get_cached_doc("Item", self.item)
+		item.append(
+			"uoms",
+			{
+				"uom": self.uom,
+				"conversion_factor": frappe.db.get_value("UOM", self.uom, "custom_default_conversion_factor"),
+			},
+		).save()
 
 	def on_update(self):
 		if not getattr(self.flags, "bulk_entry", False):
