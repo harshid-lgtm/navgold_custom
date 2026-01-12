@@ -8,10 +8,14 @@
 
 import frappe
 from erpnext.selling.doctype.sales_order.sales_order import make_material_request
+from erpnext.stock.doctype.stock_reservation_entry.stock_reservation_entry import (
+	get_sre_reserved_qty_for_items_and_warehouses as get_reserved_stock_details,
+)
 from erpnext.stock.stock_ledger import get_stock_balance
 from frappe import _
-from frappe.query_builder import Order
-from frappe.utils import flt, getdate, nowdate
+from frappe.model.db_query import DatabaseQuery
+from frappe.query_builder import DocType, Order
+from frappe.utils import cint, flt, getdate, nowdate
 
 
 # Used for recalled orders, Amazon append's S at the start of ID
@@ -101,12 +105,6 @@ def sales_order_after_delete(doc, method):
 			temp_stock_transfer_doc.delete()
 
 
-# def sales_order_before_submit(doc, method):
-# pass
-# if doc.amazon_order_id:
-# 	validate_amazon_so_submit(doc)
-
-
 def validate_amazon_so_submit(doc):
 	"""method validates the amazon sales order"""
 	order_statuses = [
@@ -178,28 +176,92 @@ def sales_order_on_submit(doc, method):
 		doc.update_status("Closed")
 
 
+# Based on item_dashboard.py's get_data because we need to filter out rejected warehouses
+def get_item_bin_data(item_code, warehouse=None):
+	"""Return Item Bin Data excluding Rejected Warehouses"""
+
+	Bin = DocType("Bin")
+	Warehouse = DocType("Warehouse")
+
+	query = (
+		frappe.qb.from_(Bin)
+		.join(Warehouse)
+		.on(Bin.warehouse == Warehouse.name)
+		.select(
+			Bin.item_code,
+			Bin.warehouse,
+			Bin.projected_qty,
+			Bin.reserved_qty,
+			Bin.reserved_qty_for_production,
+			Bin.reserved_qty_for_sub_contract,
+			Bin.actual_qty,
+			Bin.valuation_rate,
+		)
+		.where(Warehouse.is_rejected_warehouse != 1)
+	)
+
+	query = query.where(Bin.item_code == item_code)
+
+	if warehouse:
+		query = query.where(Bin.warehouse == warehouse)
+
+	try:
+		if DatabaseQuery("Warehouse", user=frappe.session.user).build_match_conditions():
+			allowed_wh = [w.name for w in frappe.get_list("Warehouse")]
+			query = query.where(Bin.warehouse.isin(allowed_wh))
+	except frappe.PermissionError:
+		return []
+	query = query.where(
+		(Bin.projected_qty != 0)
+		| (Bin.reserved_qty != 0)
+		| (Bin.reserved_qty_for_production != 0)
+		| (Bin.reserved_qty_for_sub_contract != 0)
+		| (Bin.actual_qty != 0)
+	)
+
+	items = query.run(as_dict=True)
+
+	item_code_list = [item_code] if item_code else [i["item_code"] for i in items]
+	warehouse_list = [i["warehouse"] for i in items]
+
+	sre_reserved = get_reserved_stock_details(item_code_list, warehouse_list)
+	precision = cint(frappe.db.get_single_value("System Settings", "float_precision"))
+	for item in items:
+		item.update(
+			{
+				"item_name": frappe.get_cached_value("Item", item["item_code"], "item_name"),
+				"stock_uom": frappe.get_cached_value("Item", item["item_code"], "stock_uom"),
+				"disable_quick_entry": (
+					frappe.get_cached_value("Item", item["item_code"], "has_batch_no")
+					or frappe.get_cached_value("Item", item["item_code"], "has_serial_no")
+				),
+				"projected_qty": flt(item["projected_qty"], precision),
+				"reserved_qty": flt(item["reserved_qty"], precision),
+				"reserved_qty_for_production": flt(item["reserved_qty_for_production"], precision),
+				"reserved_qty_for_sub_contract": flt(item["reserved_qty_for_sub_contract"], precision),
+				"actual_qty": flt(item["actual_qty"], precision),
+				"reserved_stock": flt(sre_reserved.get((item["item_code"], item["warehouse"]))),
+			}
+		)
+
+	return items
+
+
 def create_material_request(doc):
 	items_needing_stock = {}
 
 	for item in doc.items:
-		projected_qty = flt(item.projected_qty)
-		ordered_qty = flt(item.qty)
+		bin_data = get_item_bin_data(item.item_code)
+		total_projected_qty = sum([b["projected_qty"] for b in bin_data])
+		delivery_date = getdate(item.delivery_date) if item.delivery_date else getdate(doc.delivery_date)
+		today = getdate(nowdate())
 
-		if projected_qty < ordered_qty:
-			if projected_qty >= 1:
-				required_qty = ordered_qty - projected_qty
-			else:
-				required_qty = ordered_qty
-
-			if required_qty <= 0:
-				continue
-
-			delivery_date = getdate(item.delivery_date) if item.delivery_date else getdate(doc.delivery_date)
-			today = getdate(nowdate())
-
-			schedule_date = delivery_date if delivery_date > today else today
-
-			items_needing_stock[item.name] = {"required_qty": required_qty, "schedule_date": schedule_date}
+		schedule_date = delivery_date if delivery_date > today else today
+		if total_projected_qty < 0:
+			items_needing_stock[item.name] = {
+				"required_qty": abs(total_projected_qty),
+				"schedule_date": schedule_date,
+			}
 
 	if not items_needing_stock:
 		return
@@ -213,8 +275,8 @@ def create_material_request(doc):
 				item_data = items_needing_stock[mr_item.sales_order_item]
 
 				mr_item.qty = item_data["required_qty"]
-				mr_item.stock_qty = flt(mr_item.qty) * flt(mr_item.conversion_factor)
-				mr_item.amount = flt(mr_item.qty) * flt(mr_item.rate)
+				mr_item.stock_qty = flt(mr_item.qty)
+				mr_item.uom = "Nos"
 				mr_item.schedule_date = item_data["schedule_date"]
 
 				updated_items.append(mr_item)
@@ -248,118 +310,3 @@ def create_material_request(doc):
 			alert=True,
 			indicator="red",
 		)
-
-
-def get_bins_with_projected_qty(item_code: str) -> list[dict]:
-	Bin = frappe.qb.DocType("Bin")
-	return (
-		frappe.qb.from_(Bin)
-		.select(
-			Bin.warehouse,
-			Bin.projected_qty,
-			Bin.actual_qty,
-		)
-		.where((Bin.item_code == item_code) & (Bin.projected_qty > 0))
-		.orderby(Bin.projected_qty, order=Order.desc)
-		.run(as_dict=True)
-	)
-
-
-def allocate_stock_for_item(
-	item_code: str, required_qty: float, default_warehouse: str, conversion_factor: float = 1.0
-) -> list[tuple[str, float]]:
-	bins = get_bins_with_projected_qty(item_code)
-	allocations = []
-	remaining_qty = flt(required_qty)
-	conversion_factor = flt(conversion_factor) or 1.0
-
-	for bin_data in bins:
-		if remaining_qty <= 0:
-			break
-
-		available_stock_uom = flt(bin_data.projected_qty)
-
-		whole_units_possible = int(available_stock_uom // conversion_factor)
-
-		if whole_units_possible <= 0:
-			continue
-
-		allocate_qty = min(whole_units_possible, remaining_qty)
-
-		if allocate_qty > 0:
-			allocations.append((bin_data.warehouse, allocate_qty))
-			remaining_qty -= allocate_qty
-
-	if remaining_qty > 0:
-		allocations.append((default_warehouse, remaining_qty))
-
-	return allocations
-
-
-def sales_order_before_submit(doc, method):
-	if not doc.amazon_order_id:
-		return
-
-	# Get default warehouse from Navgold Settings
-	default_warehouse = frappe.get_single_value("Navgold Settings", "default_stock_allocation_warehouse")
-
-	if not default_warehouse:
-		frappe.throw(
-			_(
-				"Please set a Default Stock Allocation Warehouse in Navgold Settings "
-				"or Warehouse in Amazon SP API Settings"
-			)
-		)
-
-	new_items = []
-
-	for item in doc.items:
-		item_code = item.item_code
-		required_qty = flt(item.qty)
-		conversion_factor = flt(item.conversion_factor) or 1.0
-
-		# Get stock allocations across warehouses (handles UOM conversion)
-		allocations = allocate_stock_for_item(item_code, required_qty, default_warehouse, conversion_factor)
-
-		if len(allocations) == 1:
-			# Single warehouse - just set the warehouse
-			warehouse, qty = allocations[0]
-			item.warehouse = warehouse
-			new_items.append(item)
-		else:
-			# Multiple warehouses - split the item
-			for idx, (warehouse, qty) in enumerate(allocations):
-				if idx == 0:
-					# Use the original item for first allocation
-					item.qty = qty
-					item.warehouse = warehouse
-					# Recalculate amount based on new qty
-					item.amount = flt(item.rate) * flt(qty)
-					new_items.append(item)
-				else:
-					# Create new item row for subsequent allocations
-					new_item = frappe.copy_doc(item)
-					new_item.qty = qty
-					new_item.warehouse = warehouse
-					new_item.amount = flt(item.rate) * flt(qty)
-					# Clear the name so it gets a new one
-					new_item.name = None
-					new_item.idx = None
-					new_items.append(new_item)
-
-	# Replace items with split items
-	doc.items = []
-	for idx, item in enumerate(new_items, start=1):
-		item.idx = idx
-		doc.append("items", item)
-
-	# Recalculate totals
-	doc.calculate_taxes_and_totals()
-
-	frappe.msgprint(
-		_("Stock allocated across {0} warehouse(s) for {1} item(s)").format(
-			len(set(i.warehouse for i in doc.items)), len(doc.items)
-		),
-		alert=True,
-		indicator="blue",
-	)

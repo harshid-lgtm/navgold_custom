@@ -262,7 +262,6 @@ doc_events = {
 		"after_insert": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.sales_order_after_insert",
 		"after_delete": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.sales_order_after_delete",
 		# "before_submit": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.sales_order_before_submit",
-		"before_submit": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.sales_order_before_submit",
 		"on_submit": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.sales_order_on_submit",
 	},
 	"Item": {
