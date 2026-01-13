@@ -21,7 +21,7 @@ frappe.query_reports['To Purchase'] = {
 		add_custom_styles();
 		setTimeout(() => {
 			create_info_bar(report);
-		}, 100);
+		}, 200);
 
 		report.page.add_inner_button(__('Create Purchase Orders'), async () => {
 			const selected_rows = purchase_report_state.get_selected_items();
@@ -204,35 +204,32 @@ function add_custom_styles() {
 }
 
 function create_info_bar(report) {
-	const info_bar = document.createElement('div');
-	info_bar.className = 'purchase-info-bar';
-	info_bar.innerHTML = `
-<div></div>
-		<div class="info-text">
-			<strong>${__('Selected')}:</strong> 0 ${__('items')} | 
-			<strong>${__('Total Amount')}:</strong> ${format_currency(0)}
-		</div>
-	
-	`;
+	const info_bar = $('<div></div>')
+		.addClass('purchase-info-bar')
+		.html(`
+			<div></div>
+			<div class="info-text">
+				<strong>${__('Selected')}:</strong> 0 ${__('items')} | 
+				<strong>${__('Total Amount')}:</strong> ${format_currency(0)}
+			</div>
+		`);
 
-	const report_container = report.$report[0];
-	const datatable_wrapper = report_container.querySelector('.datatable');
+	const report_container = report.$report;
+	const datatable_wrapper = report_container.find('.datatable');
 
-	if (datatable_wrapper?.parentNode) {
-		datatable_wrapper.parentNode.insertBefore(info_bar, datatable_wrapper);
+	if (datatable_wrapper.length) {
+		datatable_wrapper.before(info_bar);
 	}
 
-	report.info_bar = info_bar;
+	report.info_bar = info_bar[0];
 
-	const clear_btn = info_bar.querySelector('#clear-selection-btn');
-	if (clear_btn) {
-		clear_btn.addEventListener('click', () => {
-			if (report.datatable?.rowmanager) {
-				report.datatable.rowmanager.checkAll(false);
-				purchase_report_state.update_ui();
-			}
-		});
-	}
+	const clear_btn = info_bar.find('#clear-selection-btn');
+	clear_btn.on('click', () => {
+		if (report.datatable?.rowmanager) {
+			report.datatable.rowmanager.checkAll(false);
+			purchase_report_state.update_ui();
+		}
+	});
 }
 
 window.edit_quantity = (button) => {
