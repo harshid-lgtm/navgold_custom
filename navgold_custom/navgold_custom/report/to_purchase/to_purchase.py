@@ -32,6 +32,12 @@ def get_columns(data: list[dict]) -> list[dict]:
 			"width": 150,
 		},
 		{
+			"label": _("Description"),
+			"fieldname": "description",
+			"fieldtype": "Data",
+			"width": 150,
+		},
+		{
 			"label": _("Free Qty"),
 			"fieldname": "free_qty",
 			"fieldtype": "Float",
@@ -64,7 +70,7 @@ def get_columns(data: list[dict]) -> list[dict]:
 			"width": 150,
 		},
 		{
-			"label": _("Available Stock"),
+			"label": _("Supplier Stock"),
 			"fieldname": "available_stock",
 			"fieldtype": "Float",
 			"width": 150,
@@ -148,6 +154,7 @@ def get_data(filters):
 	material_request = DocType("Material Request")
 	material_request_item = DocType("Material Request Item")
 	supplier_item_price_and_stock = DocType("Supplier Item Price and Stock")
+	item_doc = DocType("Item")
 	items_requests = (
 		frappe.qb.from_(material_request)
 		.left_join(material_request_item)
@@ -180,8 +187,11 @@ def get_data(filters):
 		return []
 	supplier_list_query = (
 		frappe.qb.from_(supplier_item_price_and_stock)
+		.left_join(item_doc)
+		.on(supplier_item_price_and_stock.item == item_doc.name)
 		.select(
 			supplier_item_price_and_stock.item,
+			item_doc.description,
 			supplier_item_price_and_stock.supplier,
 			supplier_item_price_and_stock.price.as_("unit_price"),
 			supplier_item_price_and_stock.stock_qty,
@@ -232,6 +242,7 @@ def get_data(filters):
 
 		row = {
 			"item_code": item_code,
+			"description": s["description"],
 			"free_qty": free_qty_map.get(item_code, 0),
 			"total_required_qty": total_required,
 			"supplier": s["supplier"],
