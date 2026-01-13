@@ -1,8 +1,6 @@
 // Copyright (c) 2025, developers@buildwithhussain.com and contributors
 // For license information, please see license.txt
 
-let edited_quantities = {};
-
 frappe.query_reports['To Purchase'] = {
 	filters: [
 		{
@@ -17,44 +15,23 @@ frappe.query_reports['To Purchase'] = {
 			fieldtype: 'Check',
 		},
 	],
+
 	onload: (report) => {
-		edited_quantities = {};
-		// To remove 1 row selected msg
+		purchase_report_state.init(report);
+		add_custom_styles();
 		setTimeout(() => {
-			const style = document.createElement('style');
-			style.innerHTML = `
-				.dt-toast {
-					display: none !important;
-				}
-				.qty-edit-wrapper {
-				display: flex;
-				align-items: center;
-				justify-content: center;
-				gap: 2rem;
-			}
-
-			.edit-qty-icon {
-				color: var(--text-muted);
-				cursor: pointer;
-			}
-
-			.edit-qty-icon:hover {
-				color: var(--text-color);
-			}
-		
-			`;
-			document.head.appendChild(style);
+			create_info_bar(report);
 		}, 100);
 
 		report.page.add_inner_button(__('Create Purchase Orders'), async () => {
-			const selected_rows = report.get_checked_items();
+			const selected_rows = purchase_report_state.get_selected_items();
 
 			if (selected_rows.length === 0) {
 				frappe.msgprint(__('Please select at least one row'));
 				return;
 			}
 
-			const confirmed = await frappe.confirm(
+			frappe.confirm(
 				__('Create Purchase Orders for {0} selected items?', [
 					selected_rows.length,
 				]),
@@ -70,25 +47,28 @@ frappe.query_reports['To Purchase'] = {
 			checkboxColumn: true,
 			editable: false,
 			events: {
-				onCheckRow: (row) => {},
+				onCheckRow: () => {
+					purchase_report_state.update_ui();
+				},
 			},
 		});
 	},
 
 	formatter: (value, row, column, data, default_formatter) => {
-		default_value = default_formatter(value, row, column, data);
+		const default_value = default_formatter(value, row, column, data);
 
 		if (column.fieldname === 'allocated_qty' && data) {
-			const key = `${data.item_code}|${data.supplier}`;
-			const edited_qty = edited_quantities[key];
-			const display_qty =
-				edited_qty !== undefined ? edited_qty : data.allocated_qty;
+			const display_qty = purchase_report_state.get_quantity(
+				data.item_code,
+				data.supplier,
+				data.allocated_qty,
+			);
 
 			return `
 				<div class="qty-edit-wrapper">
 					<span>${display_qty}</span>
 					<span
-						class="edit-qty-icon cursor-pointer"
+						class="edit-qty-icon"
 						data-item-code="${data.item_code}"
 						data-supplier="${data.supplier}"
 						data-allocated="${data.allocated_qty}"
@@ -105,6 +85,155 @@ frappe.query_reports['To Purchase'] = {
 		return default_value;
 	},
 };
+const purchase_report_state = {
+	edited_quantities: {},
+	report: null,
+
+	init(report) {
+		this.report = report;
+		this.edited_quantities = {};
+	},
+
+	set_quantity(item_code, supplier, qty) {
+		const key = `${item_code}|${supplier}`;
+		this.edited_quantities[key] = qty;
+		this.update_ui();
+	},
+
+	get_quantity(item_code, supplier, default_qty) {
+		const key = `${item_code}|${supplier}`;
+		return this.edited_quantities[key] ?? default_qty;
+	},
+
+	get_selected_items() {
+		return this.report?.get_checked_items() || [];
+	},
+
+	calculate_total() {
+		const selected = this.get_selected_items();
+		return selected.reduce((sum, row) => {
+			const qty = this.get_quantity(
+				row.item_code,
+				row.supplier,
+				row.allocated_qty || 0,
+			);
+			const unit_price = row.unit_price || 0;
+			return sum + qty * unit_price;
+		}, 0);
+	},
+
+	get_items_with_edited_quantities(items) {
+		return items.map((item) => {
+			const key = `${item.item_code}|${item.supplier}`;
+			if (this.edited_quantities[key] !== undefined) {
+				return {
+					...item,
+					allocated_qty: this.edited_quantities[key],
+				};
+			}
+			return item;
+		});
+	},
+
+	reset() {
+		this.edited_quantities = {};
+		this.update_ui();
+	},
+
+	update_ui: frappe.utils.debounce(function () {
+		if (!this.report?.info_bar) return;
+
+		const selected = this.get_selected_items();
+		const total = this.calculate_total();
+		const info_text = this.report.info_bar.querySelector('.info-text');
+
+		if (info_text) {
+			info_text.innerHTML = `
+				<strong>${__('Selected')}:</strong> ${selected.length} ${__('items')} | 
+				<strong>${__('Total Amount')}:</strong> ${format_currency(total)}
+			`;
+		}
+	}, 50),
+};
+
+function add_custom_styles() {
+	if (document.getElementById('to-purchase-report-styles')) return;
+
+	const style = document.createElement('style');
+	style.id = 'to-purchase-report-styles';
+	style.innerHTML = `
+		.dt-toast {
+			display: none !important;
+		}
+		
+		.qty-edit-wrapper {
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			gap: 0.5rem;
+		}
+		
+		.edit-qty-icon {
+			color: var(--text-muted);
+			cursor: pointer;
+			transition: color 0.2s ease;
+		}
+		
+		.edit-qty-icon:hover {
+			color: var(--text-color);
+		}
+		
+		.purchase-info-bar {
+
+			margin-bottom: 12px;
+			display: flex;
+			align-items: center;
+			justify-content: end;
+			padding-left: 4px
+
+		}
+		
+		.purchase-info-bar .info-text {
+			color: var(--text-color);
+			font-weight: 500;
+			font-size: 14px;
+		}
+
+	`;
+	document.head.appendChild(style);
+}
+
+function create_info_bar(report) {
+	const info_bar = document.createElement('div');
+	info_bar.className = 'purchase-info-bar';
+	info_bar.innerHTML = `
+<div></div>
+		<div class="info-text">
+			<strong>${__('Selected')}:</strong> 0 ${__('items')} | 
+			<strong>${__('Total Amount')}:</strong> ${format_currency(0)}
+		</div>
+	
+	`;
+
+	const report_container = report.$report[0];
+	const datatable_wrapper = report_container.querySelector('.datatable');
+
+	if (datatable_wrapper?.parentNode) {
+		datatable_wrapper.parentNode.insertBefore(info_bar, datatable_wrapper);
+	}
+
+	report.info_bar = info_bar;
+
+	const clear_btn = info_bar.querySelector('#clear-selection-btn');
+	if (clear_btn) {
+		clear_btn.addEventListener('click', () => {
+			if (report.datatable?.rowmanager) {
+				report.datatable.rowmanager.checkAll(false);
+				purchase_report_state.update_ui();
+			}
+		});
+	}
+}
 
 window.edit_quantity = (button) => {
 	const item_code = button.getAttribute('data-item-code');
@@ -112,11 +241,11 @@ window.edit_quantity = (button) => {
 	const allocated_qty = parseFloat(button.getAttribute('data-allocated'));
 	const available_stock = parseFloat(button.getAttribute('data-available'));
 
-	const key = `${item_code}|${supplier}`;
-	const current_qty =
-		edited_quantities[key] !== undefined
-			? edited_quantities[key]
-			: allocated_qty;
+	const current_qty = purchase_report_state.get_quantity(
+		item_code,
+		supplier,
+		allocated_qty,
+	);
 
 	const dialog = new frappe.ui.Dialog({
 		title: __('Edit Quantity'),
@@ -177,9 +306,11 @@ window.edit_quantity = (button) => {
 				if (!confirmed) return;
 			}
 
-			save_edited_quantity(key, new_qty);
+			purchase_report_state.set_quantity(item_code, supplier, new_qty);
 			update_quantity_display(item_code, supplier, new_qty);
+
 			dialog.hide();
+
 			frappe.show_alert({
 				message: __('Quantity updated to {0}', [new_qty]),
 				indicator: 'green',
@@ -190,49 +321,35 @@ window.edit_quantity = (button) => {
 	dialog.show();
 };
 
-function save_edited_quantity(key, qty) {
-	edited_quantities[key] = qty;
-}
-
 function update_quantity_display(item_code, supplier, new_qty) {
-	const editIcon = document.querySelector(
+	const edit_icon = document.querySelector(
 		`span.edit-qty-icon[data-item-code="${item_code}"][data-supplier="${supplier}"]`,
 	);
 
-	if (editIcon) {
-		const wrapper = editIcon.closest('.qty-edit-wrapper');
-		if (wrapper) {
-			const quantitySpan = wrapper.querySelector('span:first-child');
-			if (quantitySpan) {
-				quantitySpan.textContent = new_qty;
-			}
-		}
+	if (!edit_icon) return;
 
-		// Automatically check the checkbox for this row
-		const row = editIcon.closest('.dt-row');
-		if (row) {
-			const checkbox = row.querySelector(
-				'.dt-cell--col-0 input[type="checkbox"]',
-			);
-			if (checkbox && !checkbox.checked) {
-				checkbox.click();
-			}
+	const wrapper = edit_icon.closest('.qty-edit-wrapper');
+	if (wrapper) {
+		const quantity_span = wrapper.querySelector('span:first-child');
+		if (quantity_span) {
+			quantity_span.textContent = new_qty;
+		}
+	}
+
+	const row = edit_icon.closest('.dt-row');
+	if (row) {
+		const checkbox = row.querySelector(
+			'.dt-cell--col-0 input[type="checkbox"]',
+		);
+		if (checkbox && !checkbox.checked) {
+			checkbox.click();
 		}
 	}
 }
 
 async function create_purchase_orders(selected_items, report) {
-	// Apply edited quantities to selected items
-	const items_with_edited_qty = selected_items.map((item) => {
-		const key = `${item.item_code}|${item.supplier}`;
-		if (edited_quantities[key] !== undefined) {
-			return {
-				...item,
-				allocated_qty: edited_quantities[key],
-			};
-		}
-		return item;
-	});
+	const items_with_edited_qty =
+		purchase_report_state.get_items_with_edited_quantities(selected_items);
 
 	frappe.show_alert({
 		message: __('Creating Purchase Orders...'),
@@ -274,8 +391,7 @@ async function create_purchase_orders(selected_items, report) {
 				});
 			}
 
-			// Reset edited quantities after successful PO creation
-			edited_quantities = {};
+			purchase_report_state.reset();
 			report.refresh();
 		}
 	} catch (error) {

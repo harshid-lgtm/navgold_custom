@@ -7,6 +7,7 @@ import math
 import frappe
 from frappe import _
 from frappe.query_builder import DocType
+from frappe.query_builder.functions import Sum
 from frappe.utils import flt
 from frappe.utils.caching import redis_cache
 
@@ -29,6 +30,12 @@ def get_columns(data: list[dict]) -> list[dict]:
 			"fieldtype": "Link",
 			"options": "Item",
 			"width": 150,
+		},
+		{
+			"label": _("Free Qty"),
+			"fieldname": "free_qty",
+			"fieldtype": "Float",
+			"width": 120,
 		},
 		{
 			"label": _("Total Required Qty"),
@@ -114,6 +121,28 @@ def get_columns(data: list[dict]) -> list[dict]:
 	return columns
 
 
+def get_free_qty_map(item_codes: list[str]) -> dict[str, float]:
+	if not item_codes:
+		return {}
+
+	bin_dt = DocType("Bin")
+	warehouse_dt = DocType("Warehouse")
+
+	result = (
+		frappe.qb.from_(bin_dt)
+		.left_join(warehouse_dt)
+		.on(bin_dt.warehouse == warehouse_dt.name)
+		.select(
+			bin_dt.item_code,
+			(Sum(bin_dt.actual_qty) - Sum(bin_dt.reserved_qty)).as_("free_qty"),
+		)
+		.where((bin_dt.item_code.isin(item_codes)) & (warehouse_dt.is_rejected_warehouse == 0))
+		.groupby(bin_dt.item_code)
+	).run(as_dict=True)
+
+	return {r["item_code"]: flt(r.get("free_qty", 0)) for r in result}
+
+
 # Adds supplier to list until the required qty is satified
 def get_data(filters):
 	material_request = DocType("Material Request")
@@ -154,8 +183,7 @@ def get_data(filters):
 		.select(
 			supplier_item_price_and_stock.item,
 			supplier_item_price_and_stock.supplier,
-			supplier_item_price_and_stock.unit_price,
-			supplier_item_price_and_stock.price,
+			supplier_item_price_and_stock.price.as_("unit_price"),
 			supplier_item_price_and_stock.stock_qty,
 			supplier_item_price_and_stock.uom,
 			supplier_item_price_and_stock.name,
@@ -180,6 +208,8 @@ def get_data(filters):
 	if supplier_list:
 		offers_by_parent = get_offers_by_supplier(supplier_list)
 
+	free_qty_map = get_free_qty_map(list(items_needed.keys()))
+
 	results = []
 
 	item_remaining = {item: qty for item, qty in items_needed.items()}
@@ -202,6 +232,7 @@ def get_data(filters):
 
 		row = {
 			"item_code": item_code,
+			"free_qty": free_qty_map.get(item_code, 0),
 			"total_required_qty": total_required,
 			"supplier": s["supplier"],
 			"supplier_uom": s["uom"],
