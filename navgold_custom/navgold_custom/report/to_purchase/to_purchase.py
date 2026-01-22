@@ -38,6 +38,12 @@ def get_columns(data: list[dict]) -> list[dict]:
 			"width": 150,
 		},
 		{
+			"label": _("Actual Qty"),
+			"fieldname": "actual_qty",
+			"fieldtype": "Float",
+			"width": 120,
+		},
+		{
 			"label": _("Free Qty"),
 			"fieldname": "free_qty",
 			"fieldtype": "Float",
@@ -127,7 +133,7 @@ def get_columns(data: list[dict]) -> list[dict]:
 	return columns
 
 
-def get_free_qty_map(item_codes: list[str]) -> dict[str, float]:
+def get_free_qty_map(item_codes: list[str]) -> dict[str, dict[str, float]]:
 	if not item_codes:
 		return {}
 
@@ -140,13 +146,20 @@ def get_free_qty_map(item_codes: list[str]) -> dict[str, float]:
 		.on(bin_dt.warehouse == warehouse_dt.name)
 		.select(
 			bin_dt.item_code,
+			Sum(bin_dt.actual_qty).as_("actual_qty"),
 			(Sum(bin_dt.actual_qty) - Sum(bin_dt.reserved_qty)).as_("free_qty"),
 		)
 		.where((bin_dt.item_code.isin(item_codes)) & (warehouse_dt.is_rejected_warehouse == 0))
 		.groupby(bin_dt.item_code)
 	).run(as_dict=True)
 
-	return {r["item_code"]: flt(r.get("free_qty", 0)) for r in result}
+	return {
+		r["item_code"]: {
+			"actual_qty": flt(r.get("actual_qty", 0)),
+			"free_qty": flt(r.get("free_qty", 0)),
+		}
+		for r in result
+	}
 
 
 # Adds supplier to list until the required qty is satified
@@ -240,10 +253,12 @@ def get_data(filters):
 
 		offers = offers_by_parent.get(s["name"], [])
 
+		item_qty_data = free_qty_map.get(item_code, {})
 		row = {
 			"item_code": item_code,
 			"description": s["description"],
-			"free_qty": free_qty_map.get(item_code, 0),
+			"actual_qty": item_qty_data.get("actual_qty", 0),
+			"free_qty": item_qty_data.get("free_qty", 0),
 			"total_required_qty": total_required,
 			"supplier": s["supplier"],
 			"supplier_uom": s["uom"],
