@@ -163,17 +163,24 @@ class SupplierStockImport(Document):
 	def get_uom_from_barcode_and_conversion_factor(self, barcode, conversion_factor):
 		item = self.get_item_from_barcode(barcode)
 		if not item:
-			return frappe.db.get_value(
-				"UOM",
-				{"custom_default_conversion_factor": conversion_factor},
-				"name",
-			)
+			frappe.throw("Item is required")
 
-		return frappe.db.get_value(
+		uom = frappe.db.get_value(
 			"UOM Conversion Detail",
 			{"parent": item, "conversion_factor": conversion_factor},
 			"uom",
 		)
+		if uom:
+			return uom
+		# Fallback add uom to item
+		uom = frappe.db.get_value(
+			"UOM",
+			{"custom_default_conversion_factor": conversion_factor},
+			"name",
+		)
+		item_doc = frappe.get_cached_doc("Item", item)
+		item_doc.append("uoms", {"uom": uom, "conversion_factor": conversion_factor}).save()
+		return uom
 
 	def process_row(self, row, row_idx):
 		supplier_part_number = row[0] if len(row) > 0 else None
