@@ -5,7 +5,8 @@
 # Modifications and additions
 # Copyright (c) 2025, BWH Studios and contributors
 # For license information, please see license.txt
-from requests import request
+from frappe.integrations.utils import make_request as frappe_make_request
+from frappe.utils import get_request_session
 
 # https://github.com/amzn/selling-partner-api-docs/blob/main/guides/en-US/developer-guide/SellingPartnerApiDeveloperGuide.md#selling-partner-api-endpoints
 MARKETPLACES = {
@@ -96,12 +97,20 @@ class SPAPI:
 			"refresh_token": self.refresh_token,
 		}
 
-		response = request(method="POST", url=self.AUTH_URL, data=data)
-		result = response.json()
-		if response.status_code == 200:
-			return result.get("access_token")
-		exception = SPAPIError(error=result.get("error"), error_description=result.get("error_description"))
-		raise exception
+		try:
+			result = frappe_make_request("POST", self.AUTH_URL, data=data)
+			if result and result.get("access_token"):
+				return result.get("access_token")
+			raise SPAPIError(
+				error=result.get("error", "UnknownError"),
+				error_description=result.get("error_description", "Failed to get access token"),
+			)
+		except Exception as e:
+			if isinstance(e, SPAPIError):
+				raise
+			raise SPAPIError(
+				error="AuthenticationError", error_description=f"Failed to authenticate with Amazon: {e!s}"
+			)
 
 	def get_headers(self) -> dict:
 		return {"x-amz-access-token": self.get_access_token()}
@@ -120,8 +129,9 @@ class SPAPI:
 
 		url = self.endpoint + self.BASE_URI + append_to_base_uri
 
-		response = request(method=method, url=url, params=params, data=data, headers=self.get_headers())
-		return response.json()
+		return frappe_make_request(
+			method=method, url=url, params=params, data=data, headers=self.get_headers()
+		)
 
 	def list_to_dict(self, key: str, values: list, data: dict) -> None:
 		if values and isinstance(values, list):
@@ -272,3 +282,173 @@ class Util:
 			if not dict[key]:
 				del dict[key]
 		return dict
+
+
+class Feeds(SPAPI):
+	"""
+	Amazon Feeds API for pricing submissions.
+
+	The Feeds API lets you upload information to Amazon on behalf of a selling partner.
+	This is used to submit pricing updates to Amazon.
+
+	Flow:
+	1. Create a feed document (get upload URL)
+	2. Upload feed content to the URL
+	3. Create the feed (submit for processing)
+	4. Poll feed status until complete
+	"""
+
+	BASE_URI = "/feeds/2021-06-30/"
+
+	def create_feed_document(self, content_type: str = "application/json") -> dict:
+		"""
+		Create a feed document and get a pre-signed URL for upload.
+
+		Args:
+			content_type: Content type of the feed (default: application/json)
+
+		Returns:
+			Dictionary containing:
+			- feedDocumentId: The feed document identifier
+			- url: Pre-signed URL for uploading content
+		"""
+		url = self.endpoint + self.BASE_URI + "documents"
+
+		try:
+			result = frappe_make_request(
+				method="POST",
+				url=url,
+				json={"contentType": content_type},
+				headers={**self.get_headers(), "Content-Type": "application/json"},
+			)
+			return result
+		except Exception as e:
+			raise SPAPIError(
+				error="CreateFeedDocumentError", error_description=f"Failed to create feed document: {e!s}"
+			)
+
+	def upload_feed_content(
+		self, url: str, content: str | bytes, content_type: str = "application/json"
+	) -> bool:
+		"""
+		Upload feed content to the pre-signed URL (S3).
+
+		Args:
+			url: Pre-signed URL from create_feed_document
+			content: The feed content to upload (JSON string or bytes)
+			content_type: Content type of the feed
+
+		Returns:
+			True if upload successful
+		"""
+		if isinstance(content, str):
+			content = content.encode("utf-8")
+
+		try:
+			# Use Frappe's request session for S3 upload
+			session = get_request_session()
+			response = session.put(url=url, data=content, headers={"Content-Type": content_type})
+			response.raise_for_status()
+			return True
+		except Exception as e:
+			raise SPAPIError(
+				error="UploadFeedError", error_description=f"Failed to upload feed content: {e!s}"
+			)
+
+	def create_feed(self, feed_type: str, feed_document_id: str, marketplace_ids: list | None = None) -> dict:
+		"""
+		Submit the feed for processing.
+
+		Args:
+			feed_type: The type of feed (e.g., JSON_LISTINGS_FEED)
+			feed_document_id: The feed document ID from create_feed_document
+			marketplace_ids: List of marketplace IDs (uses default if not provided)
+
+		Returns:
+			Dictionary containing:
+			- feedId: The feed identifier for tracking
+		"""
+		if not marketplace_ids:
+			marketplace_ids = [self.marketplace_id]
+
+		url = self.endpoint + self.BASE_URI + "feeds"
+
+		try:
+			result = frappe_make_request(
+				method="POST",
+				url=url,
+				json={
+					"feedType": feed_type,
+					"marketplaceIds": marketplace_ids,
+					"inputFeedDocumentId": feed_document_id,
+				},
+				headers={**self.get_headers(), "Content-Type": "application/json"},
+			)
+			return result
+		except Exception as e:
+			raise SPAPIError(error="CreateFeedError", error_description=f"Failed to create feed: {e!s}")
+
+	def get_feed(self, feed_id: str) -> dict:
+		"""
+		Get the status of a feed.
+
+		Args:
+			feed_id: The feed ID from create_feed
+
+		Returns:
+			Dictionary containing feed status and details
+		"""
+		append_to_base_uri = f"feeds/{feed_id}"
+		return self.make_request(append_to_base_uri=append_to_base_uri)
+
+	def get_feed_document(self, feed_document_id: str) -> dict:
+		"""
+		Get feed document details including download URL for results.
+
+		Args:
+			feed_document_id: The feed document ID
+
+		Returns:
+			Dictionary containing document details and download URL
+		"""
+		append_to_base_uri = f"documents/{feed_document_id}"
+		return self.make_request(append_to_base_uri=append_to_base_uri)
+
+	def get_feeds(
+		self,
+		feed_types: list | None = None,
+		marketplace_ids: list | None = None,
+		page_size: int = 10,
+		processing_statuses: list | None = None,
+		created_since: str | None = None,
+		created_until: str | None = None,
+		next_token: str | None = None,
+	) -> dict:
+		"""
+		List feeds with optional filters.
+
+		Args:
+			feed_types: Filter by feed types
+			marketplace_ids: Filter by marketplace IDs
+			page_size: Number of results per page (max 100)
+			processing_statuses: Filter by status (IN_QUEUE, IN_PROGRESS, DONE, CANCELLED, FATAL)
+			created_since: ISO datetime string
+			created_until: ISO datetime string
+			next_token: Token for pagination
+
+		Returns:
+			Dictionary containing feeds list and pagination info
+		"""
+		data = {
+			"pageSize": page_size,
+			"nextToken": next_token,
+			"createdSince": created_since,
+			"createdUntil": created_until,
+		}
+
+		self.list_to_dict("feedTypes", feed_types, data)
+		self.list_to_dict("marketplaceIds", marketplace_ids or [self.marketplace_id], data)
+		self.list_to_dict("processingStatuses", processing_statuses, data)
+
+		append_to_base_uri = "feeds"
+		return self.make_request(append_to_base_uri=append_to_base_uri, params=data)

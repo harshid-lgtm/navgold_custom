@@ -8,6 +8,7 @@
 		"is_active",
 		"section_break_4",
 		"client_id",
+		"merchant_id",
 		"client_secret",
 		"country",
 		"column_break_1",
@@ -268,11 +269,17 @@
 			"fieldtype": "Date",
 			"label": "Return Invoice Stock Adjustment Before",
 			"mandatory_depends_on": "eval: doc.adjust_stock_for_returns"
+		},
+		{
+			"fieldname": "merchant_id",
+			"fieldtype": "Data",
+			"label": "Merchant ID",
+			"reqd": 1
 		}
 	],
 	"links": [],
-	"modified": "2025-11-08 11:25:49.215351",
-	"modified_by": "Administrator",
+	"modified": "2026-02-02 10:42:26.728127",
+	"modified_by": "rahul@buildwithhussain.com",
 	"module": "Navgold Custom",
 	"name": "Amazon SP API Settings",
 	"owner": "Administrator",

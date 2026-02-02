@@ -1,0 +1,82 @@
+{
+	"actions": [],
+	"allow_rename": 1,
+	"creation": "2026-01-20 10:00:00.000000",
+	"doctype": "DocType",
+	"editable_grid": 1,
+	"engine": "InnoDB",
+	"field_order": [
+		"strategy_type",
+		"strategy_name",
+		"column_break_item",
+		"min_margin",
+		"max_margin",
+		"repricer_rule",
+		"cost_set_template"
+	],
+	"fields": [
+		{
+			"fieldname": "strategy_type",
+			"fieldtype": "Select",
+			"in_list_view": 1,
+			"label": "Strategy Type",
+			"options": "FBA\nSFP\nBackorder\nDefault",
+			"reqd": 1
+		},
+		{
+			"fieldname": "strategy_name",
+			"fieldtype": "Data",
+			"in_list_view": 1,
+			"label": "Strategy Name",
+			"reqd": 1
+		},
+		{
+			"fieldname": "column_break_item",
+			"fieldtype": "Column Break"
+		},
+		{
+			"default": "0",
+			"fieldname": "min_margin",
+			"fieldtype": "Percent",
+			"in_list_view": 1,
+			"label": "Min Margin %",
+			"reqd": 1
+		},
+		{
+			"default": "0",
+			"fieldname": "max_margin",
+			"fieldtype": "Percent",
+			"in_list_view": 1,
+			"label": "Max Margin %",
+			"reqd": 1
+		},
+		{
+			"fieldname": "repricer_rule",
+			"fieldtype": "Link",
+			"label": "Repricer Rule",
+			"options": "Amazon Repricer Rule"
+		},
+		{
+			"description": "Cost template to apply to this strategy",
+			"fieldname": "cost_set_template",
+			"fieldtype": "Link",
+			"label": "Cost Set Template",
+			"options": "Amazon Cost Set Template"
+		}
+	],
+	"grid_page_length": 50,
+	"index_web_pages_for_search": 1,
+	"istable": 1,
+	"links": [],
+	"modified": "2026-01-20 10:00:00.000000",
+	"modified_by": "Administrator",
+	"module": "Navgold Custom",
+	"name": "Amazon Strategy Template Item",
+	"owner": "Administrator",
+	"permissions": [],
+	"row_format": "Dynamic",
+	"rows_threshold_for_grid_search": 20,
+	"sort_field": "creation",
+	"sort_order": "ASC",
+	"states": []
+}

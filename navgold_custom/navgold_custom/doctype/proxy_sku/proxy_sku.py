@@ -17,7 +17,9 @@ class ProxySKU(Document):
 
 		asin: DF.Link | None
 		is_active: DF.Check
+		is_fba: DF.Check
 		item: DF.Link | None
+		last_transfer_rate: DF.Currency
 		naming_series: DF.Data | None
 		uom: DF.Link | None
 	# end: auto-generated types

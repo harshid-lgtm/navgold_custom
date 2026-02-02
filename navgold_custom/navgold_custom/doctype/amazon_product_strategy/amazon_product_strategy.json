@@ -1,0 +1,175 @@
+{
+	"actions": [],
+	"allow_rename": 1,
+	"autoname": "format:{proxy_sku}-{strategy_name}",
+	"creation": "2026-01-20 10:00:00",
+	"doctype": "DocType",
+	"engine": "InnoDB",
+	"field_order": [
+		"strategy_name",
+		"proxy_sku",
+		"is_active",
+		"column_break_strategy",
+		"repricer_rule",
+		"margin_section",
+		"min_margin",
+		"max_margin",
+		"column_break_margin",
+		"calculated_min_price",
+		"calculated_max_price",
+		"reverse_calc_section",
+		"target_price",
+		"calculated_margin",
+		"calculated_profit",
+		"costs_section",
+		"costs"
+	],
+	"fields": [
+		{
+			"fieldname": "strategy_name",
+			"fieldtype": "Data",
+			"in_list_view": 1,
+			"in_standard_filter": 1,
+			"label": "Strategy Name",
+			"reqd": 1
+		},
+		{
+			"fieldname": "proxy_sku",
+			"fieldtype": "Link",
+			"in_list_view": 1,
+			"in_standard_filter": 1,
+			"label": "Proxy SKU",
+			"options": "Proxy SKU",
+			"reqd": 1
+		},
+		{
+			"default": "1",
+			"fieldname": "is_active",
+			"fieldtype": "Check",
+			"in_list_view": 1,
+			"label": "Is Active"
+		},
+		{
+			"fieldname": "column_break_strategy",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "repricer_rule",
+			"fieldtype": "Link",
+			"in_list_view": 1,
+			"label": "Repricer Rule",
+			"options": "Amazon Repricer Rule"
+		},
+		{
+			"fieldname": "margin_section",
+			"fieldtype": "Section Break",
+			"label": "Margin Settings"
+		},
+		{
+			"default": "0",
+			"description": "Minimum margin percentage (e.g., 10 for 10%)",
+			"fieldname": "min_margin",
+			"fieldtype": "Percent",
+			"in_list_view": 1,
+			"label": "Min Margin %",
+			"reqd": 1
+		},
+		{
+			"default": "0",
+			"description": "Maximum margin percentage (e.g., 30 for 30%)",
+			"fieldname": "max_margin",
+			"fieldtype": "Percent",
+			"in_list_view": 1,
+			"label": "Max Margin %",
+			"reqd": 1
+		},
+		{
+			"fieldname": "column_break_margin",
+			"fieldtype": "Column Break"
+		},
+		{
+			"description": "Auto-calculated based on costs and min margin",
+			"fieldname": "calculated_min_price",
+			"fieldtype": "Currency",
+			"label": "Calculated Min Price",
+			"precision": "2",
+			"read_only": 1
+		},
+		{
+			"description": "Auto-calculated based on costs and max margin",
+			"fieldname": "calculated_max_price",
+			"fieldtype": "Currency",
+			"label": "Calculated Max Price",
+			"precision": "2",
+			"read_only": 1
+		},
+		{
+			"collapsible": 1,
+			"description": "Enter a target selling price to see what margin it would achieve",
+			"fieldname": "reverse_calc_section",
+			"fieldtype": "Section Break",
+			"label": "Reverse Price Calculator"
+		},
+		{
+			"description": "Enter a price to calculate the margin you would achieve",
+			"fieldname": "target_price",
+			"fieldtype": "Currency",
+			"label": "Target Price",
+			"precision": "2"
+		},
+		{
+			"description": "Margin achieved at target price",
+			"fieldname": "calculated_margin",
+			"fieldtype": "Percent",
+			"label": "Calculated Margin %",
+			"read_only": 1
+		},
+		{
+			"description": "Profit achieved at target price",
+			"fieldname": "calculated_profit",
+			"fieldtype": "Currency",
+			"label": "Calculated Profit",
+			"precision": "2",
+			"read_only": 1
+		},
+		{
+			"fieldname": "costs_section",
+			"fieldtype": "Section Break",
+			"label": "Costs"
+		},
+		{
+			"fieldname": "costs",
+			"fieldtype": "Table",
+			"label": "Costs",
+			"options": "Amazon Product Cost"
+		}
+	],
+	"grid_page_length": 50,
+	"index_web_pages_for_search": 1,
+	"links": [],
+	"modified": "2026-02-02 12:00:00.000000",
+	"modified_by": "Administrator",
+	"module": "Navgold Custom",
+	"name": "Amazon Product Strategy",
+	"naming_rule": "Expression (old style)",
+	"owner": "Administrator",
+	"permissions": [
+		{
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "System Manager",
+			"share": 1,
+			"write": 1
+		}
+	],
+	"row_format": "Dynamic",
+	"rows_threshold_for_grid_search": 20,
+	"sort_field": "creation",
+	"sort_order": "ASC",
+	"states": []
+}

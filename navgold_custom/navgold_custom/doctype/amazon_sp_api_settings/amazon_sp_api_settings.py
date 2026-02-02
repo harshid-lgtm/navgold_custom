@@ -16,6 +16,66 @@ from frappe.utils import add_days, get_date_str, getdate, now_datetime, today
 
 
 class AmazonSPAPISettings(Document):
+	# begin: auto-generated types
+	# This code is auto-generated. Do not modify anything in this block.
+
+	from typing import TYPE_CHECKING
+
+	if TYPE_CHECKING:
+		from frappe.types import DF
+
+		adjust_stock_for_returns: DF.Check
+		afn_warehouse: DF.Link
+		after_date: DF.Date
+		client_id: DF.Data
+		client_secret: DF.Password
+		company: DF.Link
+		country: DF.Literal[
+			"",
+			"CA",
+			"US",
+			"MX",
+			"BR",
+			"ES",
+			"GB",
+			"FR",
+			"NL",
+			"DE",
+			"IT",
+			"SE",
+			"PL",
+			"EG",
+			"TR",
+			"SA",
+			"AE",
+			"IN",
+			"SG",
+			"AU",
+			"JP",
+		]
+		create_item_if_not_exists: DF.Check
+		customer_group: DF.Link
+		customer_type: DF.Literal["Individual", "Company"]
+		enable_sync: DF.Check
+		is_active: DF.Check
+		is_old_data_migrated: DF.Check
+		map_state_data: DF.Check
+		market_place_account_group: DF.Link
+		max_retry_limit: DF.Int
+		merchant_id: DF.Data
+		mfn_postage_fee_account_head: DF.Link
+		parent_item_group: DF.Link
+		price_list: DF.Link
+		refresh_token: DF.Text
+		return_invoice_stock_adjustment_before: DF.Date | None
+		sync_selected_date_only: DF.Check
+		taxes_charges: DF.Check
+		temporary_order_warehouse: DF.Link | None
+		temporary_stock_transfer_required: DF.Check
+		territory: DF.Link
+		warehouse: DF.Link
+	# end: auto-generated types
+
 	def validate(self):
 		self.validate_after_date()
 
@@ -42,25 +102,35 @@ class AmazonSPAPISettings(Document):
 			get_orders,
 		)
 
-		if self.is_active == 1:
-			job_name = f"Get Amazon Orders - {self.name}"
+		# frappe.throw("helo")
+		get_orders(amz_setting_name=self.name, last_updated_after=self.after_date)
+		# if self.is_active == 1:
+		# 	job_name = f"Get Amazon Orders - {self.name}"
 
-			if frappe.db.get_all("RQ Job", {"job_name": job_name, "status": ["in", ["queued", "started"]]}):
-				return frappe.msgprint(_("The order details are currently being fetched in the background."))
+		# 	if frappe.db.get_all("RQ Job", {"job_name": job_name, "status": ["in", ["queued", "started"]]}):
+		# 		return frappe.msgprint(_("The order details are currently being fetched in the background."))
 
-			frappe.enqueue(
-				job_name=job_name,
-				method=get_orders,
-				amz_setting_name=self.name,
-				last_updated_after=self.after_date,
-				sync_selected_date_only=self.sync_selected_date_only,
-				timeout=6000,
-				now=frappe.flags.in_test,
-			)
+		# 	frappe.enqueue(
+		# 		job_name=job_name,
+		# 		method=get_orders,
+		# 		amz_setting_name=self.name,
+		# 		last_updated_after=self.after_date,
+		# 		sync_selected_date_only=self.sync_selected_date_only,
+		# 		timeout=6000,
+		# 		now=frappe.flags.in_test,
+		# 	)
 
-			frappe.msgprint(_("Order details will be fetched in the background."))
-		else:
-			frappe.msgprint(_("Please enable the Amazon SP API Settings {0}.").format(frappe.bold(self.name)))
+		# 	frappe.msgprint(_("Order details will be fetched in the background."))
+		# else:
+		# 	frappe.msgprint(_("Please enable the Amazon SP API Settings {0}.").format(frappe.bold(self.name)))
+
+	def get_marketplace_id(self) -> str:
+		from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import MARKETPLACES
+
+		for region_data in MARKETPLACES.values():
+			if self.country in region_data:
+				return region_data[self.country]
+		return ""
 
 
 # Called via a hook in every hour.
