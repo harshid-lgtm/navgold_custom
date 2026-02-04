@@ -114,7 +114,7 @@ class AmazonProductStrategy(Document):
 			cost.is_active = 1 if cost.rank == 1 else 0
 
 			if cost.source == "Supplier-Sync":
-				item = frappe.db.get_value("Proxy Sku", self.proxy_sku, "item")
+				item = frappe.db.get_value("Proxy SKU", self.proxy_sku, "item")
 				supplier_price = frappe.db.get_value(
 					"Supplier Item Price and Stock",
 					{"item": item, "purchase_blocked": 0, "stock_qty": [">", 0]},
@@ -124,7 +124,7 @@ class AmazonProductStrategy(Document):
 				cost.value = flt(supplier_price)
 
 			if cost.source == "PO-Sync":
-				item = frappe.db.get_value("Proxy Sku", self.proxy_sku, "item")
+				item = frappe.db.get_value("Proxy SKU", self.proxy_sku, "item")
 				po_cost = frappe.db.get_value(
 					"Purchase Order Item",
 					{"item_code": item, "docstatus": 1},
@@ -134,7 +134,7 @@ class AmazonProductStrategy(Document):
 				cost.value = flt(po_cost)
 
 			if cost.source == "FBA-Transfer":
-				last_transfer_cost = frappe.db.get_value("Proxy Sku", self.proxy_sku, "last_transfer_rate")
+				last_transfer_cost = frappe.db.get_value("Proxy SKU", self.proxy_sku, "last_transfer_rate")
 				cost.value = flt(last_transfer_cost)
 			if cost.source == "Auto-Sync":
 				value = frappe.db.get_value("Cost Sub Type", cost.cost_sub_type, "default_value")
