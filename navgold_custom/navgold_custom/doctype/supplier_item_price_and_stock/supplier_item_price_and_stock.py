@@ -6,6 +6,7 @@ from collections import defaultdict
 import frappe
 from frappe import DoesNotExistError, _
 from frappe.model.document import Document
+from frappe.utils.data import flt
 
 
 class SupplierItemPriceandStock(Document):
@@ -115,11 +116,16 @@ def update_supplier_rank():
 def _update_supplier_rank():
 	records = frappe.db.get_all(
 		"Supplier Item Price and Stock",
-		fields=["name", "item", "uom", "price", "purchase_blocked"],
+		fields=["name", "item", "uom", "price", "purchase_blocked", "supplier"],
 	)
 
 	if not records:
 		return
+
+	supplier_ranks = {}
+	supplier_ranks = {
+		s.name: s.custom_rank or 0 for s in frappe.get_all("Supplier", fields=["name", "custom_rank"])
+	}
 
 	groups = defaultdict(list)
 	blocked = []
@@ -128,6 +134,7 @@ def _update_supplier_rank():
 		if record.purchase_blocked:
 			blocked.append(record.name)
 		else:
+			record.supplier_custom_rank = supplier_ranks.get(record.supplier, 0)
 			groups[(record.item)].append(record)
 
 	try:
@@ -146,21 +153,36 @@ def _update_supplier_rank():
 
 
 def update_rank_by_unit_price(group_records):
-	"""After sorting we use for loop to handle ties, if the sorted list is [10, 10, 20, 30, 30], ranks should be [1, 1, 2, 3, 3] instead of [1, 2, 3, 4, 5]"""
+	"""
+	Rank suppliers by price, using supplier's custom_rank as tiebreaker.
 
-	group_records.sort(key=lambda x: x.price or 0)
+	Sorting logic:
+	- Primary: price (ascending, lowest price = best rank)
+	- Secondary (tiebreaker): supplier_custom_rank (ascending, but 0 goes last)
+
+	For ties handling: if sorted prices are [10, 10, 20, 30, 30], ranks are [1, 1, 2, 3, 3]
+	With custom_rank tiebreaker, same-price items with different custom_ranks get sequential ranks.
+	"""
+
+	def sort_key(record):
+		price = record.price or 0
+		custom_rank = record.supplier_custom_rank or 0
+		custom_rank_sort = flt("inf") if custom_rank == 0 else custom_rank
+		return (price, custom_rank_sort)
+
+	group_records.sort(key=sort_key)
 	doc_updates = {}
 	rank = 1
-	prev_price = None
+	prev_sort_key = None
 
 	for i, record in enumerate(group_records):
-		price = record.price or 0
+		current_sort_key = sort_key(record)
 
-		if prev_price is not None and price > prev_price:
+		if prev_sort_key is not None and current_sort_key > prev_sort_key:
 			rank = i + 1
 
 		doc_updates[record.name] = {"rank": rank}
-		prev_price = price
+		prev_sort_key = current_sort_key
 
 	frappe.db.bulk_update(
 		"Supplier Item Price and Stock",
