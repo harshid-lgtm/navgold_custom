@@ -4,6 +4,8 @@
 import frappe
 from frappe.model.document import Document
 
+from navgold_custom.navgold_custom.amazon_pricing.strategy_selector import select_strategy
+
 
 class AmazonProductPricing(Document):
 	# begin: auto-generated types
@@ -45,7 +47,6 @@ class AmazonProductPricing(Document):
 
 	def select_active_strategy(self):
 		"""Select the active strategy based on stock/fulfillment conditions"""
-		from navgold_custom.navgold_custom.amazon_pricing.strategy_selector import select_strategy
 
 		self.active_strategy = select_strategy(self)
 
