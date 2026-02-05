@@ -179,6 +179,7 @@ frappe.ui.form.on('Purchase Receipt', {
 				args: {
 					supplier: frm.doc.supplier,
 					item_code,
+					current_pr_items: frm.doc.items || [],
 				},
 			});
 
@@ -325,7 +326,7 @@ frappe.ui.form.on('Purchase Receipt', {
 								await frm.events.map_po_item_to_pr(
 									frm,
 									po_data.po_name,
-									po_data.po_item_name,
+									item_code,
 									values.qty_input,
 									values.warehouse,
 									values.batch_no,
@@ -339,7 +340,7 @@ frappe.ui.form.on('Purchase Receipt', {
 						await frm.events.map_po_item_to_pr(
 							frm,
 							po_data.po_name,
-							po_data.po_item_name,
+							item_code,
 							values.qty_input,
 							values.warehouse,
 							values.batch_no,
@@ -360,7 +361,7 @@ frappe.ui.form.on('Purchase Receipt', {
 	async map_po_item_to_pr(
 		frm,
 		po_name,
-		po_item_name,
+		item_code,
 		qty,
 		warehouse,
 		batch_no,
@@ -374,7 +375,7 @@ frappe.ui.form.on('Purchase Receipt', {
 					'navgold_custom.navgold_custom.custom_script.purchase_receipt.purchase_receipt.add_scanned_po_item_to_pr',
 				args: {
 					po_name,
-					po_item_name,
+					item_code,
 					qty,
 					warehouse,
 					batch_no,
