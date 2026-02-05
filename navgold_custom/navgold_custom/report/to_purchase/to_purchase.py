@@ -8,7 +8,7 @@ import frappe
 from frappe import _
 from frappe.query_builder import DocType
 from frappe.query_builder.functions import Sum
-from frappe.utils import flt
+from frappe.utils import ceil, flt
 from frappe.utils.caching import redis_cache
 
 from navgold_custom.navgold_custom.utils import get_free_qty_map
@@ -373,7 +373,7 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 			continue
 
 		allocated_qty_in_supplier_uom = (
-			math.ceil(allocated_qty / conversion_factor) if conversion_factor > 0 else allocated_qty
+			ceil(allocated_qty / conversion_factor) if conversion_factor > 0 else allocated_qty
 		)
 
 		supplier_uom_remaining = allocated_qty_in_supplier_uom
@@ -382,7 +382,11 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 			if supplier_uom_remaining <= 0:
 				break
 
-			qty_to_order = min(allocated_qty_in_supplier_uom, supplier_uom_remaining)
+			mr_pending_in_supplier_uom = (
+				ceil(mr["pending_qty"] / conversion_factor) if conversion_factor > 0 else mr["pending_qty"]
+			)
+
+			qty_to_order = min(mr_pending_in_supplier_uom, supplier_uom_remaining)
 
 			if qty_to_order <= 0:
 				continue
