@@ -30,18 +30,21 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 		patches = [
 			{
 				"op": "replace",
-				"path": "/standard_price",
-				"value": {"amount": round(pricing.current_min_price, 2), "currency": "GBP"},
-			},
-			{
-				"op": "replace",
-				"path": "/minimum_seller_allowed_price",
-				"value": {"amount": round(pricing.current_min_price, 2), "currency": "GBP"},
-			},
-			{
-				"op": "replace",
-				"path": "/maximum_seller_allowed_price",
-				"value": {"amount": round(pricing.current_max_price, 2), "currency": "GBP"},
+				"path": "/attributes/purchasable_offer",
+				"value": [
+					{
+						"audience": "ALL",
+						"our_price": [
+							{"schedule": [{"value_with_tax": round(pricing.current_max_price, 2)}]}
+						],
+						"minimum_seller_allowed_price": [
+							{"schedule": [{"value_with_tax": round(pricing.current_min_price, 2)}]}
+						],
+						"maximum_seller_allowed_price": [
+							{"schedule": [{"value_with_tax": round(pricing.current_max_price, 2)}]}
+						],
+					}
+				],
 			},
 		]
 
@@ -107,7 +110,7 @@ def validate_pricing_feed(json_content: str) -> dict:
 		if not patches:
 			errors.append(f"Message {i}: No patches found")
 
-		has_standard_price = False
+		has_purchasable_offer = False
 		for j, patch in enumerate(patches, start=1):
 			if not patch.get("op"):
 				errors.append(f"Message {i}, Patch {j}: Missing op")
@@ -117,17 +120,18 @@ def validate_pricing_feed(json_content: str) -> dict:
 				errors.append(f"Message {i}, Patch {j}: Missing value")
 			else:
 				value = patch["value"]
-				if not isinstance(value, dict):
-					errors.append(f"Message {i}, Patch {j}: value must be an object")
-				elif "amount" not in value:
-					errors.append(f"Message {i}, Patch {j}: Missing amount in value")
-				elif "currency" not in value:
-					errors.append(f"Message {i}, Patch {j}: Missing currency in value")
+				if not isinstance(value, list):
+					errors.append(f"Message {i}, Patch {j}: value must be an array")
+				elif len(value) == 0:
+					errors.append(f"Message {i}, Patch {j}: value array is empty")
 
-			if patch.get("path") == "/standard_price":
-				has_standard_price = True
+			if patch.get("path") == "/attributes/purchasable_offer":
+				has_purchasable_offer = True
+				offer = patch["value"][0] if isinstance(patch.get("value"), list) and patch["value"] else {}
+				if not offer.get("our_price"):
+					errors.append(f"Message {i}: Missing our_price in purchasable_offer")
 
-		if not has_standard_price:
-			errors.append(f"Message {i}: Missing standard_price patch")
+		if not has_purchasable_offer:
+			errors.append(f"Message {i}: Missing purchasable_offer patch")
 
 	return {"valid": len(errors) == 0, "message_count": message_count, "errors": errors}
