@@ -248,9 +248,13 @@ doctype_js = {
 		"navgold_custom/custom_script/purchase_receipt/purchase_receipt.js",
 	],
 	"Pick List": ["navgold_custom/custom_script/pick_list/pick_list.js"],
+	"Supplier": "navgold_custom/custom_script/supplier/supplier.js",
 }
 
 doc_events = {
+	"Supplier": {
+		"validate": "navgold_custom.navgold_custom.custom_script.supplier.supplier.validate_lead_time",
+	},
 	"Stock Entry": {
 		# "before_validate": "navgold_custom.navgold_custom.custom_script.purchase_receipt.purchase_receipt.create_barcodes",
 		# "before_submit": "navgold_custom.navgold_custom.custom_script.stock_entry.stock_entry.transfer_barcodes",
