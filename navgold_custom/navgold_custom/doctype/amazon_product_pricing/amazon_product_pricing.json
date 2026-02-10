@@ -2,7 +2,7 @@
 	"actions": [],
 	"allow_rename": 1,
 	"autoname": "field:proxy_sku",
-	"creation": "2026-01-20 10:00:00.000000",
+	"creation": "2026-01-20 10:00:00",
 	"doctype": "DocType",
 	"engine": "InnoDB",
 	"field_order": [
@@ -17,6 +17,8 @@
 		"backorder_strategy",
 		"default_strategy",
 		"prices_section",
+		"fixed_price",
+		"fixed_price_value",
 		"current_min_price",
 		"current_max_price",
 		"sync_section",
@@ -99,6 +101,22 @@
 			"label": "Calculated Prices"
 		},
 		{
+			"default": "0",
+			"fieldname": "fixed_price",
+			"fieldtype": "Check",
+			"label": "Fixed Price"
+		},
+		{
+			"depends_on": "eval:doc.fixed_price",
+			"description": "Overrides strategy-calculated prices with this fixed value",
+			"fieldname": "fixed_price_value",
+			"fieldtype": "Currency",
+			"label": "Fixed Price Value",
+			"mandatory_depends_on": "eval:doc.fixed_price",
+			"non_negative": 1,
+			"precision": "2"
+		},
+		{
 			"description": "From active strategy",
 			"fieldname": "current_min_price",
 			"fieldtype": "Currency",
@@ -157,7 +175,7 @@
 			"link_fieldname": "proxy_sku"
 		}
 	],
-	"modified": "2026-01-20 10:00:00.000000",
+	"modified": "2026-02-10 15:47:51.585822",
 	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Amazon Product Pricing",

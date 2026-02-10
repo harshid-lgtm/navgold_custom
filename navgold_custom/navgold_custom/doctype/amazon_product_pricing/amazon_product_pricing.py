@@ -3,6 +3,7 @@
 
 import frappe
 from frappe.model.document import Document
+from frappe.utils.data import flt
 
 from navgold_custom.navgold_custom.amazon_pricing.strategy_selector import select_strategy
 
@@ -23,6 +24,8 @@ class AmazonProductPricing(Document):
 		current_min_price: DF.Currency
 		default_strategy: DF.Link | None
 		fba_strategy: DF.Link | None
+		fixed_price: DF.Check
+		fixed_price_value: DF.Currency
 		is_active: DF.Check
 		last_amazon_sync: DF.Datetime | None
 		last_repricer_sync: DF.Datetime | None
@@ -51,7 +54,12 @@ class AmazonProductPricing(Document):
 		self.active_strategy = select_strategy(self)
 
 	def update_current_prices(self):
-		"""Update current prices from active strategy"""
+		"""Update current prices from active strategy, or use fixed price if enabled"""
+		if self.fixed_price:
+			self.current_min_price = flt(self.fixed_price_value)
+			self.current_max_price = flt(self.fixed_price_value)
+			return
+
 		if self.active_strategy:
 			strategy = frappe.get_cached_doc("Amazon Product Strategy", self.active_strategy)
 			self.current_min_price = strategy.calculated_min_price

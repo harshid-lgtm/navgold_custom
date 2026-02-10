@@ -124,4 +124,18 @@ frappe.ui.form.on('Amazon Product Pricing', {
 			}));
 		}
 	},
+
+	fixed_price(frm) {
+		if (frm.doc.fixed_price) {
+			frm.set_value('current_min_price', frm.doc.fixed_price_value || 0);
+			frm.set_value('current_max_price', frm.doc.fixed_price_value || 0);
+		}
+	},
+
+	fixed_price_value(frm) {
+		if (frm.doc.fixed_price) {
+			frm.set_value('current_min_price', frm.doc.fixed_price_value || 0);
+			frm.set_value('current_max_price', frm.doc.fixed_price_value || 0);
+		}
+	},
 });
