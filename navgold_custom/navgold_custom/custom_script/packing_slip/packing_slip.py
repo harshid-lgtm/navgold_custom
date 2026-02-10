@@ -22,9 +22,7 @@ def get_draft_delivery_note_items(tote=None):
 
 	sales_orders = set()
 	for pl in pick_lists:
-		pl_items = frappe.get_all(
-			"Pick List Item", filters={"parent": pl.name}, fields=["sales_order"]
-		)
+		pl_items = frappe.get_all("Pick List Item", filters={"parent": pl.name}, fields=["sales_order"])
 		for item in pl_items:
 			if item.sales_order:
 				sales_orders.add(item.sales_order)
@@ -32,9 +30,7 @@ def get_draft_delivery_note_items(tote=None):
 	if not sales_orders:
 		return []
 
-	delivery_notes = frappe.get_all(
-		"Delivery Note", filters={"docstatus": 0}, fields=["name"]
-	)
+	delivery_notes = frappe.get_all("Delivery Note", filters={"docstatus": 0}, fields=["name"])
 
 	items_map = []
 	for dn in delivery_notes:

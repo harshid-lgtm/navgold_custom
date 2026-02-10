@@ -22,7 +22,9 @@ frappe.ui.form.on('Packing Slip', {
 			})
 			.then(({ message: items }) => {
 				if (!items || items.length === 0) {
-					frappe.msgprint(__('No items found for tote {0}', [frm.doc.custom_tote]));
+					frappe.msgprint(
+						__('No items found for tote {0}', [frm.doc.custom_tote]),
+					);
 					frm.fields_dict.custom_item.set_data([]);
 					item_to_delivery_note_map = {};
 					return;
@@ -43,7 +45,10 @@ frappe.ui.form.on('Packing Slip', {
 
 	custom_item(frm) {
 		if (frm.doc.custom_item && item_to_delivery_note_map[frm.doc.custom_item]) {
-			frm.set_value('delivery_note', item_to_delivery_note_map[frm.doc.custom_item]);
+			frm.set_value(
+				'delivery_note',
+				item_to_delivery_note_map[frm.doc.custom_item],
+			);
 		}
 	},
 });
