@@ -97,24 +97,30 @@ def get_stock_info(proxy_sku: str) -> dict:
 		mfn_qty = get_free_qty_map([proxy.item]).get(proxy.item, {}).get("free_qty", 0)
 		mfn_stock += mfn_qty
 
-	# Check for restock date
-	has_restock_date = check_pending_restock(proxy.item)
+	# Check for restock
+	restock_info = check_pending_restock(proxy.item)
 
 	return {
 		"fba_stock": fba_stock,
 		"mfn_stock": mfn_stock,
-		"has_restock_date": has_restock_date,
+		"has_restock_date": restock_info["has_restock"],
+		"restock_date": restock_info["restock_date"],
 		"total_stock": fba_stock + mfn_stock,
 	}
 
 
-def check_pending_restock(item: str) -> bool:
+def check_pending_restock(item: str) -> dict:
 	"""
 	Check if there's a pending restock for this item.
 
 	Checks:
 	- Open Material Requests with expected delivery date
 	- Open Purchase Orders with expected delivery date
+
+	Returns:
+		Dictionary with:
+		- has_restock: bool
+		- restock_date: date or None (latest expected delivery date from PO)
 	"""
 
 	mr_exists = frappe.db.exists(
@@ -133,26 +139,27 @@ def check_pending_restock(item: str) -> bool:
 		},
 	)
 
-	if mr_exists:
-		return True
-
-	po_exists = frappe.db.exists(
-		"Purchase Order Item",
-		{
-			"item_code": item,
-			"docstatus": 1,
-			"parent": [
-				"in",
-				frappe.get_all(
-					"Purchase Order",
-					filters={"docstatus": 1, "status": ["not in", ["Closed", "Cancelled", "Completed"]]},
-					pluck="name",
-				),
-			],
-		},
+	open_po_names = frappe.get_all(
+		"Purchase Order",
+		filters={"docstatus": 1, "status": ["not in", ["Closed", "Cancelled", "Completed"]]},
+		pluck="name",
 	)
 
-	return bool(po_exists)
+	restock_date = None
+	if open_po_names:
+		po_items = frappe.get_all(
+			"Purchase Order Item",
+			filters={"item_code": item, "docstatus": 1, "parent": ["in", open_po_names]},
+			fields=["schedule_date"],
+			order_by="schedule_date desc",
+			limit=1,
+		)
+		if po_items:
+			restock_date = po_items[0].schedule_date
+
+	has_restock = bool(mr_exists) or bool(restock_date)
+
+	return {"has_restock": has_restock, "restock_date": restock_date}
 
 
 def refresh_active_strategy(pricing_name: str):
