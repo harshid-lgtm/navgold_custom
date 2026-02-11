@@ -5,7 +5,7 @@ import frappe
 
 
 @frappe.whitelist()
-def get_draft_delivery_note_items(tote=None):
+def get_draft_delivery_note_items(tote: str | None = None):
 	"""Fetch items from draft Delivery Notes filtered by tote"""
 
 	if not tote:
