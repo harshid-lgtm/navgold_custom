@@ -248,6 +248,7 @@ doctype_js = {
 		"navgold_custom/custom_script/purchase_receipt/purchase_receipt.js",
 	],
 	"Pick List": ["navgold_custom/custom_script/pick_list/pick_list.js"],
+	"Packing Slip": ["navgold_custom/custom_script/packing_slip/packing_slip.js"],
 	"Supplier": "navgold_custom/custom_script/supplier/supplier.js",
 }
 
