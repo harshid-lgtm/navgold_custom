@@ -1,0 +1,60 @@
+{
+	"add_total_row": 0,
+	"add_translate_data": 0,
+	"columns": [],
+	"creation": "2026-02-18 00:00:00.000000",
+	"disabled": 0,
+	"docstatus": 0,
+	"doctype": "Report",
+	"filters": [
+		{
+			"default": "",
+			"fieldname": "warehouse",
+			"fieldtype": "Link",
+			"label": "Warehouse",
+			"options": "Warehouse"
+		},
+		{
+			"default": "4",
+			"fieldname": "min_cover_days",
+			"fieldtype": "Int",
+			"label": "Min Cover Days"
+		},
+		{
+			"default": "3",
+			"fieldname": "max_multiplier",
+			"fieldtype": "Int",
+			"label": "Max Multiplier"
+		}
+	],
+	"idx": 0,
+	"is_standard": "Yes",
+	"letter_head": null,
+	"modified": "2026-02-18 00:00:00.000000",
+	"modified_by": "Administrator",
+	"module": "Navgold Custom",
+	"name": "Amazon Min Max Report",
+	"owner": "Administrator",
+	"prepared_report": 0,
+	"ref_doctype": "Item",
+	"report_name": "Amazon Min Max Report",
+	"report_type": "Script Report",
+	"roles": [
+		{
+			"role": "Stock Manager"
+		},
+		{
+			"role": "Stock User"
+		},
+		{
+			"role": "Purchase Manager"
+		},
+		{
+			"role": "Purchase User"
+		},
+		{
+			"role": "Sales Manager"
+		}
+	],
+	"timeout": 0
+}

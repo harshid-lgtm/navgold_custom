@@ -129,9 +129,17 @@ class SPAPI:
 
 		url = self.endpoint + self.BASE_URI + append_to_base_uri
 
-		return frappe_make_request(
-			method=method, url=url, params=params, data=data, headers=self.get_headers()
-		)
+		try:
+			return frappe_make_request(
+				method=method, url=url, params=params, data=data, headers=self.get_headers()
+			)
+		except Exception as e:
+			if isinstance(e, SPAPIError):
+				raise
+			raise SPAPIError(
+				error=type(e).__name__,
+				error_description=str(e),
+			)
 
 	def list_to_dict(self, key: str, values: list, data: dict) -> None:
 		if values and isinstance(values, list):

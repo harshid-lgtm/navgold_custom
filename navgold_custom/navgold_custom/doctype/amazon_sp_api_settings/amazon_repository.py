@@ -554,9 +554,16 @@ class AmazonRepository:
 	def create_sales_order(self, order) -> str | None:
 		def get_refunds(self, order_id, order_date, amazon_order_amount=0) -> dict:
 			finances = self.get_finances_instance()
-			financial_events_payload = self.call_sp_api_method(
-				sp_api_method=finances.list_financial_events_by_order_id, order_id=order_id
-			)
+			try:
+				financial_events_payload = self.call_sp_api_method(
+					sp_api_method=finances.list_financial_events_by_order_id, order_id=order_id
+				)
+			except Exception:
+				self.amz_setting.reload()
+				if not self.amz_setting.enable_sync:
+					self.amz_setting.enable_sync = 1
+					self.amz_setting.save()
+				return []
 
 			if not (
 				financial_events_payload
