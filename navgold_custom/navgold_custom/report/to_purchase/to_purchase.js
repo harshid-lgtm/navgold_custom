@@ -60,11 +60,14 @@ frappe.query_reports['To Purchase'] = {
 
 		if (column.fieldname === 'po_history' && data) {
 			return `
-				<button class="btn btn-xs btn-default btn-po-history"
-					data-item-code="${data.item_code}"
-					title="${__('View Purchase Order History')}">
-					<i class="fa fa-eye"></i>
-				</button>
+				<div style="display: flex; justify-content: center; align-items: center; height: 100%;">
+					<span class="btn-po-history"
+						data-item-code="${data.item_code}"
+						title="${__('View Purchase Order History')}"
+						style="color: var(--text-muted); cursor: pointer; transition: color 0.2s ease;">
+						${frappe.utils.icon('eye', 'sm')}
+					</span>
+				</div>
 			`;
 		}
 
@@ -192,6 +195,10 @@ function add_custom_styles() {
 		
 		.edit-qty-icon:hover {
 			color: var(--text-color);
+		}
+
+		.btn-po-history:hover {
+			color: var(--text-color) !important;
 		}
 		
 		.purchase-info-bar {

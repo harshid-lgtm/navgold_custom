@@ -503,10 +503,11 @@ def get_po_history_for_item(item_code: str) -> list[dict]:
 			po.supplier,
 			po_item.item_code,
 			po.status,
-			po_item.qty,
-			(po_item.qty * po_item.rate).as_("amount"),
+			Sum(po_item.qty).as_("qty"),
+			Sum(po_item.qty * po_item.rate).as_("amount"),
 		)
 		.where((po_item.item_code == item_code) & (po.docstatus == 1))
+		.groupby(po.name, po_item.item_code)
 		.orderby(po.transaction_date, order=frappe.qb.desc)
 		.limit(50)
 	).run(as_dict=True)
