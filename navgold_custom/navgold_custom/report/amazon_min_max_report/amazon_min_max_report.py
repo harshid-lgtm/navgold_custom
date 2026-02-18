@@ -5,7 +5,7 @@ import math
 
 import frappe
 from frappe import _
-from frappe.query_builder import DocType
+from frappe.query_builder import Case, DocType
 from frappe.query_builder.functions import Max, Sum
 from frappe.utils import add_days, cint, flt, today
 
@@ -87,13 +87,9 @@ def get_data(filters: dict) -> list[dict]:
 	if not items:
 		return []
 
-	item_codes = [item["item_code"] for item in items]
-
 	today_date = today()
-	sales_7d_map = get_sales_map(item_codes, add_days(today_date, -7), today_date)
-	sales_30d_map = get_sales_map(item_codes, add_days(today_date, -30), today_date)
-
-	max_pack_by_base = get_max_pack_by_base_sku(item_codes)
+	combined_sales_map = get_combined_sales_map(today_date)
+	max_pack_by_base = get_max_pack_by_base_sku()
 
 	results = []
 	for item in items:
@@ -101,8 +97,7 @@ def get_data(filters: dict) -> list[dict]:
 		pack_size = flt(item["pack_size"]) or 1.0
 		base_sku = item["variant_of"]
 
-		sales_7d = flt(sales_7d_map.get(item_code, 0))
-		sales_30d = flt(sales_30d_map.get(item_code, 0))
+		sales_7d, sales_30d = combined_sales_map.get(item_code, (0.0, 0.0))
 
 		# MAX_PACK_QTY: largest pack size within the same base SKU
 		max_pack_qty = flt(max_pack_by_base.get(base_sku, pack_size)) if base_sku else pack_size
@@ -186,31 +181,39 @@ def get_items_with_pack_size() -> list[dict]:
 	).run(as_dict=True)
 
 
-def get_sales_map(item_codes: list[str], from_date: str, to_date: str) -> dict[str, float]:
+def get_combined_sales_map(today_date: str) -> dict[str, tuple[float, float]]:
 	sales_order = DocType("Sales Order")
 	sales_order_item = DocType("Sales Order Item")
+	item = DocType("Item")
+
+	date_7d = add_days(today_date, -7)
+	date_30d = add_days(today_date, -30)
 
 	rows = (
 		frappe.qb.from_(sales_order)
 		.join(sales_order_item)
 		.on(sales_order_item.parent == sales_order.name)
+		.join(item)
+		.on((item.name == sales_order_item.item_code) & (item.disabled == 0) & (item.is_stock_item == 1))
 		.select(
 			sales_order_item.item_code,
-			Sum(sales_order_item.qty).as_("total_qty"),
+			Sum(Case().when(sales_order.transaction_date >= date_7d, sales_order_item.qty).else_(0)).as_(
+				"sales_7d"
+			),
+			Sum(sales_order_item.qty).as_("sales_30d"),
 		)
 		.where(
 			(sales_order.docstatus == 1)
-			& (sales_order.transaction_date >= from_date)
-			& (sales_order.transaction_date <= to_date)
-			& (sales_order_item.item_code.isin(item_codes))
+			& (sales_order.transaction_date >= date_30d)
+			& (sales_order.transaction_date <= today_date)
 		)
 		.groupby(sales_order_item.item_code)
 	).run(as_dict=True)
 
-	return {r["item_code"]: flt(r["total_qty"]) for r in rows}
+	return {r["item_code"]: (flt(r["sales_7d"]), flt(r["sales_30d"])) for r in rows}
 
 
-def get_max_pack_by_base_sku(item_codes: list[str]) -> dict[str, float]:
+def get_max_pack_by_base_sku() -> dict[str, float]:
 	item = DocType("Item")
 	uom_detail = DocType("UOM Conversion Detail")
 
@@ -225,7 +228,6 @@ def get_max_pack_by_base_sku(item_codes: list[str]) -> dict[str, float]:
 		.where(
 			(item.disabled == 0)
 			& (item.is_stock_item == 1)
-			& (item.name.isin(item_codes))
 			& (item.variant_of.isnotnull())
 			& (item.variant_of != "")
 		)
