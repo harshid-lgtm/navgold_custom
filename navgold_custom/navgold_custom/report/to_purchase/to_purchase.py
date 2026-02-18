@@ -27,6 +27,12 @@ def get_columns(data: list[dict]) -> list[dict]:
 	"""Return columns for the report."""
 	columns = [
 		{
+			"label": _("History"),
+			"fieldname": "po_history",
+			"fieldtype": "Data",
+			"width": 40,
+		},
+		{
 			"label": _("Item Code"),
 			"fieldname": "item_code",
 			"fieldtype": "Link",
@@ -228,6 +234,7 @@ def get_data(filters):
 
 		item_qty_data = free_qty_map.get(item_code, {})
 		row = {
+			"po_history": "",
 			"item_code": item_code,
 			"description": s["description"],
 			"actual_qty": item_qty_data.get("actual_qty", 0),
@@ -472,3 +479,36 @@ def get_offers_by_supplier(supplier_list):
 			offers_by_parent[parent] = []
 		offers_by_parent[parent].append(offer["offer"])
 	return offers_by_parent
+
+
+@frappe.whitelist()
+def get_po_history_for_item(item_code: str) -> list[dict]:
+	"""Get Purchase Order history for a specific item.
+
+	Returns list of POs with: transaction_date, purchase_order, supplier, item_code, status, qty, amount
+	"""
+	if not item_code:
+		return []
+
+	po = DocType("Purchase Order")
+	po_item = DocType("Purchase Order Item")
+
+	result = (
+		frappe.qb.from_(po)
+		.left_join(po_item)
+		.on(po_item.parent == po.name)
+		.select(
+			po.transaction_date,
+			po.name.as_("purchase_order"),
+			po.supplier,
+			po_item.item_code,
+			po.status,
+			po_item.qty,
+			(po_item.qty * po_item.rate).as_("amount"),
+		)
+		.where((po_item.item_code == item_code) & (po.docstatus == 1))
+		.orderby(po.transaction_date, order=frappe.qb.desc)
+		.limit(50)
+	).run(as_dict=True)
+
+	return result

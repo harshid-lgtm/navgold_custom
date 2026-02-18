@@ -17,6 +17,7 @@ frappe.query_reports['To Purchase'] = {
 	],
 
 	onload: (report) => {
+		setup_po_history_handler(report);
 		purchase_report_state.init(report);
 		add_custom_styles();
 		setTimeout(() => {
@@ -56,6 +57,16 @@ frappe.query_reports['To Purchase'] = {
 
 	formatter: (value, row, column, data, default_formatter) => {
 		const default_value = default_formatter(value, row, column, data);
+
+		if (column.fieldname === 'po_history' && data) {
+			return `
+				<button class="btn btn-xs btn-default btn-po-history"
+					data-item-code="${data.item_code}"
+					title="${__('View Purchase Order History')}">
+					<i class="fa fa-eye"></i>
+				</button>
+			`;
+		}
 
 		if (column.fieldname === 'allocated_qty' && data) {
 			const display_qty = purchase_report_state.get_quantity(
@@ -400,4 +411,146 @@ async function create_purchase_orders(selected_items, report) {
 			indicator: 'red',
 		});
 	}
+}
+
+function setup_po_history_handler(report) {
+	$(document).on('click', '.btn-po-history', function (e) {
+		e.preventDefault();
+		e.stopPropagation();
+
+		const item_code = $(this).data('item-code');
+		if (item_code) {
+			show_po_history_dialog(item_code);
+		}
+	});
+}
+
+async function show_po_history_dialog(item_code) {
+	const dialog = new frappe.ui.Dialog({
+		title: __('Purchase Order History: {0}', [item_code]),
+		size: 'extra-large',
+		fields: [
+			{
+				fieldtype: 'HTML',
+				fieldname: 'po_history_html',
+			},
+		],
+	});
+
+	dialog.show();
+
+	dialog.fields_dict.po_history_html.$wrapper.html(`
+		<div class="text-center py-5">
+			<div class="spinner-border text-primary" role="status"></div>
+			<p class="mt-2">${__('Loading Purchase Order history...')}</p>
+		</div>
+	`);
+
+	try {
+		const r = await frappe.call({
+			method:
+				'navgold_custom.navgold_custom.report.to_purchase.to_purchase.get_po_history_for_item',
+			args: { item_code },
+		});
+
+		const data = r.message || [];
+
+		if (data.length === 0) {
+			dialog.fields_dict.po_history_html.$wrapper.html(`
+				<div class="text-center py-5 text-muted">
+					<i class="fa fa-inbox fa-3x mb-3"></i>
+					<p>${__('No Purchase Orders found for this item.')}</p>
+				</div>
+			`);
+			return;
+		}
+
+		const table_html = build_po_history_table(data);
+		dialog.fields_dict.po_history_html.$wrapper.html(table_html);
+	} catch (error) {
+		dialog.fields_dict.po_history_html.$wrapper.html(`
+			<div class="text-center py-5 text-danger">
+				<i class="fa fa-exclamation-triangle fa-3x mb-3"></i>
+				<p>${__('Failed to load Purchase Order history.')}</p>
+			</div>
+		`);
+	}
+}
+
+function build_po_history_table(data) {
+	let rows = '';
+	let total_qty = 0;
+	let total_amount = 0;
+
+	for (const row of data) {
+		total_qty += row.qty || 0;
+		total_amount += row.amount || 0;
+
+		const status_color = get_status_color(row.status);
+
+		rows += `
+			<tr>
+				<td>${frappe.datetime.str_to_user(row.transaction_date)}</td>
+				<td>
+					<a href="/app/purchase-order/${row.purchase_order}" target="_blank">
+						${row.purchase_order}
+					</a>
+				</td>
+				<td>
+					<a href="/app/supplier/${row.supplier}" target="_blank">
+						${row.supplier}
+					</a>
+				</td>
+				<td>
+					<a href="/app/item/${row.item_code}" target="_blank">
+						${row.item_code}
+					</a>
+				</td>
+				<td><span class="indicator-pill ${status_color}">${row.status}</span></td>
+				<td class="text-right">${row.qty}</td>
+				<td class="text-right">${format_currency(row.amount)}</td>
+			</tr>
+		`;
+	}
+
+	return `
+		<div class="po-history-table-wrapper" style="max-height: 400px; overflow-y: auto;">
+			<table class="table table-bordered table-hover">
+				<thead class="sticky-top bg-white">
+					<tr>
+						<th>${__('Date')}</th>
+						<th>${__('Purchase Order')}</th>
+						<th>${__('Supplier')}</th>
+						<th>${__('Item Code')}</th>
+						<th>${__('Status')}</th>
+						<th class="text-right">${__('Qty')}</th>
+						<th class="text-right">${__('Amount')}</th>
+					</tr>
+				</thead>
+				<tbody>
+					${rows}
+				</tbody>
+				<tfoot class="bg-light font-weight-bold">
+					<tr>
+						<td colspan="5" class="text-right"><strong>${__('Total')}</strong></td>
+						<td class="text-right"><strong>${total_qty}</strong></td>
+						<td class="text-right"><strong>${format_currency(total_amount)}</strong></td>
+					</tr>
+				</tfoot>
+			</table>
+		</div>
+	`;
+}
+
+function get_status_color(status) {
+	const colors = {
+		'To Receive and Bill': 'orange',
+		'To Bill': 'yellow',
+		'To Receive': 'blue',
+		'To Pay': 'purple',
+		Completed: 'green',
+		Closed: 'gray',
+		Cancelled: 'red',
+	};
+	return colors[status] || 'gray';
 }
