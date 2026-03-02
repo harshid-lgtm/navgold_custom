@@ -134,6 +134,12 @@ def get_columns():
 			"width": 150,
 		},
 		{"label": _("Comment"), "fieldname": "comment", "fieldtype": "Data", "width": 100},
+		{
+			"label": _("Quantity to Transfer"),
+			"fieldname": "quantity_to_transfer",
+			"fieldtype": "Float",
+			"width": 140,
+		},
 	]
 
 
@@ -273,6 +279,7 @@ def get_data(filters):
 			"po_count": po.get("po_count", 0),
 			"total_qty_on_order": flt(po.get("total_qty", 0)),
 			"comment": comment,
+			"quantity_to_transfer": 0,
 		}
 		data.append(row)
 
@@ -883,3 +890,66 @@ def _compute_program_forecast(
 def _compute_total_forecast(hwr, forecast):
 	"""total_forecast = hwr + forecast"""
 	return flt(hwr) + flt(forecast)
+
+
+@frappe.whitelist()
+def create_material_requests_from_forecast_report(selected_items):
+	if isinstance(selected_items, str):
+		selected_items = frappe.parse_json(selected_items)
+
+	if not selected_items:
+		frappe.throw(_("No items selected"))
+
+	sku_names = [item.get("sku") for item in selected_items if item.get("sku")]
+	if not sku_names:
+		frappe.throw(_("No valid SKUs found in selection"))
+
+	sku_rows = frappe.get_all(
+		"Proxy SKU", filters={"name": ("in", sku_names)}, fields=["name", "item", "uom"]
+	)
+
+	sku_info = {row["name"]: {"item": row["item"], "uom": row["uom"]} for row in sku_rows}
+
+	amz_setting = frappe.get_last_doc("Amazon SP API Settings", {"is_active": 1})
+	company = amz_setting.company
+	target_warehouse = amz_setting.afn_warehouse
+
+	if not target_warehouse:
+		frappe.throw(_("AFN Warehouse not configured in Amazon SP API Settings"))
+
+	mr = frappe.new_doc("Material Request")
+	mr.material_request_type = "Material Transfer"
+	mr.company = company
+	mr.schedule_date = frappe.utils.today()
+
+	for item in selected_items:
+		sku = item.get("sku")
+		info = sku_info.get(sku)
+		if not info or not info["item"]:
+			continue
+
+		qty = flt(item.get("quantity_to_transfer") or 0)
+		if qty <= 0:
+			continue
+
+		mr.append(
+			"items",
+			{
+				"item_code": info["item"],
+				"qty": qty,
+				"uom": info["uom"],
+				"schedule_date": frappe.utils.today(),
+				"warehouse": target_warehouse,
+			},
+		)
+
+	if not mr.items:
+		frappe.throw(_("No valid items with positive quantity to transfer"))
+
+	mr.insert(ignore_permissions=True)
+
+	return {
+		"success": True,
+		"material_request": mr.name,
+		"message": _("Created Material Request {0}").format(mr.name),
+	}
