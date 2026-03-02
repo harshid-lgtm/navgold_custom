@@ -1,16 +1,18 @@
 # Copyright (c) 2026, developers@buildwithhussain.com and contributors
 # For license information, please see license.txt
 
-import csv
-import io
+import math
 import re
 
 import frappe
 from frappe import _
 from frappe.query_builder import DocType
 from frappe.query_builder.functions import Count, Sum
-from frappe.utils import flt
+from frappe.utils import add_days, cstr, flt, today
+from frappe.utils.csvutils import read_csv_content
+from frappe.utils.xlsxutils import read_xlsx_file_from_attached_file
 
+from navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku import get_proxy_sku_map
 from navgold_custom.navgold_custom.utils import get_free_qty_map
 
 
@@ -146,32 +148,33 @@ def get_columns():
 def get_data(filters):
 	asset = frappe.get_cached_doc("Navgold Forecast Asset").as_dict()
 
-	fba_map = _parse_fba_inventory(asset.get("fba_inventory_csv"))
-	sales_3d_map = _parse_sales_csv(asset.get("sales_3d_csv"))
-	sales_7d_map = _parse_sales_csv(asset.get("sales_7d_csv"))
-	sales_14d_map = _parse_sales_csv(asset.get("sales_14d_csv"))
-	sales_30d_map = _parse_sales_csv(asset.get("sales_30d_csv"))
-	revenue_map = _parse_30d_revenue(asset.get("sales_30d_csv"))
-	keepa_map = _parse_keepa(asset.get("keepa_xlsx"))
-	your_price_map = _parse_your_price(asset.get("your_price_xlsx"))
-	prev_rate_map = _parse_previous_report(asset.get("previous_report_xlsx"))
+	fba_map = parse_fba_inventory(asset.get("fba_inventory_csv"))
+	sales_3d_map = parse_sales_csv(asset.get("sales_3d_csv"))
+	sales_7d_map = parse_sales_csv(asset.get("sales_7d_csv"))
+	sales_14d_map = parse_sales_csv(asset.get("sales_14d_csv"))
+	sales_30d_map = parse_sales_csv(asset.get("sales_30d_csv"))
+	revenue_map = parse_30d_revenue(asset.get("sales_30d_csv"))
+	keepa_map = parse_keepa(asset.get("keepa_xlsx"))
+	your_price_map = parse_your_price(asset.get("your_price_xlsx"))
+	prev_rate_map = parse_previous_report(asset.get("previous_report_xlsx"))
 
-	proxy_sku_map = _get_proxy_sku_map()
+	fba_sku_names = list(fba_map.keys())
+	proxy_sku_map = get_proxy_sku_map(fba_sku_names)
 	if not proxy_sku_map:
 		return []
 
 	item_codes = list({v["item"] for v in proxy_sku_map.values() if v.get("item")})
 	proxy_sku_names = list(proxy_sku_map.keys())
 
-	item_info_map = _get_item_info_map(item_codes)
-	variant_mult_map = _get_variant_multiplier_map(proxy_sku_map)
+	item_info_map = get_item_info_map(item_codes)
+	variant_mult_map = get_variant_multiplier_map(proxy_sku_map)
 	free_qty_map = get_free_qty_map(item_codes) if item_codes else {}
-	supplier_map = _get_top_supplier_map(item_codes)
-	pricing_map = _get_pricing_map(proxy_sku_names)
-	po_map = _get_po_data_map(item_codes)
-	channel_sales_map = _get_sales_by_channel(item_codes)
-	instocks_map = _get_instocks_map(item_codes)
-	current_map = _get_current_picking_map(item_codes)
+	supplier_map = get_top_supplier_map(item_codes)
+	pricing_map = get_pricing_map(proxy_sku_names)
+	purchase_order_map = get_po_data_map(item_codes)
+	channel_sales_map = get_sales_by_channel(item_codes)
+	instocks_map = get_instocks_map(item_codes)
+	current_map = get_current_picking_map(item_codes)
 
 	data = []
 	for sku, sku_info in proxy_sku_map.items():
@@ -191,7 +194,7 @@ def get_data(filters):
 
 		pricing = pricing_map.get(sku, {})
 		supplier = supplier_map.get(item_code, {})
-		po = po_map.get(item_code, {})
+		purchase_order = purchase_order_map.get(item_code, {})
 		free_stock = flt(free_qty_map.get(item_code, {}).get("free_qty", 0))
 
 		fba_stock = flt(fba.get("available", 0))
@@ -209,16 +212,16 @@ def get_data(filters):
 		current_month_offer = supplier.get("current_month_offer", "")
 		next_month_offer = supplier.get("next_month_offer", "")
 
-		highest_weekly_rate = _compute_highest_weekly_rate(s7, s14, s30)
-		three_week_lt = _compute_3week_lead_time_stock(fba_stock, highest_weekly_rate)
+		highest_weekly_rate = compute_highest_weekly_rate(s7, s14, s30)
+		three_week_lt = compute_3week_lead_time_stock(fba_stock, highest_weekly_rate)
 		strategy = "FBA" if fba_stock > 0 else "SFP"
-		comment = _compute_comment(asin, s3, s7, s14, s30)
+		comment = compute_comment(asin, s3, s7, s14, s30)
 		four_week_forecast = highest_weekly_rate * 4
 
-		forecast = _compute_forecast(highest_weekly_rate, instocks, current, receiving, three_week_lt)
-		ranking = _compute_ranking(keepa.get("sales_rank", 0))
-		sales_dropped = _compute_sales_dropped(fba_stock, s7, highest_weekly_rate, prev_rate)
-		program_forecast, program_reason = _compute_program_forecast(
+		forecast = compute_forecast(highest_weekly_rate, instocks, current, receiving, three_week_lt)
+		ranking = compute_ranking(keepa.get("sales_rank", 0))
+		sales_dropped = compute_sales_dropped(fba_stock, s7, highest_weekly_rate, prev_rate)
+		program_forecast, program_reason = compute_program_forecast(
 			keepa.get("buy_box", 0),
 			fba_stock,
 			s3,
@@ -231,7 +234,7 @@ def get_data(filters):
 			three_week_lt,
 			pricing.get("min_margin", 0),
 		)
-		total_forecast = _compute_total_forecast(highest_weekly_rate, forecast)
+		total_forecast = compute_total_forecast(highest_weekly_rate, forecast)
 
 		row = {
 			"sku": sku,
@@ -276,8 +279,8 @@ def get_data(filters):
 			"program_forecast": program_forecast,
 			"program_reason": program_reason,
 			"total_forecast": total_forecast,
-			"po_count": po.get("po_count", 0),
-			"total_qty_on_order": flt(po.get("total_qty", 0)),
+			"po_count": purchase_order.get("po_count", 0),
+			"total_qty_on_order": flt(purchase_order.get("total_qty", 0)),
 			"comment": comment,
 			"quantity_to_transfer": 0,
 		}
@@ -293,260 +296,168 @@ def get_data(filters):
 	return data
 
 
-# def get_forecast_asset():
-# 	try:
-# 		return
-# 	except frappe.DoesNotExistError:
-# 		return {}
-
-
-def _read_file_content(file_url):
-	"""Read an attached file and return bytes content."""
+def read_file_content(file_url):
 	if not file_url:
 		return None
 	try:
-		_file = frappe.get_doc("File", {"file_url": file_url})
-		return _file.get_content()
+		file_doc = frappe.get_doc("File", {"file_url": file_url})
+		return file_doc.get_content()
 	except Exception:
 		frappe.log_error(f"Failed to read file: {file_url}", "Navgold Forecast Report")
 		return None
 
 
-def _parse_fba_inventory(file_url):
-	"""Parse FBA Inventory CSV (comma-separated). Returns {sku: {available, fnsku, receiving}}."""
-	content = _read_file_content(file_url)
+def read_csv_as_dicts(file_url):
+	content = read_file_content(file_url)
 	if not content:
-		return {}
+		return []
 
-	if isinstance(content, bytes):
-		content = content.decode("utf-8-sig", errors="replace")
+	rows = read_csv_content(content)
+	if not rows or len(rows) < 2:
+		return []
 
+	headers = [cstr(h or "").strip() for h in rows[0]]
+	return [dict(zip(headers, row, strict=False)) for row in rows[1:]]
+
+
+def read_xlsx_as_dicts(file_url):
+	content = read_file_content(file_url)
+	if not content:
+		return []
+
+	try:
+		rows = read_xlsx_file_from_attached_file(fcontent=content)
+		if not rows or len(rows) < 2:
+			return []
+
+		headers = [cstr(h or "").strip() for h in rows[0]]
+		return [dict(zip(headers, row, strict=False)) for row in rows[1:]]
+	except Exception:
+		frappe.log_error(f"Failed to parse XLSX: {file_url}", "Navgold Forecast Report")
+		return []
+
+
+def get_col_value(row, *possible_keys, default=None):
+	lower_row = {cstr(k).strip().lower(): v for k, v in row.items() if k}
+	for key in possible_keys:
+		val = lower_row.get(key.lower())
+		if val is not None:
+			return val
+	return default
+
+
+def parse_fba_inventory(file_url):
 	result = {}
-	reader = csv.DictReader(io.StringIO(content))
-	for row in reader:
-		sku = (row.get("sku") or row.get("SKU") or "").strip()
+	for row in read_csv_as_dicts(file_url):
+		sku = cstr(get_col_value(row, "sku", "SKU", default="")).strip()
 		if not sku:
 			continue
 		result[sku] = {
-			"available": flt(row.get("available", 0)),
-			"fnsku": (row.get("fnsku") or row.get("FNSKU") or "").strip(),
+			"available": flt(get_col_value(row, "available", default=0)),
+			"fnsku": cstr(get_col_value(row, "fnsku", "FNSKU", default="")).strip(),
 			"receiving": (
-				flt(row.get("inbound-working", 0))
-				+ flt(row.get("inbound-shipped", 0))
-				+ flt(row.get("inbound-received", 0))
+				flt(get_col_value(row, "inbound-working", default=0))
+				+ flt(get_col_value(row, "inbound-shipped", default=0))
+				+ flt(get_col_value(row, "inbound-received", default=0))
 			),
 		}
 	return result
 
 
-def _parse_sales_csv(file_url):
-	"""Parse Amazon Sales CSV (comma-separated). Returns {sku: {units: float}}."""
-	content = _read_file_content(file_url)
-	if not content:
-		return {}
-
-	if isinstance(content, bytes):
-		content = content.decode("utf-8-sig", errors="replace")
-
+def parse_sales_csv(file_url):
 	result = {}
-	reader = csv.DictReader(io.StringIO(content))
-	for row in reader:
-		sku = (row.get("SKU") or row.get("sku") or "").strip()
+	for row in read_csv_as_dicts(file_url):
+		sku = cstr(get_col_value(row, "SKU", "sku", default="")).strip()
 		if not sku or sku.lower() == "sku":
 			continue
-		units = flt(_strip_currency(row.get("Units ordered", 0)))
+		units = flt(strip_currency(get_col_value(row, "Units ordered", default=0)))
 		result[sku] = {"units": units}
 	return result
 
 
-def _parse_30d_revenue(file_url):
-	"""Parse 30D Sales CSV for revenue (comma-separated). Returns {sku: {revenue: float}}."""
-	content = _read_file_content(file_url)
-	if not content:
-		return {}
-
-	if isinstance(content, bytes):
-		content = content.decode("utf-8-sig", errors="replace")
-
+def parse_30d_revenue(file_url):
 	result = {}
-	reader = csv.DictReader(io.StringIO(content))
-	for row in reader:
-		sku = (row.get("SKU") or row.get("sku") or "").strip()
+	for row in read_csv_as_dicts(file_url):
+		sku = cstr(get_col_value(row, "SKU", "sku", default="")).strip()
 		if not sku or sku.lower() == "sku":
 			continue
-		revenue = flt(_strip_currency(row.get("Ordered Product Sales", 0)))
+		revenue = flt(strip_currency(get_col_value(row, "Ordered Product Sales", default=0)))
 		result[sku] = {"revenue": revenue}
 	return result
 
 
-def _parse_keepa(file_url):
-	"""Parse Keepa XLSX. Returns {asin: {buy_box: float, sales_rank: int}}."""
-	content = _read_file_content(file_url)
-	if not content:
+def parse_keepa(file_url):
+	rows = read_xlsx_as_dicts(file_url)
+	if not rows:
 		return {}
 
-	try:
-		import openpyxl
+	result = {}
+	for row in rows:
+		asin = cstr(get_col_value(row, "ASIN", "asin", default="")).strip()
+		if not asin:
+			continue
 
-		wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
-		ws = wb.active
+		buy_box = 0
+		sales_rank = 0
+		lower_row = {cstr(k).strip().lower(): v for k, v in row.items() if k}
+		for key, val in lower_row.items():
+			if "buy box" in key and "current" in key:
+				buy_box = flt(val)
+			elif "sales rank" in key and "current" in key:
+				sales_rank = int(flt(val)) if val else 0
 
-		headers = []
-		result = {}
-		asin_col = None
-		buy_box_col = None
-		sales_rank_col = None
+		result[asin] = {"buy_box": buy_box, "sales_rank": sales_rank}
+	return result
 
-		for row_idx, row in enumerate(ws.iter_rows(values_only=True)):
-			if row_idx == 0:
-				headers = [str(c or "").strip().lower() for c in row]
-				for i, h in enumerate(headers):
-					if h == "asin":
-						asin_col = i
-					elif "buy box" in h and "current" in h:
-						buy_box_col = i
-					elif "sales rank" in h and "current" in h:
-						sales_rank_col = i
-				continue
 
-			if asin_col is None:
+def parse_your_price(file_url):
+	rows = read_xlsx_as_dicts(file_url)
+	if not rows:
+		return {}
+
+	result = {}
+	for row in rows:
+		sku = cstr(
+			get_col_value(row, "seller-sku", "sku", "seller sku", "Seller SKU", "SKU", default="")
+		).strip()
+		if not sku:
+			continue
+		price = flt(get_col_value(row, "price", "your-price", "your price", "Your Price", "Price", default=0))
+		result[sku] = {"price": price}
+	return result
+
+
+def parse_previous_report(file_url):
+	rows = read_xlsx_as_dicts(file_url)
+	if not rows:
+		return {}
+
+	result = {}
+	for row in rows:
+		sku = cstr(get_col_value(row, "sku", "SKU", "seller_sku", default="")).strip()
+		if not sku:
+			continue
+
+		rate = 0
+		lower_row = {cstr(k).strip().lower(): v for k, v in row.items() if k}
+		for key, val in lower_row.items():
+			if "highest" in key and "weekly" in key and "rate" in key:
+				rate = flt(val)
 				break
 
-			asin = str(row[asin_col] or "").strip() if row[asin_col] else ""
-			if not asin:
-				continue
-
-			buy_box = flt(row[buy_box_col]) if buy_box_col is not None and row[buy_box_col] else 0
-			sales_rank = (
-				int(flt(row[sales_rank_col])) if sales_rank_col is not None and row[sales_rank_col] else 0
-			)
-
-			result[asin] = {"buy_box": buy_box, "sales_rank": sales_rank}
-
-		wb.close()
-		return result
-	except Exception:
-		frappe.log_error(f"Failed to parse Keepa XLSX: {file_url}", "Navgold Forecast Report")
-		return {}
+		result[sku] = {"highest_weekly_rate": rate}
+	return result
 
 
-def _parse_your_price(file_url):
-	"""Parse Your Price XLSX. Returns {sku: {price: float}}."""
-	content = _read_file_content(file_url)
-	if not content:
-		return {}
-
-	try:
-		import openpyxl
-
-		wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
-		ws = wb.active
-
-		headers = []
-		result = {}
-		sku_col = None
-		price_col = None
-
-		for row_idx, row in enumerate(ws.iter_rows(values_only=True)):
-			if row_idx == 0:
-				headers = [str(c or "").strip().lower() for c in row]
-				for i, h in enumerate(headers):
-					if h in ("seller-sku", "sku", "seller sku"):
-						sku_col = i
-					elif h in ("price", "your-price", "your price"):
-						price_col = i
-				continue
-
-			if sku_col is None:
-				break
-
-			sku = str(row[sku_col] or "").strip() if row[sku_col] else ""
-			if not sku:
-				continue
-
-			price = flt(row[price_col]) if price_col is not None and row[price_col] else 0
-			result[sku] = {"price": price}
-
-		wb.close()
-		return result
-	except Exception:
-		frappe.log_error(f"Failed to parse Your Price XLSX: {file_url}", "Navgold Forecast Report")
-		return {}
-
-
-def _parse_previous_report(file_url):
-	"""Parse Previous Report XLSX. Returns {sku: {highest_weekly_rate: float}}."""
-	content = _read_file_content(file_url)
-	if not content:
-		return {}
-
-	try:
-		import openpyxl
-
-		wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
-		ws = wb.active
-
-		headers = []
-		result = {}
-		sku_col = None
-		rate_col = None
-
-		for row_idx, row in enumerate(ws.iter_rows(values_only=True)):
-			if row_idx == 0:
-				headers = [str(c or "").strip().lower() for c in row]
-				for i, h in enumerate(headers):
-					if h in ("sku", "seller_sku"):
-						sku_col = i
-					elif "highest" in h and "weekly" in h and "rate" in h:
-						rate_col = i
-				continue
-
-			if sku_col is None:
-				break
-
-			sku = str(row[sku_col] or "").strip() if row[sku_col] else ""
-			if not sku:
-				continue
-
-			rate = flt(row[rate_col]) if rate_col is not None and row[rate_col] else 0
-			result[sku] = {"highest_weekly_rate": rate}
-
-		wb.close()
-		return result
-	except Exception:
-		frappe.log_error(f"Failed to parse Previous Report XLSX: {file_url}", "Navgold Forecast Report")
-		return {}
-
-
-def _strip_currency(val):
-	"""Strip currency symbols (£, $) and commas from a value string."""
+def strip_currency(val):
 	if not val:
 		return 0
 	if isinstance(val, int | float):
 		return val
-	return re.sub(r"[£$,]", "", str(val).strip())
+	return re.sub(r"[£$,]", "", cstr(val).strip())
 
 
-def _get_proxy_sku_map():
-	"""Returns {sku_name: {item, asin, uom, is_fba}}."""
-	ps = DocType("Proxy SKU")
-	rows = (
-		frappe.qb.from_(ps).select(ps.name, ps.item, ps.asin, ps.uom, ps.is_fba).where(ps.is_active == 1)
-	).run(as_dict=True)
-
-	return {
-		r["name"]: {
-			"item": r["item"],
-			"asin": r["asin"] or "",
-			"uom": r["uom"],
-			"is_fba": r["is_fba"],
-		}
-		for r in rows
-	}
-
-
-def _get_item_info_map(item_codes):
-	"""Returns {item_code: {brand, item_name}}."""
+def get_item_info_map(item_codes):
 	if not item_codes:
 		return {}
 
@@ -558,51 +469,50 @@ def _get_item_info_map(item_codes):
 	return {r["name"]: {"brand": r["brand"] or "", "item_name": r["item_name"] or ""} for r in rows}
 
 
-def _get_sales_by_channel(item_codes):
-	"""Returns {item_code: {fba_sales: float, sfp_sales: float}} from submitted Sales Orders."""
+def get_sales_by_channel(item_codes):
 	if not item_codes:
 		return {}
 
-	from frappe.utils import add_days, today
-
-	so = DocType("Sales Order")
-	soi = DocType("Sales Order Item")
+	sales_order = DocType("Sales Order")
+	sales_order_item = DocType("Sales Order Item")
 	thirty_days_ago = add_days(today(), -30)
 
 	rows = (
-		frappe.qb.from_(so)
-		.join(soi)
-		.on(soi.parent == so.name)
-		.select(soi.item_code, so.fulfillment_channel, Sum(soi.qty).as_("total_qty"))
-		.where(
-			(so.docstatus == 1)
-			& (so.transaction_date >= thirty_days_ago)
-			& (so.fulfillment_channel.isin(["AFN", "MFN"]))
-			& (soi.item_code.isin(item_codes))
+		frappe.qb.from_(sales_order)
+		.join(sales_order_item)
+		.on(sales_order_item.parent == sales_order.name)
+		.select(
+			sales_order_item.item_code,
+			sales_order.fulfillment_channel,
+			Sum(sales_order_item.qty).as_("total_qty"),
 		)
-		.groupby(soi.item_code, so.fulfillment_channel)
+		.where(
+			(sales_order.docstatus == 1)
+			& (sales_order.transaction_date >= thirty_days_ago)
+			& (sales_order.fulfillment_channel.isin(["AFN", "MFN"]))
+			& (sales_order_item.item_code.isin(item_codes))
+		)
+		.groupby(sales_order_item.item_code, sales_order.fulfillment_channel)
 	).run(as_dict=True)
 
 	result = {}
-	for r in rows:
-		item = r["item_code"]
-		if item not in result:
-			result[item] = {"fba_sales": 0, "sfp_sales": 0}
-		if r["fulfillment_channel"] == "AFN":
-			result[item]["fba_sales"] = flt(r["total_qty"])
-		elif r["fulfillment_channel"] == "MFN":
-			result[item]["sfp_sales"] = flt(r["total_qty"])
+	for row in rows:
+		item_code = row["item_code"]
+		if item_code not in result:
+			result[item_code] = {"fba_sales": 0, "sfp_sales": 0}
+		if row["fulfillment_channel"] == "AFN":
+			result[item_code]["fba_sales"] = flt(row["total_qty"])
+		elif row["fulfillment_channel"] == "MFN":
+			result[item_code]["sfp_sales"] = flt(row["total_qty"])
 	return result
 
 
-def _get_variant_multiplier_map(proxy_sku_map):
-	"""Returns {sku: conversion_factor} from UOM Conversion Detail."""
+def get_variant_multiplier_map(proxy_sku_map):
 	if not proxy_sku_map:
 		return {}
 
-	uom_detail = DocType("UOM Conversion Detail")
+	uom_conversion_detail = DocType("UOM Conversion Detail")
 
-	# Build list of (item, uom) pairs we need
 	pairs = [(v["item"], v["uom"]) for v in proxy_sku_map.values() if v.get("item") and v.get("uom")]
 	if not pairs:
 		return {}
@@ -610,17 +520,17 @@ def _get_variant_multiplier_map(proxy_sku_map):
 	item_codes = list({p[0] for p in pairs})
 
 	rows = (
-		frappe.qb.from_(uom_detail)
-		.select(uom_detail.parent, uom_detail.uom, uom_detail.conversion_factor)
-		.where((uom_detail.parenttype == "Item") & (uom_detail.parent.isin(item_codes)))
+		frappe.qb.from_(uom_conversion_detail)
+		.select(
+			uom_conversion_detail.parent, uom_conversion_detail.uom, uom_conversion_detail.conversion_factor
+		)
+		.where((uom_conversion_detail.parenttype == "Item") & (uom_conversion_detail.parent.isin(item_codes)))
 	).run(as_dict=True)
 
-	# Build lookup by (item, uom)
 	uom_lookup = {}
-	for r in rows:
-		uom_lookup[(r["parent"], r["uom"])] = flt(r["conversion_factor"])
+	for row in rows:
+		uom_lookup[(row["parent"], row["uom"])] = flt(row["conversion_factor"])
 
-	# Map back to SKU names
 	result = {}
 	for sku, info in proxy_sku_map.items():
 		key = (info.get("item"), info.get("uom"))
@@ -630,110 +540,110 @@ def _get_variant_multiplier_map(proxy_sku_map):
 	return result
 
 
-def _get_top_supplier_map(item_codes):
-	"""Returns {item_code: {supplier, price, current_month_offer, next_month_offer}} where rank=1."""
+def get_top_supplier_map(item_codes):
 	if not item_codes:
 		return {}
 
-	sips = DocType("Supplier Item Price and Stock")
+	supplier_item_price = DocType("Supplier Item Price and Stock")
 	rows = (
-		frappe.qb.from_(sips)
-		.select(sips.item, sips.supplier, sips.price)
-		.where((sips.item.isin(item_codes)) & (sips.rank == 1))
+		frappe.qb.from_(supplier_item_price)
+		.select(supplier_item_price.item, supplier_item_price.supplier, supplier_item_price.price)
+		.where((supplier_item_price.item.isin(item_codes)) & (supplier_item_price.rank == 1))
 	).run(as_dict=True)
 
 	result = {r["item"]: {"supplier": r["supplier"], "price": flt(r["price"])} for r in rows}
 
-	# Fetch offers for rank-1 suppliers (idx=1 → current month, idx=2 → next month)
-	so = DocType("Supplier Offer")
+	supplier_offer = DocType("Supplier Offer")
 	offer_rows = (
-		frappe.qb.from_(sips)
-		.join(so)
-		.on(so.parent == sips.name)
-		.select(sips.item, so.offer, so.idx)
-		.where((sips.item.isin(item_codes)) & (sips.rank == 1))
-		.orderby(so.idx)
+		frappe.qb.from_(supplier_item_price)
+		.join(supplier_offer)
+		.on(supplier_offer.parent == supplier_item_price.name)
+		.select(supplier_item_price.item, supplier_offer.offer, supplier_offer.idx)
+		.where((supplier_item_price.item.isin(item_codes)) & (supplier_item_price.rank == 1))
+		.orderby(supplier_offer.idx)
 	).run(as_dict=True)
 
-	for r in offer_rows:
-		item = r["item"]
-		if item not in result:
+	for row in offer_rows:
+		item_code = row["item"]
+		if item_code not in result:
 			continue
-		if r["idx"] == 1:
-			result[item]["current_month_offer"] = r["offer"] or ""
-		elif r["idx"] == 2:
-			result[item]["next_month_offer"] = r["offer"] or ""
+		if row["idx"] == 1:
+			result[item_code]["current_month_offer"] = row["offer"] or ""
+		elif row["idx"] == 2:
+			result[item_code]["next_month_offer"] = row["offer"] or ""
 
 	return result
 
 
-def _get_instocks_map(item_codes):
-	"""Returns {item_code: outstanding_qty} from open Purchase Orders."""
+def get_instocks_map(item_codes):
 	if not item_codes:
 		return {}
 
-	po = DocType("Purchase Order")
-	poi = DocType("Purchase Order Item")
+	purchase_order = DocType("Purchase Order")
+	purchase_order_item = DocType("Purchase Order Item")
 
 	rows = (
-		frappe.qb.from_(po)
-		.join(poi)
-		.on(poi.parent == po.name)
-		.select(poi.item_code, Sum(poi.qty - poi.received_qty).as_("outstanding_qty"))
-		.where(
-			(po.docstatus == 1)
-			& (po.status.notin(["Completed", "Cancelled", "Closed"]))
-			& (poi.item_code.isin(item_codes))
+		frappe.qb.from_(purchase_order)
+		.join(purchase_order_item)
+		.on(purchase_order_item.parent == purchase_order.name)
+		.select(
+			purchase_order_item.item_code,
+			Sum(purchase_order_item.qty - purchase_order_item.received_qty).as_("outstanding_qty"),
 		)
-		.groupby(poi.item_code)
+		.where(
+			(purchase_order.docstatus == 1)
+			& (purchase_order.status.notin(["Completed", "Cancelled", "Closed"]))
+			& (purchase_order_item.item_code.isin(item_codes))
+		)
+		.groupby(purchase_order_item.item_code)
 	).run(as_dict=True)
 
 	return {r["item_code"]: flt(r["outstanding_qty"]) for r in rows}
 
 
-def _get_current_picking_map(item_codes):
-	"""Returns {item_code: qty} from open Pick Lists (Material Transfer purpose)."""
+def get_current_picking_map(item_codes):
 	if not item_codes:
 		return {}
 
-	pl = DocType("Pick List")
-	pli = DocType("Pick List Item")
+	pick_list = DocType("Pick List")
+	pick_list_item = DocType("Pick List Item")
 
 	rows = (
-		frappe.qb.from_(pl)
-		.join(pli)
-		.on(pli.parent == pl.name)
-		.select(pli.item_code, Sum(pli.qty).as_("total_qty"))
+		frappe.qb.from_(pick_list)
+		.join(pick_list_item)
+		.on(pick_list_item.parent == pick_list.name)
+		.select(pick_list_item.item_code, Sum(pick_list_item.qty).as_("total_qty"))
 		.where(
-			(pl.docstatus == 1)
-			& (pl.purpose == "Material Transfer")
-			& (pl.status.isin(["Open", "Partly Delivered"]))
-			& (pli.item_code.isin(item_codes))
+			(pick_list.docstatus == 1)
+			& (pick_list.purpose == "Material Transfer")
+			& (pick_list.status.isin(["Open", "Partly Delivered"]))
+			& (pick_list_item.item_code.isin(item_codes))
 		)
-		.groupby(pli.item_code)
+		.groupby(pick_list_item.item_code)
 	).run(as_dict=True)
 
 	return {r["item_code"]: flt(r["total_qty"]) for r in rows}
 
 
-def _get_pricing_map(proxy_sku_names):
-	"""Returns {proxy_sku: {min_price, min_margin}} from Amazon Product Pricing + Strategy."""
+def get_pricing_map(proxy_sku_names):
 	if not proxy_sku_names:
 		return {}
 
-	app = DocType("Amazon Product Pricing")
-	aps = DocType("Amazon Product Strategy")
+	amazon_product_pricing = DocType("Amazon Product Pricing")
+	amazon_product_strategy = DocType("Amazon Product Strategy")
 
 	rows = (
-		frappe.qb.from_(app)
-		.left_join(aps)
-		.on(app.active_strategy == aps.name)
+		frappe.qb.from_(amazon_product_pricing)
+		.left_join(amazon_product_strategy)
+		.on(amazon_product_pricing.active_strategy == amazon_product_strategy.name)
 		.select(
-			app.proxy_sku,
-			app.current_min_price,
-			aps.min_margin,
+			amazon_product_pricing.proxy_sku,
+			amazon_product_pricing.current_min_price,
+			amazon_product_strategy.min_margin,
 		)
-		.where((app.proxy_sku.isin(proxy_sku_names)) & (app.is_active == 1))
+		.where(
+			(amazon_product_pricing.proxy_sku.isin(proxy_sku_names)) & (amazon_product_pricing.is_active == 1)
+		)
 	).run(as_dict=True)
 
 	return {
@@ -745,29 +655,28 @@ def _get_pricing_map(proxy_sku_names):
 	}
 
 
-def _get_po_data_map(item_codes):
-	"""Returns {item_code: {po_count, total_qty}} from open Purchase Orders."""
+def get_po_data_map(item_codes):
 	if not item_codes:
 		return {}
 
-	po = DocType("Purchase Order")
-	poi = DocType("Purchase Order Item")
+	purchase_order = DocType("Purchase Order")
+	purchase_order_item = DocType("Purchase Order Item")
 
 	rows = (
-		frappe.qb.from_(po)
-		.join(poi)
-		.on(poi.parent == po.name)
+		frappe.qb.from_(purchase_order)
+		.join(purchase_order_item)
+		.on(purchase_order_item.parent == purchase_order.name)
 		.select(
-			poi.item_code,
-			Count(po.name).as_("po_count"),
-			Sum(poi.qty).as_("total_qty"),
+			purchase_order_item.item_code,
+			Count(purchase_order.name).as_("po_count"),
+			Sum(purchase_order_item.qty).as_("total_qty"),
 		)
 		.where(
-			(po.docstatus == 1)
-			& (po.status.notin(["Completed", "Cancelled", "Closed"]))
-			& (poi.item_code.isin(item_codes))
+			(purchase_order.docstatus == 1)
+			& (purchase_order.status.notin(["Completed", "Cancelled", "Closed"]))
+			& (purchase_order_item.item_code.isin(item_codes))
 		)
-		.groupby(poi.item_code)
+		.groupby(purchase_order_item.item_code)
 	).run(as_dict=True)
 
 	return {
@@ -779,27 +688,21 @@ def _get_po_data_map(item_codes):
 	}
 
 
-def _compute_highest_weekly_rate(s7, s14, s30):
-	"""
-	Compute highest weekly sales rate from multi-period data.
-	max(s7, max(0, s14-s7), max(0, s30-s14)/2)
-	"""
+def compute_highest_weekly_rate(s7, s14, s30):
 	week1 = flt(s7)
 	week2 = max(0, flt(s14) - flt(s7))
 	weeks3_4 = max(0, flt(s30) - flt(s14)) / 2
 	return max(week1, week2, weeks3_4)
 
 
-def _compute_3week_lead_time_stock(fba_stock, rate):
-	"""Stock remaining after 3 weeks of sales at the given rate."""
+def compute_3week_lead_time_stock(fba_stock, rate):
 	needed = flt(rate) * 3
 	if flt(fba_stock) >= needed:
 		return flt(fba_stock) - needed
 	return 0
 
 
-def _compute_comment(asin, s3, s7, s14, s30):
-	"""Determine SKU status: Not Listed, Active, or No Sales."""
+def compute_comment(asin, s3, s7, s14, s30):
 	if not asin:
 		return "Not Listed"
 	if any([flt(s3) > 0, flt(s7) > 0, flt(s14) > 0, flt(s30) > 0]):
@@ -807,13 +710,11 @@ def _compute_comment(asin, s3, s7, s14, s30):
 	return "No Sales"
 
 
-def _compute_forecast(hwr, instocks, current, receiving, three_wk_lt):
-	"""forecast = (hwr * 3) - instocks - current - receiving - three_wk_lt"""
+def compute_forecast(hwr, instocks, current, receiving, three_wk_lt):
 	return flt(hwr) * 3 - flt(instocks) - flt(current) - flt(receiving) - flt(three_wk_lt)
 
 
-def _compute_ranking(sales_rank):
-	"""'No Rank' if blank/0; 'High' if >50000; else ''."""
+def compute_ranking(sales_rank):
 	rank = flt(sales_rank)
 	if not rank:
 		return "No Rank"
@@ -822,8 +723,7 @@ def _compute_ranking(sales_rank):
 	return ""
 
 
-def _compute_sales_dropped(fba_stock, s7, hwr, prev_hwr):
-	"""YES if fba_stock > 0 and 7d sales >= 35% below baseline."""
+def compute_sales_dropped(fba_stock, s7, hwr, prev_hwr):
 	baseline = max(flt(hwr), flt(prev_hwr))
 	if baseline <= 0 or flt(fba_stock) <= 0:
 		return ""
@@ -833,11 +733,9 @@ def _compute_sales_dropped(fba_stock, s7, hwr, prev_hwr):
 	return ""
 
 
-def _compute_program_forecast(
+def compute_program_forecast(
 	buy_box_current, fba_stock, s3, s7, hwr, instocks, current, receiving, forecast, three_wk_lt, min_margin
 ):
-	import math
-
 	buy_box_current = flt(buy_box_current)
 	fba_stock = flt(fba_stock)
 	s3 = flt(s3)
@@ -850,7 +748,6 @@ def _compute_program_forecast(
 	three_wk_lt = flt(three_wk_lt)
 	min_margin = flt(min_margin)
 
-	# If no buy box price → blank
 	if not buy_box_current:
 		return ("", "No Buy Box price")
 
@@ -858,23 +755,19 @@ def _compute_program_forecast(
 	rate4x = hwr * 4
 	total_buf = fba_stock + instocks + current + receiving
 
-	# Exact FBA 4-week coverage
 	if math.isclose(fba_stock, sales7x4, abs_tol=1e-6):
 		return (0, "Enough FBA stock (≈7dX4)")
 
-	# Rule A: No recent sales but margin OK and positive forecast
 	if s3 == 0 and s7 == 0 and min_margin > 0.05 and forecast > 0:
 		if three_wk_lt >= rate4x:
 			return (0, "High lead-time (>=4Xwk rate), hold")
 		return (forecast + hwr, "Zero recent sales but margin OK; send (forecast+hwr)")
 
-	# Rule B: Negative forecast, or no sales, or low margin
 	if forecast < 0 or (s3 == 0 and s7 == 0) or min_margin <= 0.05:
 		if min_margin <= 0.05:
 			return ("Margins", "Low margin")
 		return (0, "Negative/zero conditions; hold")
 
-	# Rule C: Has sales, positive forecast, margin OK
 	if fba_stock >= sales7x4:
 		return (0, "AFN alone covers 4 weeks; hold")
 
@@ -883,12 +776,10 @@ def _compute_program_forecast(
 			return (forecast + hwr, "Total buffer covers, lead OK; send (forecast+hwr)")
 		return (0, "Buffer covers but lead high; hold")
 
-	# Insufficient buffer
 	return (forecast + hwr, "Insufficient buffer; send (forecast+hwr)")
 
 
-def _compute_total_forecast(hwr, forecast):
-	"""total_forecast = hwr + forecast"""
+def compute_total_forecast(hwr, forecast):
 	return flt(hwr) + flt(forecast)
 
 
@@ -917,10 +808,10 @@ def create_material_requests_from_forecast_report(selected_items):
 	if not target_warehouse:
 		frappe.throw(_("AFN Warehouse not configured in Amazon SP API Settings"))
 
-	mr = frappe.new_doc("Material Request")
-	mr.material_request_type = "Material Transfer"
-	mr.company = company
-	mr.schedule_date = frappe.utils.today()
+	material_request = frappe.new_doc("Material Request")
+	material_request.material_request_type = "Material Transfer"
+	material_request.company = company
+	material_request.schedule_date = frappe.utils.today()
 
 	for item in selected_items:
 		sku = item.get("sku")
@@ -932,7 +823,7 @@ def create_material_requests_from_forecast_report(selected_items):
 		if qty <= 0:
 			continue
 
-		mr.append(
+		material_request.append(
 			"items",
 			{
 				"item_code": info["item"],
@@ -943,13 +834,13 @@ def create_material_requests_from_forecast_report(selected_items):
 			},
 		)
 
-	if not mr.items:
+	if not material_request.items:
 		frappe.throw(_("No valid items with positive quantity to transfer"))
 
-	mr.insert(ignore_permissions=True)
+	material_request.insert(ignore_permissions=True)
 
 	return {
 		"success": True,
-		"material_request": mr.name,
-		"message": _("Created Material Request {0}").format(mr.name),
+		"material_request": material_request.name,
+		"message": _("Created Material Request {0}").format(material_request.name),
 	}

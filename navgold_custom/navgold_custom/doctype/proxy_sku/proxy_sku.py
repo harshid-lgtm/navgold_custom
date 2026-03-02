@@ -4,6 +4,7 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
+from frappe.query_builder import DocType
 
 
 class ProxySKU(Document):
@@ -76,3 +77,27 @@ class ProxySKU(Document):
 			}
 		)
 		return doc.insert(ignore_permissions=True)
+
+
+def get_proxy_sku_map(sku_names=None):
+	proxy_sku = DocType("Proxy SKU")
+	query = (
+		frappe.qb.from_(proxy_sku)
+		.select(proxy_sku.name, proxy_sku.item, proxy_sku.asin, proxy_sku.uom, proxy_sku.is_fba)
+		.where(proxy_sku.is_active == 1)
+	)
+
+	if sku_names:
+		query = query.where(proxy_sku.name.isin(sku_names))
+
+	rows = query.run(as_dict=True)
+
+	return {
+		row["name"]: {
+			"item": row["item"],
+			"asin": row["asin"] or "",
+			"uom": row["uom"],
+			"is_fba": row["is_fba"],
+		}
+		for row in rows
+	}
