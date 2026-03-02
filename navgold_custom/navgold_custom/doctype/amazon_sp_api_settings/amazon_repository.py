@@ -1220,22 +1220,34 @@ class AmazonRepository:
 		sales_orders = []
 
 		while True:
-			if orders_payload:
-				orders_list = orders_payload.get("Orders")
-				next_token = orders_payload.get("NextToken")
-				if not orders_list or len(orders_list) == 0:
-					break
-				for order in orders_list:
+			if not orders_payload:
+				break
+
+			orders_list = orders_payload.get("Orders")
+			next_token = orders_payload.get("NextToken")
+			if not orders_list or len(orders_list) == 0:
+				break
+			for order in orders_list:
+				try:
 					sales_order = self.create_sales_order(order)
 					if sales_order:
 						sales_orders.append(sales_order)
-				if not next_token:
-					break
-				orders_payload = self.call_sp_api_method(
-					sp_api_method=orders.get_orders,
-					last_updated_after=last_updated_after,
-					next_token=next_token,
-				)
+				except Exception:
+					order_id = (order or {}).get("AmazonOrderId")
+					frappe.log_error(
+						title="Amazon Sales Order Sync Error",
+						message=(
+							f"Failed syncing Amazon order {order_id or 'Unknown'}"
+							f"\n\n{frappe.get_traceback()}"
+						),
+					)
+			if not next_token:
+				break
+			orders_payload = self.call_sp_api_method(
+				sp_api_method=orders.get_orders,
+				last_updated_after=last_updated_after,
+				next_token=next_token,
+			)
 		# Todo: Submit Sales Order and create Invoices
 		# frappe.enqueue("navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api_settings.enq_si_submit", sales_orders=sales_orders)
 		return sales_orders
