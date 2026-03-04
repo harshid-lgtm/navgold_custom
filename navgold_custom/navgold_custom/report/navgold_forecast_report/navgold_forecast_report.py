@@ -8,7 +8,7 @@ import frappe
 from frappe import _
 from frappe.query_builder import DocType
 from frappe.query_builder.functions import Count, Sum
-from frappe.utils import add_days, cstr, flt, today
+from frappe.utils import add_days, ceil, cstr, flt, today
 from frappe.utils.csvutils import read_csv_content
 from frappe.utils.xlsxutils import read_xlsx_file_from_attached_file
 
@@ -838,9 +838,260 @@ def create_material_requests_from_forecast_report(selected_items):
 		frappe.throw(_("No valid items with positive quantity to transfer"))
 
 	material_request.insert(ignore_permissions=True)
+	material_request.submit()
 
 	return {
 		"success": True,
 		"material_request": material_request.name,
 		"message": _("Created Material Request {0}").format(material_request.name),
+	}
+
+
+def build_sku_info(selected_items):
+	sku_names = [item.get("sku") for item in selected_items if item.get("sku")]
+	if not sku_names:
+		frappe.throw(_("No valid SKUs found in selection"))
+
+	sku_rows = frappe.get_all(
+		"Proxy SKU", filters={"name": ("in", sku_names)}, fields=["name", "item", "uom"]
+	)
+	return {row["name"]: {"item": row["item"], "uom": row["uom"]} for row in sku_rows}
+
+
+def create_material_request_doc(selected_items, sku_info, company, target_warehouse):
+	material_request = frappe.new_doc("Material Request")
+	material_request.material_request_type = "Material Transfer"
+	material_request.company = company
+	material_request.schedule_date = frappe.utils.today()
+
+	sku_order = []
+	for item in selected_items:
+		sku = item.get("sku")
+		info = sku_info.get(sku)
+		if not info or not info["item"]:
+			continue
+
+		qty = flt(item.get("quantity_to_transfer") or 0)
+		if qty <= 0:
+			continue
+
+		material_request.append(
+			"items",
+			{
+				"item_code": info["item"],
+				"qty": qty,
+				"uom": info["uom"],
+				"schedule_date": frappe.utils.today(),
+				"warehouse": target_warehouse,
+			},
+		)
+		sku_order.append(sku)
+
+	if not material_request.items:
+		frappe.throw(_("No valid items with positive quantity to transfer"))
+
+	material_request.insert(ignore_permissions=True)
+	material_request.submit()
+
+	sku_to_mr_item = {
+		sku: mr_item.name for sku, mr_item in zip(sku_order, material_request.items, strict=False)
+	}
+	return material_request, sku_to_mr_item
+
+
+def get_supplier_uom_map(selected_items, sku_info):
+	"""Batch-fetch supplier UOM from Supplier Item Price and Stock for each item+supplier pair."""
+	pairs = []
+	for item in selected_items:
+		supplier = item.get("top_supplier")
+		sku = item.get("sku")
+		info = sku_info.get(sku)
+		if supplier and info and info["item"]:
+			pairs.append((info["item"], supplier))
+
+	if not pairs:
+		return {}
+
+	supplier_item_price_and_stock = DocType("Supplier Item Price and Stock")
+	item_codes = list({pair[0] for pair in pairs})
+	supplier_names = list({pair[1] for pair in pairs})
+
+	rows = (
+		frappe.qb.from_(supplier_item_price_and_stock)
+		.select(
+			supplier_item_price_and_stock.item,
+			supplier_item_price_and_stock.supplier,
+			supplier_item_price_and_stock.uom,
+		)
+		.where(
+			(supplier_item_price_and_stock.item.isin(item_codes))
+			& (supplier_item_price_and_stock.supplier.isin(supplier_names))
+		)
+	).run(as_dict=True)
+
+	return {(row["item"], row["supplier"]): row["uom"] for row in rows}
+
+
+def get_conversion_factor(item_code, supplier_uom):
+	"""Fetch conversion factor from Item UOM conversion table."""
+	conversion_factor = frappe.db.get_value(
+		"UOM Conversion Detail", {"parent": item_code, "uom": supplier_uom}, "conversion_factor"
+	)
+	return flt(conversion_factor) or 1.0
+
+
+def create_purchase_orders(selected_items, sku_info, company, warehouse, mr_item_map=None):
+	supplier_uom_map = get_supplier_uom_map(selected_items, sku_info)
+
+	supplier_groups = {}
+	for item in selected_items:
+		supplier = item.get("top_supplier")
+		if not supplier:
+			continue
+
+		sku = item.get("sku")
+		info = sku_info.get(sku)
+		if not info or not info["item"]:
+			continue
+
+		qty = flt(item.get("quantity_to_transfer") or 0)
+		if qty <= 0:
+			continue
+
+		item_code = info["item"]
+		mr_uom = info["uom"]
+		supplier_uom = supplier_uom_map.get((item_code, supplier)) or mr_uom
+		mr_conversion_factor = get_conversion_factor(item_code, mr_uom)
+		supplier_conversion_factor = get_conversion_factor(item_code, supplier_uom)
+		qty_in_base = qty * mr_conversion_factor
+		qty_in_supplier_uom = (
+			ceil(qty_in_base / supplier_conversion_factor) if supplier_conversion_factor > 0 else qty_in_base
+		)
+
+		if supplier not in supplier_groups:
+			supplier_groups[supplier] = []
+
+		supplier_groups[supplier].append(
+			{
+				"sku": sku,
+				"item_code": item_code,
+				"qty": qty_in_supplier_uom,
+				"uom": supplier_uom,
+				"conversion_factor": supplier_conversion_factor,
+				"rate": flt(item.get("top_supplier_cost") or 0),
+			}
+		)
+
+	created_purchase_orders = []
+	sku_to_purchase_order = {}
+
+	for supplier, items in supplier_groups.items():
+		purchase_order = frappe.new_doc("Purchase Order")
+		purchase_order.supplier = supplier
+		purchase_order.company = company
+		purchase_order.currency = frappe.db.get_default("currency")
+		purchase_order.transaction_date = frappe.utils.today()
+		purchase_order.schedule_date = frappe.utils.today()
+
+		for item_data in items:
+			purchase_order.append(
+				"items",
+				{
+					"item_code": item_data["item_code"],
+					"qty": item_data["qty"],
+					"uom": item_data["uom"],
+					"conversion_factor": item_data["conversion_factor"],
+					"rate": item_data["rate"],
+					"schedule_date": frappe.utils.today(),
+					"warehouse": warehouse,
+				},
+			)
+
+		if purchase_order.items:
+			purchase_order.insert(ignore_permissions=True)
+			purchase_order.submit()
+			created_purchase_orders.append(purchase_order.name)
+			for item_data in items:
+				sku_to_purchase_order[item_data["sku"]] = purchase_order.name
+
+	return created_purchase_orders, sku_to_purchase_order
+
+
+@frappe.whitelist()
+def create_purchase_orders_from_forecast_report(selected_items):
+	if isinstance(selected_items, str):
+		selected_items = frappe.parse_json(selected_items)
+
+	if not selected_items:
+		frappe.throw("No items selected")
+
+	sku_info = build_sku_info(selected_items)
+
+	amz_setting = frappe.get_last_doc("Amazon SP API Settings", {"is_active": 1})
+	company = amz_setting.company
+	warehouse = amz_setting.warehouse
+
+	created_purchase_orders, _ = create_purchase_orders(selected_items, sku_info, company, warehouse)
+
+	if not created_purchase_orders:
+		frappe.throw(_("No valid items with a supplier and positive quantity to transfer"))
+
+	return {
+		"success": True,
+		"purchase_orders": created_purchase_orders,
+		"message": _("Created {0} Purchase Order(s)").format(len(created_purchase_orders)),
+	}
+
+
+@frappe.whitelist()
+def create_purchase_orders_and_material_request_from_forecast_report(selected_items):
+	if isinstance(selected_items, str):
+		selected_items = frappe.parse_json(selected_items)
+
+	if not selected_items:
+		frappe.throw(_("No items selected"))
+
+	sku_info = build_sku_info(selected_items)
+
+	amz_setting = frappe.get_last_doc("Amazon SP API Settings", {"is_active": 1})
+	company = amz_setting.company
+	warehouse = amz_setting.warehouse
+	target_warehouse = amz_setting.afn_warehouse
+
+	if not target_warehouse:
+		frappe.throw(_("AFN Warehouse not configured in Amazon SP API Settings"))
+
+	material_request, sku_to_mr_item = create_material_request_doc(
+		selected_items, sku_info, company, target_warehouse
+	)
+
+	mr_item_map = {
+		sku: {
+			"material_request": material_request.name,
+			"material_request_item": mr_item_name,
+		}
+		for sku, mr_item_name in sku_to_mr_item.items()
+	}
+
+	created_purchase_orders, sku_to_purchase_order = create_purchase_orders(
+		selected_items, sku_info, company, warehouse, mr_item_map
+	)
+
+	if not created_purchase_orders:
+		frappe.throw(_("No valid items with a supplier and positive quantity to transfer"))
+
+	for sku, mr_item_name in sku_to_mr_item.items():
+		purchase_order_name = sku_to_purchase_order.get(sku)
+		if purchase_order_name:
+			frappe.db.set_value(
+				"Material Request Item", mr_item_name, "custom_purchase_order", purchase_order_name
+			)
+
+	return {
+		"success": True,
+		"material_request": material_request.name,
+		"purchase_orders": created_purchase_orders,
+		"message": _("Created Material Request {0} and {1} Purchase Order(s)").format(
+			material_request.name, len(created_purchase_orders)
+		),
 	}

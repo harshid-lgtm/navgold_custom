@@ -12,6 +12,7 @@ const forecast_report_state = {
 
 	set_quantity(sku, qty) {
 		this.edited_quantities[sku] = qty;
+		this.update_ui();
 	},
 
 	get_quantity(sku, default_qty) {
@@ -29,6 +30,32 @@ const forecast_report_state = {
 			return item;
 		});
 	},
+
+	calculate_total_qty_stock_uom() {
+		const selected = this.report?.get_checked_items() || [];
+		return selected.reduce((sum, row) => {
+			const qty = this.get_quantity(row.sku, row.quantity_to_transfer || 0);
+			const multiplier = parseFloat(row.variant_multiplier || 1);
+			return sum + parseFloat(qty || 0) * multiplier;
+		}, 0);
+	},
+
+	update_ui: frappe.utils.debounce(function () {
+		if (!this.report?.info_bar) return;
+
+		const selected = this.report.get_checked_items() || [];
+		const total_stock_qty = this.calculate_total_qty_stock_uom();
+		const info_text = this.report.info_bar.querySelector('.info-text');
+
+		if (info_text) {
+			info_text.innerHTML = `
+				<strong>${__('Selected')}:</strong> ${selected.length} ${__('items')} |
+				<strong>${__(
+					'Total Qty to Order (Singles)',
+				)}:</strong> ${total_stock_qty}
+			`;
+		}
+	}, 50),
 };
 
 frappe.query_reports['Navgold Forecast Report'] = {
@@ -56,52 +83,128 @@ frappe.query_reports['Navgold Forecast Report'] = {
 	onload: (report) => {
 		forecast_report_state.init(report);
 
-		report.page.add_inner_button(__('Create Material Request'), () => {
+		const get_valid_items = () => {
 			const selected_rows = report.get_checked_items();
-
 			if (selected_rows.length === 0) {
 				frappe.msgprint(__('Please select at least one row'));
-				return;
+				return null;
 			}
-
 			const items_with_qty =
 				forecast_report_state.get_items_with_edited_quantities(selected_rows);
-
 			const valid_items = items_with_qty.filter(
 				(r) => parseFloat(r.quantity_to_transfer) > 0,
 			);
-
 			if (valid_items.length === 0) {
 				frappe.msgprint(
 					__(
 						'No selected rows have a Quantity to Transfer > 0. Please edit the quantity first.',
 					),
 				);
-				return;
+				return null;
 			}
+			return valid_items;
+		};
+
+		// report.page.add_inner_button(__('Create Material Request'), () => {
+		// 	const valid_items = get_valid_items();
+		// 	if (!valid_items) return;
+
+		// 	frappe.confirm(
+		// 		__('Create Material Request for {0} items?', [valid_items.length]),
+		// 		async () => {
+		// 			try {
+		// 				const response = await frappe.call({
+		// 					method: 'navgold_custom.navgold_custom.report.navgold_forecast_report.navgold_forecast_report.create_material_requests_from_forecast_report',
+		// 					args: { selected_items: valid_items },
+		// 					freeze: true,
+		// 					freeze_message: __('Creating Material Request...'),
+		// 				});
+
+		// 				if (response.message?.success) {
+		// 					const mr_name = response.message.material_request;
+		// 					frappe.msgprint({
+		// 						title: __('Material Request Created'),
+		// 						message: __('Created: <a href="/app/material-request/{0}" target="_blank">{0}</a>', [mr_name]),
+		// 						indicator: 'green',
+		// 					});
+		// 					forecast_report_state.edited_quantities = {};
+		// 					report.refresh();
+		// 				}
+		// 			} catch (error) {
+		// 				frappe.msgprint({ title: __('Error'), message: __('Failed to create Material Request. Check error log.'), indicator: 'red' });
+		// 			}
+		// 		},
+		// 	);
+		// });
+
+		// report.page.add_inner_button(__('Create Purchase Order'), () => {
+		// 	const valid_items = get_valid_items();
+		// 	if (!valid_items) return;
+
+		// 	const items_without_supplier = valid_items.filter((r) => !r.top_supplier);
+		// 	if (items_without_supplier.length > 0) {
+		// 		frappe.msgprint(__('Some selected items have no top supplier. They will be skipped.'));
+		// 	}
+
+		// 	frappe.confirm(
+		// 		__('Create Purchase Order(s) for {0} items?', [valid_items.length]),
+		// 		async () => {
+		// 			try {
+		// 				const response = await frappe.call({
+		// 					method: 'navgold_custom.navgold_custom.report.navgold_forecast_report.navgold_forecast_report.create_purchase_orders_from_forecast_report',
+		// 					args: { selected_items: valid_items },
+		// 					freeze: true,
+		// 					freeze_message: __('Creating Purchase Order(s)...'),
+		// 				});
+
+		// 				if (response.message?.success) {
+		// 					const po_names = response.message.purchase_orders;
+		// 					const links = po_names.map((name) => `<a href="/app/purchase-order/${name}" target="_blank">${name}</a>`).join(', ');
+		// 					frappe.msgprint({
+		// 						title: __('Purchase Order(s) Created'),
+		// 						message: __('Created: {0}', [links]),
+		// 						indicator: 'green',
+		// 					});
+		// 					forecast_report_state.edited_quantities = {};
+		// 					report.refresh();
+		// 				}
+		// 			} catch (error) {
+		// 				frappe.msgprint({ title: __('Error'), message: __('Failed to create Purchase Order. Check error log.'), indicator: 'red' });
+		// 			}
+		// 		},
+		// 	);
+		// });
+
+		report.page.add_inner_button(__('Create PO + Material Request'), () => {
+			const valid_items = get_valid_items();
+			if (!valid_items) return;
 
 			frappe.confirm(
-				__('Create Material Request for {0} items?', [valid_items.length]),
+				__('Create Purchase Order(s) and Material Request for {0} items?', [
+					valid_items.length,
+				]),
 				async () => {
 					try {
 						const response = await frappe.call({
 							method:
-								'navgold_custom.navgold_custom.report.navgold_forecast_report.navgold_forecast_report.create_material_requests_from_forecast_report',
-							args: {
-								selected_items: valid_items,
-							},
+								'navgold_custom.navgold_custom.report.navgold_forecast_report.navgold_forecast_report.create_purchase_orders_and_material_request_from_forecast_report',
+							args: { selected_items: valid_items },
 							freeze: true,
-							freeze_message: __('Creating Material Request...'),
+							freeze_message: __('Creating PO + Material Request...'),
 						});
 
 						if (response.message?.success) {
 							const mr_name = response.message.material_request;
+							const po_names = response.message.purchase_orders;
+							const po_links = po_names
+								.map(
+									(name) =>
+										`<a href="/app/purchase-order/${name}" target="_blank">${name}</a>`,
+								)
+								.join(', ');
 							frappe.msgprint({
-								title: __('Material Request Created'),
-								message: __(
-									'Created: <a href="/app/material-request/{0}" target="_blank">{0}</a>',
-									[mr_name],
-								),
+								title: __('Created Successfully'),
+								message: `MR: <a href="/app/material-request/${mr_name}" target="_blank">${mr_name}</a><br>PO(s): ${po_links}`,
 								indicator: 'green',
 							});
 							forecast_report_state.edited_quantities = {};
@@ -111,7 +214,7 @@ frappe.query_reports['Navgold Forecast Report'] = {
 						frappe.msgprint({
 							title: __('Error'),
 							message: __(
-								'Failed to create Material Request. Check error log.',
+								'Failed to create PO + Material Request. Check error log.',
 							),
 							indicator: 'red',
 						});
@@ -121,9 +224,21 @@ frappe.query_reports['Navgold Forecast Report'] = {
 		});
 	},
 
+	after_refresh: (report) => {
+		if (!report.info_bar) {
+			create_forecast_info_bar(report);
+		}
+		forecast_report_state.update_ui();
+	},
+
 	get_datatable_options(options) {
 		return Object.assign(options, {
 			checkboxColumn: true,
+			events: {
+				onCheckRow: () => {
+					forecast_report_state.update_ui();
+				},
+			},
 		});
 	},
 
@@ -156,6 +271,44 @@ frappe.query_reports['Navgold Forecast Report'] = {
 		return default_value;
 	},
 };
+
+function create_forecast_info_bar(report) {
+	const info_bar = $('<div></div>')
+		.addClass('forecast-info-bar')
+		.html(`
+			<div class="info-text">
+				<strong>${__('Selected')}:</strong> 0 ${__('items')} |
+				<strong>${__('Total Qty to Order')}:</strong> 0
+			</div>
+		`);
+
+	const datatable_wrapper = report.$report.find('.datatable');
+	if (datatable_wrapper.length) {
+		datatable_wrapper.before(info_bar);
+	}
+
+	report.info_bar = info_bar[0];
+
+	if (!document.getElementById('forecast-report-styles')) {
+		const style = document.createElement('style');
+		style.id = 'forecast-report-styles';
+		style.innerHTML = `
+			.forecast-info-bar {
+				display: flex;
+				justify-content: flex-end;
+				align-items: center;
+				margin-bottom: 12px;
+				padding-left: 4px;
+			}
+			.forecast-info-bar .info-text {
+				color: var(--text-color);
+				font-weight: 500;
+				font-size: 14px;
+			}
+		`;
+		document.head.appendChild(style);
+	}
+}
 
 window.edit_forecast_quantity = (button) => {
 	const sku = button.getAttribute('data-sku');
