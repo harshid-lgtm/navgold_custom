@@ -1,2 +1,2 @@
-# Copyright (c) 2025, Navgold and contributors
-# License: MIT License (see license.txt)
+# Copyright (c) 2025, developers@buildwithhussain.com and contributors
+# For license information, please see license.txt

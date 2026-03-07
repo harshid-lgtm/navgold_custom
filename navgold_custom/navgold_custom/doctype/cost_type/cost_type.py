@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import frappe
+from frappe import _
 from frappe.model.document import Document
 
 
@@ -28,6 +29,6 @@ class CostType(Document):
 		"""Ensure only one of is_absolute, is_relative, or is_vat is set"""
 		flags = [self.is_absolute, self.is_relative, self.is_vat]
 		if sum(flags) > 1:
-			frappe.throw("Only one of 'Is Absolute', 'Is Relative', or 'Is VAT' can be selected")
+			frappe.throw(_("Only one of 'Is Absolute', 'Is Relative', or 'Is VAT' can be selected"))
 		if sum(flags) == 0:
-			frappe.throw("At least one of 'Is Absolute', 'Is Relative', or 'Is VAT' must be selected")
+			frappe.throw(_("At least one of 'Is Absolute', 'Is Relative', or 'Is VAT' must be selected"))

@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import frappe
+from frappe import _
 from frappe.model.document import Document
 
 
@@ -33,7 +34,7 @@ class AmazonPricingSubmissionLog(Document):
 		from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_submitter import check_feed_status
 
 		if self.submission_type != "Amazon":
-			frappe.throw("Can only check status for Amazon submissions")
+			frappe.throw(_("Can only check status for Amazon submissions"))
 
 		result = check_feed_status(self.name)
 		self.reload()
@@ -45,7 +46,7 @@ class AmazonPricingSubmissionLog(Document):
 		from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_submitter import submit_pricing
 
 		if self.status != "Error":
-			frappe.throw("Can only retry failed submissions")
+			frappe.throw(_("Can only retry failed submissions"))
 
 		pricing_names = [p.strip() for p in self.pricing_records.split("\n") if p.strip()]
 		return submit_pricing(pricing_names)

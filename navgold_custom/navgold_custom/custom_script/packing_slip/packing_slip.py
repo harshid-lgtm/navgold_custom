@@ -1,86 +1,97 @@
-# Copyright (c) 2025, Navgold and contributors
-# License: MIT License
+# Copyright (c) 2025, developers@buildwithhussain.com and contributors
+# For license information, please see license.txt
 
 import frappe
+from erpnext.stock.doctype.delivery_note.delivery_note import make_packing_slip
+from frappe import _
+from frappe.utils import flt
+
+from navgold_custom.navgold_custom.custom_script.packing_slip.packing_utils import (
+	get_item_weight_map,
+	recalculate_net_weight,
+)
+
+
+def before_validate(doc, method):
+	recalculate_net_weight(doc)
+	validate_packed_qty(doc)
+
+
+def validate_packed_qty(doc):
+	for item in doc.items:
+		packed_qty = flt(item.custom_packed_qty)
+		qty = flt(item.qty)
+		if packed_qty != qty:
+			frappe.throw(
+				_("Row {0}: Packed Qty ({1}) does not match Required Qty ({2}) for item {3}").format(
+					item.idx, packed_qty, qty, item.item_code
+				)
+			)
 
 
 @frappe.whitelist()
 def get_draft_delivery_note_items(tote: str | None = None):
-	"""Fetch items from draft Delivery Notes filtered by tote"""
 	if not tote:
 		return []
 
-	pick_lists = frappe.get_all(
+	pick_list_names = frappe.get_all(
 		"Pick List",
 		filters={"custom_tote": tote, "docstatus": 1, "status": "Open"},
-		fields=["name"],
+		pluck="name",
 	)
 
-	if not pick_lists:
+	if not pick_list_names:
 		return []
 
-	sales_orders = set()
-	for pl in pick_lists:
-		pl_items = frappe.get_all("Pick List Item", filters={"parent": pl.name}, fields=["sales_order"])
-		for item in pl_items:
-			if item.sales_order:
-				sales_orders.add(item.sales_order)
+	sales_orders = set(
+		frappe.get_all(
+			"Pick List Item",
+			filters={"parent": ["in", pick_list_names]},
+			pluck="sales_order",
+		)
+	)
+	sales_orders.discard(None)
 
 	if not sales_orders:
 		return []
 
-	delivery_notes = frappe.get_all("Delivery Note", filters={"docstatus": 0}, fields=["name"])
+	delivery_note_items = frappe.get_all(
+		"Delivery Note Item",
+		filters={
+			"docstatus": 0,
+			"against_sales_order": ["in", sales_orders],
+		},
+		fields=["item_code", "item_name", "against_sales_order", "qty", "packed_qty", "parent"],
+	)
 
-	items_map = []
-	for dn in delivery_notes:
-		doc = frappe.get_cached_doc("Delivery Note", dn.name)
-
-		for item in doc.items:
-			if item.against_sales_order in sales_orders:
-				items_map.append(
-					{
-						"item_code": item.item_code,
-						"item_name": item.item_name,
-						"delivery_note": doc.name,
-						"sales_order": item.against_sales_order,
-					}
-				)
-
-	return items_map
+	return [
+		{
+			"item_code": item.item_code,
+			"item_name": item.item_name,
+			"delivery_note": item.parent,
+			"sales_order": item.against_sales_order,
+		}
+		for item in delivery_note_items
+		if flt(item.packed_qty) < flt(item.qty)
+	]
 
 
 @frappe.whitelist()
-def scan_barcode_and_get_delivery_note(search_value: str, tote: str | None = None):
-	"""Scan barcode and fetch the relevant Delivery Note"""
-	from erpnext.stock.utils import scan_barcode
+def get_delivery_note_items(delivery_note: str):
+	packing_slip_doc = make_packing_slip(delivery_note)
+	item_codes = {item.item_code for item in packing_slip_doc.items}
+	item_weights = get_item_weight_map(item_codes)
 
-	if not search_value:
-		return {"error": "No barcode provided"}
-
-	if not tote:
-		return {"error": "Please scan or enter Tote first"}
-
-	scan_result = scan_barcode(search_value)
-
-	if not scan_result or not scan_result.get("item_code"):
-		return {"error": "Cannot find Item with this Barcode"}
-
-	item_code = scan_result.get("item_code")
-	items = get_draft_delivery_note_items(tote)
-
-	if not items:
-		return {"error": f"No items found for tote {tote}"}
-
-	for item in items:
-		if item["item_code"] == item_code:
-			return {
-				"item_code": item_code,
-				"item_name": item.get("item_name"),
-				"delivery_note": item["delivery_note"],
-				"sales_order": item.get("sales_order"),
-				"barcode": scan_result.get("barcode"),
-				"batch_no": scan_result.get("batch_no"),
-				"serial_no": scan_result.get("serial_no"),
-			}
-
-	return {"error": f"Item {item_code} not found in any Delivery Note for tote {tote}"}
+	return [
+		{
+			"item_code": item.item_code,
+			"item_name": item.item_name,
+			"description": item.description,
+			"qty": item.qty,
+			"uom": item.stock_uom,
+			"dn_detail": item.dn_detail,
+			"weight_per_unit": flt(item_weights.get(item.item_code, {}).get("weight_per_unit")),
+			"weight_uom": item_weights.get(item.item_code, {}).get("weight_uom", ""),
+		}
+		for item in packing_slip_doc.items
+	]

@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import frappe
+from frappe import _
 from frappe.model.document import Document
 from frappe.utils.data import flt
 
@@ -57,7 +58,7 @@ class AmazonProductStrategy(Document):
 	def validate_margin(self):
 		"""Ensure min_margin <= max_margin"""
 		if self.min_margin > self.max_margin:
-			frappe.throw("Min Margin cannot be greater than Max Margin")
+			frappe.throw(_("Min Margin cannot be greater than Max Margin"))
 
 	def calculate_prices(self):
 		"""Calculate min and max prices based on costs and margins"""

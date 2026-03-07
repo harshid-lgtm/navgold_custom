@@ -1,7 +1,5 @@
-# Copyright (c) 2025, Navgold and contributors
-# License: MIT License
-
-import json
+# Copyright (c) 2025, developers@buildwithhussain.com and contributors
+# For license information, please see license.txt
 
 import frappe
 from erpnext.selling.doctype.sales_order.sales_order import create_pick_list
@@ -10,7 +8,7 @@ from frappe.utils import flt
 
 
 @frappe.whitelist()
-def get_open_sales_orders_for_delivery(customer=None, company=None):
+def get_open_sales_orders_for_delivery(customer: str | None = None, company: str | None = None):
 	if not company:
 		frappe.throw(_("Company is required"))
 
@@ -38,67 +36,73 @@ def get_open_sales_orders_for_delivery(customer=None, company=None):
 		order_by="delivery_date asc, creation desc",
 	)
 
-	result = []
+	sales_orders = [
+		so for so in sales_orders if not (flt(so.per_picked) >= 100 and flt(so.per_delivered) >= 100)
+	]
 
-	for so in sales_orders:
-		if flt(so.per_picked) >= 100 and flt(so.per_delivered) >= 100:
-			continue
+	if not sales_orders:
+		return []
 
-		so_items = frappe.db.get_all(
-			"Sales Order Item",
-			filters={
-				"parent": so.name,
-				"docstatus": 1,
-			},
-			fields=[
-				"name",
-				"item_code",
-				"qty",
-				"picked_qty",
-				"delivered_qty",
-				"conversion_factor",
-				"delivered_by_supplier",
-			],
+	so_names = [so.name for so in sales_orders]
+	so_map = {so.name: so for so in sales_orders}
+
+	all_so_items = frappe.get_all(
+		"Sales Order Item",
+		filters={"parent": ["in", so_names], "docstatus": 1},
+		fields=[
+			"parent",
+			"item_code",
+			"qty",
+			"picked_qty",
+			"delivered_qty",
+			"conversion_factor",
+			"delivered_by_supplier",
+		],
+	)
+
+	if not all_so_items:
+		return []
+
+	item_codes = {item.item_code for item in all_so_items if not item.delivered_by_supplier}
+	weight_map = {}
+	if item_codes:
+		weight_data = frappe.get_all(
+			"Item",
+			filters={"name": ["in", item_codes]},
+			fields=["name", "weight_per_unit"],
 		)
+		weight_map = {row.name: flt(row.weight_per_unit) for row in weight_data}
 
-		if not so_items:
+	so_stats = {}
+	for item in all_so_items:
+		if item.delivered_by_supplier:
 			continue
 
-		total_weight = 0.0
-		pending_items_count = 0
+		pending_qty = flt(item.qty) - max(flt(item.picked_qty), flt(item.delivered_qty))
+		if pending_qty <= 0:
+			continue
 
-		for item in so_items:
-			if item.delivered_by_supplier:
-				continue
+		if item.parent not in so_stats:
+			so_stats[item.parent] = {"total_weight": 0.0, "pending_items_count": 0}
 
-			picked_qty = flt(item.picked_qty or 0)
-			delivered_qty = flt(item.delivered_qty or 0)
-			ordered_qty = flt(item.qty or 0)
+		so_stats[item.parent]["pending_items_count"] += 1
 
-			pending_qty = ordered_qty - max(picked_qty, delivered_qty)
-
-			if pending_qty <= 0:
-				continue
-
-			pending_items_count += 1
-
+		weight_per_unit = weight_map.get(item.item_code, 0)
+		if weight_per_unit:
 			stock_pending_qty = pending_qty * flt(item.conversion_factor or 1)
+			so_stats[item.parent]["total_weight"] += stock_pending_qty * weight_per_unit
 
-			# Get weight per unit from Item master
-			weight_per_unit = frappe.get_cached_value("Item", item.item_code, "weight_per_unit")
-
-			if weight_per_unit:
-				item_weight = stock_pending_qty * flt(weight_per_unit)
-				total_weight += item_weight
-
-		if pending_items_count > 0:
+	result = []
+	for so_name, stats in so_stats.items():
+		if stats["pending_items_count"] > 0:
+			so = so_map[so_name]
 			result.append(
 				{
 					"sales_order": so.name,
 					"customer": so.customer_name or so.customer,
 					"delivery_date": so.delivery_date,
-					"total_weight": round(total_weight, 2),
-					"pending_items_count": pending_items_count,
+					"total_weight": round(stats["total_weight"], 2),
+					"pending_items_count": stats["pending_items_count"],
 					"company": so.company,
 				}
 			)
@@ -109,7 +113,7 @@ def get_open_sales_orders_for_delivery(customer=None, company=None):
 
 
 @frappe.whitelist()
-def map_sales_orders_to_pick_list(sales_order_names, target_pr_doc_json):
+def map_sales_orders_to_pick_list(sales_order_names: str, target_pr_doc_json: str):
 	if not sales_order_names:
 		frappe.throw(_("Sales Order names are required"))
 

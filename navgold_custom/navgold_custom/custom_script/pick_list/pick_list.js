@@ -1,10 +1,33 @@
-// Copyright (c) 2025
-// Navgold - MIT License
+// Copyright (c) 2025, developers@buildwithhussain.com and contributors
+// For license information, please see license.txt
 frappe.ui.form.on('Pick List', {
 	refresh(frm) {
 		frm.add_custom_button(__('Get Items by Weight'), () => {
 			frm.events.open_weight_based_selection_dialog(frm);
 		});
+
+		if (
+			frm.doc.docstatus === 1 &&
+			frm.doc.purpose === 'Material Transfer' &&
+			frm.doc.status !== 'Completed'
+		) {
+			frm.remove_custom_button(__('Stock Entry'), __('Create'));
+			frm.add_custom_button(
+				__('Stock Entry'),
+				async () => {
+					const response = await frappe.call({
+						method:
+							'erpnext.stock.doctype.pick_list.pick_list.create_stock_entry',
+						args: { pick_list: frm.doc },
+					});
+					const stock_entry = response.message;
+					stock_entry.stock_entry_type = 'FBA Transfer';
+					frappe.model.sync(stock_entry);
+					frappe.set_route('Form', 'Stock Entry', stock_entry.name);
+				},
+				__('Create'),
+			);
+		}
 	},
 
 	async open_weight_based_selection_dialog(frm) {
@@ -21,7 +44,7 @@ frappe.ui.form.on('Pick List', {
 
 	async fetch_and_show_sales_orders(frm) {
 		try {
-			const r = await frappe.call({
+			const response = await frappe.call({
 				method:
 					'navgold_custom.navgold_custom.custom_script.pick_list.pick_list.get_open_sales_orders_for_delivery',
 				args: {
@@ -30,7 +53,7 @@ frappe.ui.form.on('Pick List', {
 				},
 			});
 
-			if (!r.message || r.message.length === 0) {
+			if (!response.message || response.message.length === 0) {
 				frappe.msgprint(__('No open Sales Orders with pending items found'));
 				return;
 			}
@@ -40,7 +63,11 @@ frappe.ui.form.on('Pick List', {
 				'tote_weight_limit',
 			);
 
-			frm.events.show_sales_order_selection_popup(frm, r.message, weight_limit);
+			frm.events.show_sales_order_selection_popup(
+				frm,
+				response.message,
+				weight_limit,
+			);
 		} catch (err) {
 			frappe.msgprint(__('Error fetching Sales Orders'));
 		}
@@ -180,7 +207,7 @@ frappe.ui.form.on('Pick List', {
 
 	async map_selected_orders_to_picklist(frm, selected_orders, dialog) {
 		try {
-			const r = await frappe.call({
+			const response = await frappe.call({
 				method:
 					'navgold_custom.navgold_custom.custom_script.pick_list.pick_list.map_sales_orders_to_pick_list',
 				args: {
@@ -191,8 +218,8 @@ frappe.ui.form.on('Pick List', {
 				freeze_message: __('Adding items from Sales Orders...'),
 			});
 
-			if (r.message) {
-				frappe.model.sync(r.message);
+			if (response.message) {
+				frappe.model.sync(response.message);
 				frm.refresh_field('locations');
 
 				dialog.hide();

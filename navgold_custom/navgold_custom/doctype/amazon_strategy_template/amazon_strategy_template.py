@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import frappe
+from frappe import _
 from frappe.model.document import Document
 
 
@@ -36,15 +37,17 @@ class AmazonStrategyTemplate(Document):
 			)
 			if existing:
 				frappe.throw(
-					"Another strategy template is already set as default. "
-					"Please unset the current default first."
+					_(
+						"Another strategy template is already set as default. "
+						"Please unset the current default first."
+					)
 				)
 
 	def validate_strategy_types(self):
 		"""Validate that each strategy type appears at most once"""
 		strategy_types = [s.strategy_type for s in self.strategies]
 		if len(strategy_types) != len(set(strategy_types)):
-			frappe.throw("Each strategy type (FBA, SFP, Backorder, Default) can only appear once")
+			frappe.throw(_("Each strategy type (FBA, SFP, Backorder, Default) can only appear once"))
 
 	@frappe.whitelist()
 	def apply_to_pricing(self, pricing_name: str):

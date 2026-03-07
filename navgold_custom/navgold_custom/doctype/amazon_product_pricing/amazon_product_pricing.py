@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import frappe
+from frappe import _
 from frappe.model.document import Document
 from frappe.utils.data import flt
 
@@ -46,7 +47,11 @@ class AmazonProductPricing(Document):
 			if strategy:
 				strategy_doc = frappe.get_cached_doc("Amazon Product Strategy", strategy)
 				if strategy_doc.proxy_sku != self.proxy_sku:
-					frappe.throw(f"Strategy '{strategy}' does not belong to Proxy SKU '{self.proxy_sku}'")
+					frappe.throw(
+						_("Strategy '{0}' does not belong to Proxy SKU '{1}'").format(
+							strategy, self.proxy_sku
+						)
+					)
 
 	def select_active_strategy(self):
 		"""Select the active strategy based on stock/fulfillment conditions"""
@@ -74,10 +79,10 @@ class AmazonProductPricing(Document):
 		from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_submitter import submit_pricing
 
 		if not self.is_active:
-			frappe.throw("Cannot submit pricing for inactive products")
+			frappe.throw(_("Cannot submit pricing for inactive products"))
 
 		if not self.current_min_price or not self.current_max_price:
-			frappe.throw("Cannot submit pricing without calculated prices")
+			frappe.throw(_("Cannot submit pricing without calculated prices"))
 
 		result = submit_pricing([self.name])
 		return result
@@ -89,10 +94,10 @@ class AmazonProductPricing(Document):
 
 		settings = frappe.get_single("Navgold Settings")
 		if not settings.repricer_enabled:
-			frappe.throw("Repricer integration is not enabled")
+			frappe.throw(_("Repricer integration is not enabled"))
 
 		if not self.is_active:
-			frappe.throw("Cannot sync pricing for inactive products")
+			frappe.throw(_("Cannot sync pricing for inactive products"))
 
 		result = sync_to_repricer([self.name])
 		return result

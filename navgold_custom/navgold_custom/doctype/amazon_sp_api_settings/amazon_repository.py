@@ -1279,13 +1279,13 @@ def get_orders(amz_setting_name, last_updated_after, sync_selected_date_only=0) 
 
 
 @frappe.whitelist()
-def get_order(amz_setting_name, amazon_order_ids) -> list:
+def get_order(amz_setting_name: str, amazon_order_ids: str) -> list:
 	ar = AmazonRepository(amz_setting_name)
 	return ar.get_order(amazon_order_ids)
 
 
 @frappe.whitelist()
-def create_stock_entry(sales_invoice):
+def create_stock_entry(sales_invoice: str):
 	"""
 	Method to create Stock entry for Returns and Replaced Orders
 	"""
@@ -1332,7 +1332,7 @@ def create_stock_entry(sales_invoice):
 
 
 @frappe.whitelist()
-def create_stock_entries_for_sis(names):
+def create_stock_entries_for_sis(names: str):
 	"""method to bulk create stock entries for draft sales invoices"""
 	names = frappe.parse_json(names)
 	for name in names:

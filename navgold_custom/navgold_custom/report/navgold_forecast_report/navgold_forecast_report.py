@@ -784,7 +784,7 @@ def compute_total_forecast(hwr, forecast):
 
 
 @frappe.whitelist()
-def create_material_requests_from_forecast_report(selected_items):
+def create_material_requests_from_forecast_report(selected_items: str | list[dict]):
 	if isinstance(selected_items, str):
 		selected_items = frappe.parse_json(selected_items)
 
@@ -1018,12 +1018,12 @@ def create_purchase_orders(selected_items, sku_info, company, warehouse, mr_item
 
 
 @frappe.whitelist()
-def create_purchase_orders_from_forecast_report(selected_items):
+def create_purchase_orders_from_forecast_report(selected_items: str | list[dict]):
 	if isinstance(selected_items, str):
 		selected_items = frappe.parse_json(selected_items)
 
 	if not selected_items:
-		frappe.throw("No items selected")
+		frappe.throw(_("No items selected"))
 
 	sku_info = build_sku_info(selected_items)
 
@@ -1031,7 +1031,7 @@ def create_purchase_orders_from_forecast_report(selected_items):
 	company = amz_setting.company
 	warehouse = amz_setting.warehouse
 
-	created_purchase_orders, _ = create_purchase_orders(selected_items, sku_info, company, warehouse)
+	created_purchase_orders, _sku_to_po = create_purchase_orders(selected_items, sku_info, company, warehouse)
 
 	if not created_purchase_orders:
 		frappe.throw(_("No valid items with a supplier and positive quantity to transfer"))
@@ -1044,7 +1044,7 @@ def create_purchase_orders_from_forecast_report(selected_items):
 
 
 @frappe.whitelist()
-def create_purchase_orders_and_material_request_from_forecast_report(selected_items):
+def create_purchase_orders_and_material_request_from_forecast_report(selected_items: str):
 	if isinstance(selected_items, str):
 		selected_items = frappe.parse_json(selected_items)
 

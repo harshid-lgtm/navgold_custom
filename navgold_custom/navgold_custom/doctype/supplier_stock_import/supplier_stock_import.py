@@ -140,11 +140,12 @@ class SupplierStockImport(Document):
 						"current": row_idx - 1,
 						"total": self.total_rows,
 					},
+					user=frappe.session.user,
 				)
 
-			# Commit every 100 rows
+			# Commit every 100 rows to avoid long-running transaction in background job
 			if row_idx % 100 == 0:
-				frappe.db.commit()
+				frappe.db.commit()  # nosemgrep: frappe-manual-commit
 
 		self.errored_rows = json.dumps(errored_rows_data) if errored_rows_data else ""
 
@@ -163,7 +164,7 @@ class SupplierStockImport(Document):
 	def get_uom_from_barcode_and_conversion_factor(self, barcode, conversion_factor):
 		item = self.get_item_from_barcode(barcode)
 		if not item:
-			frappe.throw("Item is required")
+			frappe.throw(_("Item is required"))
 
 		uom = frappe.db.get_value(
 			"UOM Conversion Detail",
@@ -272,7 +273,7 @@ class SupplierStockImport(Document):
 
 
 @frappe.whitelist()
-def export_errored_rows(docname):
+def export_errored_rows(docname: str):
 	doc = frappe.get_cached_doc("Supplier Stock Import", docname)
 
 	if not doc.errored_rows:
@@ -289,4 +290,4 @@ def run_import(docname):
 	doc.process_import()
 	doc.save()
 	update_supplier_rank()
-	frappe.publish_realtime("supplier_import_refresh", {"docname": docname})
+	frappe.publish_realtime("supplier_import_refresh", {"docname": docname}, user=frappe.session.user)

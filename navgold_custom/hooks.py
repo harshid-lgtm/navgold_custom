@@ -26,7 +26,7 @@ app_license = "mit"
 
 # include js, css files in header of desk.html
 # app_include_css = "/assets/navgold_custom/css/navgold_custom.css"
-# app_include_js = "/assets/navgold_custom/js/navgold_custom.js"
+app_include_js = "/assets/navgold_custom/js/packing_utils.js"
 
 # include js, css files in header of web template
 # web_include_css = "/assets/navgold_custom/css/navgold_custom.css"
@@ -129,9 +129,9 @@ app_license = "mit"
 # ---------------
 # Override standard doctype classes
 
-# override_doctype_class = {
-# 	"ToDo": "custom_app.overrides.CustomToDo"
-# }
+fixtures = [
+	{"dt": "Stock Entry Type", "filters": [["name", "=", "FBA Transfer"]]},
+]
 
 # Document Events
 # ---------------
@@ -184,6 +184,11 @@ app_license = "mit"
 # override_doctype_dashboards = {
 # 	"Task": "navgold_custom.task.get_dashboard_data"
 # }
+
+override_doctype_dashboards = {
+	"Item": "navgold_custom.navgold_custom.custom_script.item.item_dashboard.get_data",
+	"Supplier": "navgold_custom.navgold_custom.custom_script.supplier.supplier_dashboard.get_data",
+}
 
 # exempt linked doctypes from being automatically cancelled
 #
@@ -271,6 +276,9 @@ doc_events = {
 	},
 	"Item": {
 		"validate": "navgold_custom.navgold_custom.custom_script.item.item.set_default_uom_conversion_factor"
+	},
+	"Packing Slip": {
+		"before_validate": "navgold_custom.navgold_custom.custom_script.packing_slip.packing_slip.before_validate",
 	},
 	"Pick List": {
 		"validate": "navgold_custom.navgold_custom.custom_script.pick_list.pick_list.sort_item_locations_by_walk_route"

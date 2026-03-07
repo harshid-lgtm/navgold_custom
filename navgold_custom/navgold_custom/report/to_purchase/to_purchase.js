@@ -162,10 +162,9 @@ const purchase_report_state = {
 		const info_text = this.report.info_bar.querySelector('.info-text');
 
 		if (info_text) {
-			info_text.innerHTML = `
-				<strong>${__('Selected')}:</strong> ${selected.length} ${__('items')} | 
-				<strong>${__('Total Amount')}:</strong> ${format_currency(total)}
-			`;
+			info_text.textContent = `${__('Selected')}: ${selected.length} ${__(
+				'items',
+			)} | ${__('Total Amount')}: ${format_currency(total)}`;
 		}
 	}, 50),
 };
@@ -372,7 +371,7 @@ async function create_purchase_orders(selected_items, report) {
 	});
 
 	try {
-		const r = await frappe.call({
+		const response = await frappe.call({
 			method:
 				'navgold_custom.navgold_custom.report.to_purchase.to_purchase.create_purchase_orders_from_report',
 			args: {
@@ -382,17 +381,20 @@ async function create_purchase_orders(selected_items, report) {
 			freeze_message: __('Creating Purchase Orders...'),
 		});
 
-		if (r.message?.success) {
+		if (response.message?.success) {
 			frappe.show_alert(
 				{
-					message: r.message.message,
+					message: response.message.message,
 					indicator: 'green',
 				},
 				5,
 			);
 
-			if (r.message.purchase_orders && r.message.purchase_orders.length > 0) {
-				const po_links = r.message.purchase_orders
+			if (
+				response.message.purchase_orders &&
+				response.message.purchase_orders.length > 0
+			) {
+				const po_links = response.message.purchase_orders
 					.map(
 						(po) =>
 							`<a href="/app/purchase-order/${po}" target="_blank">${po}</a>`,
@@ -454,13 +456,13 @@ async function show_po_history_dialog(item_code) {
 	`);
 
 	try {
-		const r = await frappe.call({
+		const response = await frappe.call({
 			method:
 				'navgold_custom.navgold_custom.report.to_purchase.to_purchase.get_po_history_for_item',
 			args: { item_code },
 		});
 
-		const data = r.message || [];
+		const data = response.message || [];
 
 		if (data.length === 0) {
 			dialog.fields_dict.po_history_html.$wrapper.html(`

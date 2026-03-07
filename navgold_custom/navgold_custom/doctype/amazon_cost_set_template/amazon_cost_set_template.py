@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import frappe
+from frappe import _
 from frappe.model.document import Document
 
 
@@ -35,8 +36,10 @@ class AmazonCostSetTemplate(Document):
 			)
 			if existing:
 				frappe.throw(
-					"Another cost set template is already set as default. "
-					"Please unset the current default first."
+					_(
+						"Another cost set template is already set as default. "
+						"Please unset the current default first."
+					)
 				)
 
 	@frappe.whitelist()

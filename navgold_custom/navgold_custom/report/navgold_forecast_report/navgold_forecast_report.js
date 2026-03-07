@@ -48,12 +48,9 @@ const forecast_report_state = {
 		const info_text = this.report.info_bar.querySelector('.info-text');
 
 		if (info_text) {
-			info_text.innerHTML = `
-				<strong>${__('Selected')}:</strong> ${selected.length} ${__('items')} |
-				<strong>${__(
-					'Total Qty to Order (Singles)',
-				)}:</strong> ${total_stock_qty}
-			`;
+			info_text.textContent = `${__('Selected')}: ${selected.length} ${__(
+				'items',
+			)} | ${__('Total Qty to Order (Singles)')}: ${total_stock_qty}`;
 		}
 	}, 50),
 };

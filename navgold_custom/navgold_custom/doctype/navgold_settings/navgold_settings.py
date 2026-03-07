@@ -131,5 +131,5 @@ def generate_pricing_batch(start, batch):
 				f"Error creating Amazon Product Pricing for {proxy.name}: {e!s}", "Bulk Pricing Creation"
 			)
 
-	frappe.db.commit()
+	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- background job batch, commit to persist partial progress
 	frappe.logger().info(f"Bulk Pricing: Created {created}, Skipped {skipped}")

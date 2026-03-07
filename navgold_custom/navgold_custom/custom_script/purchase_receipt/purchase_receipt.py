@@ -1,5 +1,5 @@
-# Copyright (c) 2025, Navgold and contributors
-# License: MIT License (see license.txt)
+# Copyright (c) 2025, developers@buildwithhussain.com and contributors
+# For license information, please see license.txt
 
 import json
 
@@ -10,7 +10,7 @@ from frappe.utils import flt
 
 
 @frappe.whitelist()
-def scan_barcode_local(search_value):
+def scan_barcode_local(search_value: str):
 	if not search_value:
 		return None
 
@@ -55,7 +55,7 @@ def scan_barcode_local(search_value):
 
 
 @frappe.whitelist()
-def get_open_pos_for_item(supplier, item_code, current_pr_items=None):
+def get_open_pos_for_item(supplier: str, item_code: str, current_pr_items: str | None = None):
 	if not supplier or not item_code:
 		frappe.throw(_("Supplier and Item Code are required"))
 
@@ -166,7 +166,15 @@ def get_or_create_batch(batch_no, expiry_date, item_code):
 
 
 @frappe.whitelist()
-def add_scanned_po_item_to_pr(po_name, item_code, qty, warehouse, batch_no, expiry_date, target_pr_doc):
+def add_scanned_po_item_to_pr(
+	po_name: str,
+	item_code: str,
+	qty: str,
+	warehouse: str,
+	batch_no: str,
+	expiry_date: str,
+	target_pr_doc: str,
+):
 	qty = flt(qty)
 	if qty <= 0:
 		frappe.throw(_("Quantity must be greater than 0"))
