@@ -95,6 +95,33 @@ frappe.ui.form.on('Navgold Settings', {
 				},
 				__('Amazon Pricing'),
 			);
+
+			// Fetch FNSKU for all FBA Proxy SKUs with missing FNSKU
+			frm.add_custom_button(
+				__('Fetch FNSKU'),
+				() => {
+					frappe.confirm(
+						__(
+							'This will fetch FNSKU for all FBA Proxy SKUs with missing FNSKU. Continue?',
+						),
+						async () => {
+							const response = await frappe.call({
+								method:
+									'navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku.bulk_fetch_fnsku',
+								freeze: true,
+								freeze_message: __('Queuing FNSKU fetch...'),
+							});
+							if (response.message) {
+								frappe.show_alert({
+									message: response.message.message,
+									indicator: 'blue',
+								});
+							}
+						},
+					);
+				},
+				__('Amazon Pricing'),
+			);
 		}
 	},
 

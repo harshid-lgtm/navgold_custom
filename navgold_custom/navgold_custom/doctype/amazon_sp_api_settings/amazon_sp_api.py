@@ -5,8 +5,33 @@
 # Modifications and additions
 # Copyright (c) 2025, BWH Studios and contributors
 # For license information, please see license.txt
+import time
+
+import frappe
 from frappe.integrations.utils import make_request as frappe_make_request
 from frappe.utils import get_request_session
+
+MAX_RETRIES = 3
+
+
+def retry_with_backoff(func, error_title="SP-API Error", max_retries=MAX_RETRIES):
+	retry_count = 0
+	backoff = 1
+
+	while retry_count <= max_retries:
+		try:
+			return func()
+		except Exception as error:
+			retry_count += 1
+			if retry_count > max_retries:
+				frappe.log_error(
+					f"{error_title}: {error!s}",
+					error_title,
+				)
+				raise
+			time.sleep(backoff)
+			backoff *= 2
+
 
 # https://github.com/amzn/selling-partner-api-docs/blob/main/guides/en-US/developer-guide/SellingPartnerApiDeveloperGuide.md#selling-partner-api-endpoints
 MARKETPLACES = {
@@ -88,6 +113,19 @@ class SPAPI:
 		self.refresh_token = refresh_token
 		self.country_code = country_code
 		self.region, self.endpoint, self.marketplace_id = Util.get_marketplace_data(country_code)
+
+	@classmethod
+	def from_amazon_settings(cls, settings=None):
+		if not settings:
+			settings = frappe.get_last_doc("Amazon SP API Settings", {"is_active": 1})
+		instance = cls(
+			client_id=settings.client_id,
+			client_secret=settings.get_password("client_secret"),
+			refresh_token=settings.get_password("refresh_token"),
+			country_code=settings.country,
+		)
+		instance.settings = settings
+		return instance
 
 	def get_access_token(self) -> str:
 		data = {
@@ -290,6 +328,142 @@ class Util:
 			if not dict[key]:
 				del dict[key]
 		return dict
+
+
+class Listings(SPAPI):
+	BASE_URI = "/listings/2021-08-01/"
+
+	def __init__(self, *args, seller_id: str = "", **kwargs):
+		super().__init__(*args, **kwargs)
+		self.seller_id = seller_id
+
+	@classmethod
+	def from_amazon_settings(cls, settings=None):
+		instance = super().from_amazon_settings(settings)
+		instance.seller_id = instance.settings.merchant_id
+		return instance
+
+	def get_listing_item(
+		self,
+		seller_id: str = "",
+		sku: str = "",
+		marketplace_id: str | None = None,
+		included_data: str = "summaries",
+	) -> dict:
+		if not seller_id:
+			seller_id = self.seller_id
+		if not marketplace_id:
+			marketplace_id = self.marketplace_id
+
+		append_to_base_uri = f"items/{seller_id}/{sku}"
+		params = {
+			"marketplaceIds": marketplace_id,
+			"issueLocale": "en_US",
+			"includedData": included_data,
+		}
+
+		return self.make_request(append_to_base_uri=append_to_base_uri, params=params)
+
+	def fetch_for_sku(self, sku_name):
+		try:
+			response = retry_with_backoff(
+				lambda: self.get_listing_item(sku=sku_name),
+				error_title=f"Listings API fetch failed for SKU {sku_name}",
+			)
+		except Exception:
+			return None
+
+		summaries = response.get("summaries") or []
+		if not summaries:
+			return None
+		return summaries[0]
+
+
+class FBAInventory(SPAPI):
+	"""Amazon FBA Inventory API"""
+
+	BASE_URI = "/fba/inventory/v1/"
+	BATCH_SIZE = 50
+	DELAY_BETWEEN_REQUESTS = 0.5
+
+	def get_inventory_summaries(
+		self,
+		seller_skus: list[str],
+		marketplace_id: str | None = None,
+		next_token: str | None = None,
+	) -> dict:
+		if next_token:
+			return self.make_request(
+				append_to_base_uri="summaries",
+				params={"nextToken": next_token},
+			)
+
+		if not marketplace_id:
+			marketplace_id = self.marketplace_id
+
+		params = {
+			"details": "true",
+			"granularityType": "Marketplace",
+			"granularityId": marketplace_id,
+			"marketplaceIds": marketplace_id,
+			"sellerSkus": ",".join(seller_skus),
+		}
+
+		return self.make_request(append_to_base_uri="summaries", params=params)
+
+	@staticmethod
+	def parse_summary(summary):
+		return {
+			"asin": summary.get("asin"),
+			"fnSku": summary.get("fnSku"),
+			"condition": summary.get("condition"),
+			"fulfillableQuantity": (summary.get("inventoryDetails") or {}).get("fulfillableQuantity", 0),
+			"reservedQuantity": ((summary.get("inventoryDetails") or {}).get("reservedQuantity") or {}).get(
+				"totalReservedQuantity", 0
+			),
+			"inboundWorkingQuantity": (
+				(summary.get("inventoryDetails") or {}).get("researchingQuantity") or {}
+			).get("totalResearchingQuantity", 0),
+		}
+
+	def fetch_for_skus(self, seller_skus):
+		results = {}
+
+		for batch_start in range(0, len(seller_skus), self.BATCH_SIZE):
+			batch = seller_skus[batch_start : batch_start + self.BATCH_SIZE]
+
+			try:
+				response = retry_with_backoff(
+					lambda b=batch: self.get_inventory_summaries(seller_skus=b),
+					error_title=f"FBA Inventory fetch failed for batch starting at {batch_start}",
+				)
+			except Exception:
+				continue
+
+			for summary in (response.get("payload") or {}).get("inventorySummaries") or []:
+				results[summary.get("sellerSku")] = self.parse_summary(summary)
+
+			next_token = (response.get("payload") or {}).get("nextToken")
+			while next_token:
+				time.sleep(self.DELAY_BETWEEN_REQUESTS)
+				token = next_token
+
+				try:
+					response = retry_with_backoff(
+						lambda t=token: self.get_inventory_summaries(seller_skus=[], next_token=t),
+						error_title="FBA Inventory pagination fetch failed",
+					)
+				except Exception:
+					break
+
+				for summary in (response.get("payload") or {}).get("inventorySummaries") or []:
+					results[summary.get("sellerSku")] = self.parse_summary(summary)
+				next_token = (response.get("payload") or {}).get("nextToken")
+
+			if batch_start + self.BATCH_SIZE < len(seller_skus):
+				time.sleep(self.DELAY_BETWEEN_REQUESTS)
+
+		return results
 
 
 class Feeds(SPAPI):

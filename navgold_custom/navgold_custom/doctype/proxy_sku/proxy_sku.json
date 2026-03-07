@@ -15,6 +15,7 @@
 		"naming_series",
 		"fba_tab",
 		"is_fba",
+		"fnsku",
 		"column_break_ndae",
 		"last_transfer_rate"
 	],
@@ -68,6 +69,12 @@
 			"label": "Is FBA?"
 		},
 		{
+			"depends_on": "eval:doc.is_fba",
+			"fieldname": "fnsku",
+			"fieldtype": "Data",
+			"label": "FNSKU"
+		},
+		{
 			"fieldname": "column_break_ndae",
 			"fieldtype": "Column Break"
 		},
@@ -81,8 +88,8 @@
 	"grid_page_length": 50,
 	"index_web_pages_for_search": 1,
 	"links": [],
-	"modified": "2026-02-02 06:52:16.860494",
-	"modified_by": "rahul@buildwithhussain.com",
+	"modified": "2026-03-07 07:46:30.109556",
+	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Proxy SKU",
 	"naming_rule": "By \"Naming Series\" field",

@@ -6,6 +6,11 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.query_builder import DocType
 
+from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import (
+	FBAInventory,
+	Listings,
+)
+
 
 class ProxySKU(Document):
 	# begin: auto-generated types
@@ -17,6 +22,7 @@ class ProxySKU(Document):
 		from frappe.types import DF
 
 		asin: DF.Link | None
+		fnsku: DF.Data | None
 		is_active: DF.Check
 		is_fba: DF.Check
 		item: DF.Link | None
@@ -63,6 +69,39 @@ class ProxySKU(Document):
 			)
 
 	@frappe.whitelist()
+	def fetch_asin(self):
+		listing = Listings.from_amazon_settings().fetch_for_sku(self.name)
+		if not listing:
+			frappe.throw(_("No listing data found for SKU {0}").format(self.name))
+
+		asin_value = listing.get("asin")
+		if not asin_value:
+			frappe.throw(_("No ASIN found in listing for SKU {0}").format(self.name))
+
+		if not frappe.db.exists("Amazon ASIN", asin_value):
+			asin_doc = frappe.new_doc("Amazon ASIN")
+			asin_doc.asin = asin_value
+			asin_doc.insert(ignore_permissions=True)
+
+		self.asin = asin_value
+		self.save()
+		return asin_value
+
+	@frappe.whitelist()
+	def fetch_fnsku(self):
+		if not self.is_fba:
+			frappe.throw(_("FNSKU can only be fetched for FBA Proxy SKUs"))
+
+		results = FBAInventory.from_amazon_settings().fetch_for_skus([self.name])
+		summary = results.get(self.name)
+		if not summary:
+			frappe.throw(_("No FBA inventory data found for SKU {0}").format(self.name))
+
+		self.fnsku = summary.get("fnSku")
+		self.save()
+		return self.fnsku
+
+	@frappe.whitelist()
 	def create_next_proxy_sku(self):
 		self.is_active = 0
 		self.save()
@@ -77,6 +116,45 @@ class ProxySKU(Document):
 			}
 		)
 		return doc.insert(ignore_permissions=True)
+
+
+@frappe.whitelist()
+def bulk_fetch_fnsku():
+	proxy_skus = frappe.get_all(
+		"Proxy SKU",
+		filters={"is_fba": 1, "is_active": 1, "fnsku": ["in", ["", None]]},
+		pluck="name",
+	)
+
+	if not proxy_skus:
+		return {"updated": 0, "failed": 0, "message": "No FBA Proxy SKUs with missing FNSKU found"}
+
+	frappe.enqueue(
+		"navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku.process_bulk_fnsku_fetch",
+		seller_skus=proxy_skus,
+		queue="long",
+	)
+
+	return {"message": f"Queued {len(proxy_skus)} Proxy SKUs for FNSKU fetch"}
+
+
+def process_bulk_fnsku_fetch(seller_skus):
+	results = FBAInventory.from_amazon_settings().fetch_for_skus(seller_skus)
+
+	updated = 0
+	failed = 0
+	for sku_name in seller_skus:
+		summary = results.get(sku_name)
+		if summary and summary.get("fnSku"):
+			frappe.db.set_value("Proxy SKU", sku_name, "fnsku", summary["fnSku"])
+			updated += 1
+		else:
+			failed += 1
+
+	frappe.publish_realtime(
+		"msgprint",
+		f"FNSKU Fetch Complete: Updated {updated}, Failed {failed}",
+	)
 
 
 def get_proxy_sku_map(sku_names=None):
