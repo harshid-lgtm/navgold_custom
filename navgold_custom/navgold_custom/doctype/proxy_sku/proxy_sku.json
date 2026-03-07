@@ -11,6 +11,7 @@
 		"column_break_fojg",
 		"uom",
 		"is_active",
+		"merchant_shipping_group",
 		"section_break_yaut",
 		"naming_series",
 		"fba_tab",
@@ -75,6 +76,11 @@
 			"label": "FNSKU"
 		},
 		{
+			"fieldname": "merchant_shipping_group",
+			"fieldtype": "Data",
+			"label": "Merchant Shipping Group"
+		},
+		{
 			"fieldname": "column_break_ndae",
 			"fieldtype": "Column Break"
 		},
@@ -88,7 +94,7 @@
 	"grid_page_length": 50,
 	"index_web_pages_for_search": 1,
 	"links": [],
-	"modified": "2026-03-07 07:46:30.109556",
+	"modified": "2026-03-07 10:10:53.118447",
 	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Proxy SKU",

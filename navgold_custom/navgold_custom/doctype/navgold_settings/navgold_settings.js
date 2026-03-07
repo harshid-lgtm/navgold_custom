@@ -96,6 +96,32 @@ frappe.ui.form.on('Navgold Settings', {
 				__('Amazon Pricing'),
 			);
 
+			frm.add_custom_button(
+				__('Import Listings'),
+				() => {
+					frappe.confirm(
+						__(
+							'This will download the full Amazon listings report and update all matching Proxy SKUs with ASIN, FBA status, shipping group, and active status. Continue?',
+						),
+						async () => {
+							const response = await frappe.call({
+								method:
+									'navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku.bulk_import_listings',
+								freeze: true,
+								freeze_message: __('Queuing listings import...'),
+							});
+							if (response.message) {
+								frappe.show_alert({
+									message: response.message.message,
+									indicator: 'blue',
+								});
+							}
+						},
+					);
+				},
+				__('Amazon Pricing'),
+			);
+
 			// Fetch FNSKU for all FBA Proxy SKUs with missing FNSKU
 			frm.add_custom_button(
 				__('Fetch FNSKU'),

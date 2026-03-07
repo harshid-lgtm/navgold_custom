@@ -5,10 +5,12 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 from frappe.query_builder import DocType
+from frappe.utils.xlsxutils import make_xlsx
 
 from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import (
 	FBAInventory,
 	Listings,
+	Reports,
 )
 
 
@@ -27,6 +29,7 @@ class ProxySKU(Document):
 		is_fba: DF.Check
 		item: DF.Link | None
 		last_transfer_rate: DF.Currency
+		merchant_shipping_group: DF.Data | None
 		naming_series: DF.Data | None
 		uom: DF.Link | None
 	# end: auto-generated types
@@ -154,7 +157,144 @@ def process_bulk_fnsku_fetch(seller_skus):
 	frappe.publish_realtime(
 		"msgprint",
 		f"FNSKU Fetch Complete: Updated {updated}, Failed {failed}",
+		user=frappe.session.user,
 	)
+
+
+@frappe.whitelist()
+def bulk_import_listings():
+	frappe.enqueue(
+		"navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku.process_bulk_listing_import",
+		queue="long",
+		timeout=1800,
+	)
+	return {"message": "Listings report import has been queued"}
+
+
+def process_bulk_listing_import():
+	reports_client = Reports.from_amazon_settings()
+	tsv_content = reports_client.request_and_download_report("GET_MERCHANT_LISTINGS_ALL_DATA")
+
+	rows = parse_listings_tsv(tsv_content)
+	if not rows:
+		frappe.publish_realtime("msgprint", "Listings report returned no data", user=frappe.session.user)
+		return
+
+	seller_skus = [row["seller-sku"] for row in rows]
+	existing_proxy_skus = {
+		row.name: row
+		for row in frappe.get_all(
+			"Proxy SKU",
+			filters={"name": ["in", seller_skus]},
+			fields=["name", "asin", "is_fba", "is_active", "merchant_shipping_group"],
+		)
+	}
+
+	existing_asins = set(frappe.get_all("Amazon ASIN", pluck="name"))
+
+	updated = 0
+	skipped = 0
+	asins_created = 0
+	skipped_rows = []
+	batch_size = 100
+	writes_in_batch = 0
+
+	for row in rows:
+		sku_name = row["seller-sku"]
+		proxy_sku = existing_proxy_skus.get(sku_name)
+		if not proxy_sku:
+			skipped += 1
+			skipped_rows.append(
+				{
+					"seller_sku": sku_name,
+					"asin": row.get("asin1", "").strip(),
+					"status": row.get("status", "").strip(),
+					"channel": row.get("fulfilment-channel", "").strip(),
+					"reason": "No matching Proxy SKU",
+				}
+			)
+			continue
+
+		asin_value = row.get("asin1", "").strip()
+		is_fba = 1 if row.get("fulfilment-channel", "").strip().upper() == "AMAZON_EU" else 0
+		is_active = 1 if row.get("status", "").strip().lower() == "active" else 0
+		shipping_group = row.get("merchant-shipping-group", "").strip()
+
+		if asin_value and asin_value not in existing_asins:
+			asin_doc = frappe.new_doc("Amazon ASIN")
+			asin_doc.asin = asin_value
+			asin_doc.insert(ignore_permissions=True)
+			existing_asins.add(asin_value)
+			asins_created += 1
+			writes_in_batch += 1
+
+		updates = {}
+		if asin_value and proxy_sku.asin != asin_value:
+			updates["asin"] = asin_value
+		if proxy_sku.is_fba != is_fba:
+			updates["is_fba"] = is_fba
+		if proxy_sku.is_active != is_active:
+			updates["is_active"] = is_active
+		if shipping_group and proxy_sku.merchant_shipping_group != shipping_group:
+			updates["merchant_shipping_group"] = shipping_group
+
+		if updates:
+			frappe.db.set_value("Proxy SKU", sku_name, updates)
+			updated += 1
+			writes_in_batch += 1
+
+		if writes_in_batch >= batch_size:
+			frappe.db.commit()  # nosemgrep: frappe-manual-commit -- background job, commit in batches to avoid MariaDB limits
+			writes_in_batch = 0
+
+	if writes_in_batch:
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- final batch
+
+	skipped_report_url = ""
+	if skipped_rows:
+		skipped_report_url = save_skipped_report(skipped_rows)
+
+	message = (
+		f"Listings Import Complete: Updated {updated}, Skipped {skipped}, ASINs Created {asins_created}."
+	)
+	if skipped_report_url:
+		message += f" <a href='{skipped_report_url}'>Download skipped SKUs report</a>"
+
+	frappe.publish_realtime("msgprint", message, user=frappe.session.user)
+
+
+def save_skipped_report(skipped_rows):
+	data = [["Seller SKU", "ASIN", "Status", "Channel", "Reason"]]
+	for row in skipped_rows:
+		data.append([row["seller_sku"], row["asin"], row["status"], row["channel"], row["reason"]])
+
+	xlsx_file = make_xlsx(data, "Skipped SKUs")
+	file_doc = frappe.new_doc("File")
+	file_doc.file_name = "listings_import_skipped_skus.xlsx"
+	file_doc.content = xlsx_file.getvalue()
+	file_doc.attached_to_doctype = "Navgold Settings"
+	file_doc.attached_to_name = "Navgold Settings"
+	file_doc.save(ignore_permissions=True)
+	return file_doc.file_url
+
+
+def parse_listings_tsv(tsv_content):
+	lines = tsv_content.strip().split("\n")
+	if len(lines) < 2:
+		return []
+
+	headers = lines[0].split("\t")
+	headers = [header.strip().lower() for header in headers]
+
+	rows = []
+	for line in lines[1:]:
+		values = line.split("\t")
+		row = {}
+		for index, header in enumerate(headers):
+			row[header] = values[index] if index < len(values) else ""
+		rows.append(row)
+
+	return rows
 
 
 def get_proxy_sku_map(sku_names=None):

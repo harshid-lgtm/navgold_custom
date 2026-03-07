@@ -5,6 +5,7 @@
 # Modifications and additions
 # Copyright (c) 2025, BWH Studios and contributors
 # For license information, please see license.txt
+import gzip
 import time
 
 import frappe
@@ -464,6 +465,86 @@ class FBAInventory(SPAPI):
 				time.sleep(self.DELAY_BETWEEN_REQUESTS)
 
 		return results
+
+
+class Reports(SPAPI):
+	BASE_URI = "/reports/2021-06-30/"
+	POLL_INTERVAL = 20
+	MAX_POLL_ATTEMPTS = 30
+
+	def create_report(self, report_type, marketplace_ids=None):
+		if not marketplace_ids:
+			marketplace_ids = [self.marketplace_id]
+
+		url = self.endpoint + self.BASE_URI + "reports"
+		result = frappe_make_request(
+			method="POST",
+			url=url,
+			json={
+				"reportType": report_type,
+				"marketplaceIds": marketplace_ids,
+			},
+			headers={**self.get_headers(), "Content-Type": "application/json"},
+		)
+		return result.get("reportId")
+
+	def get_report(self, report_id):
+		return self.make_request(append_to_base_uri=f"reports/{report_id}")
+
+	def get_report_document(self, report_document_id):
+		return self.make_request(append_to_base_uri=f"documents/{report_document_id}")
+
+	def download_report_file(self, url, compression=None):
+		session = get_request_session()
+		response = session.get(url)
+		response.raise_for_status()
+
+		content = response.content
+		if compression and compression.upper() == "GZIP":
+			content = gzip.decompress(content)
+
+		try:
+			return content.decode("utf-8")
+		except UnicodeDecodeError:
+			return content.decode("cp1252")
+
+	def request_and_download_report(self, report_type):
+		report_id = retry_with_backoff(
+			lambda: self.create_report(report_type),
+			error_title=f"Reports API: failed to create {report_type}",
+		)
+
+		if not report_id:
+			frappe.throw(f"Failed to create report: {report_type}")
+
+		report_document_id = None
+		for _attempt in range(self.MAX_POLL_ATTEMPTS):
+			time.sleep(self.POLL_INTERVAL)
+
+			report_status = retry_with_backoff(
+				lambda rid=report_id: self.get_report(rid),
+				error_title=f"Reports API: failed to poll report {report_id}",
+			)
+
+			status = report_status.get("processingStatus")
+			if status == "DONE":
+				report_document_id = report_status.get("reportDocumentId")
+				break
+			elif status in ("CANCELLED", "FATAL"):
+				frappe.throw(f"Report {report_id} failed with status: {status}")
+
+		if not report_document_id:
+			frappe.throw(f"Report {report_id} timed out after {self.MAX_POLL_ATTEMPTS * self.POLL_INTERVAL}s")
+
+		document = retry_with_backoff(
+			lambda: self.get_report_document(report_document_id),
+			error_title=f"Reports API: failed to get document {report_document_id}",
+		)
+
+		download_url = document.get("url")
+		compression = document.get("compressionAlgorithm")
+
+		return self.download_report_file(download_url, compression)
 
 
 class Feeds(SPAPI):
