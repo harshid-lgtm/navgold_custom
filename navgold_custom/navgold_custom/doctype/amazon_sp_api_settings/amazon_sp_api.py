@@ -9,8 +9,9 @@ import gzip
 import time
 
 import frappe
+import requests
 from frappe.integrations.utils import make_request as frappe_make_request
-from frappe.utils import get_request_session
+from frappe.utils import cstr, get_request_session
 
 MAX_RETRIES = 3
 
@@ -160,6 +161,7 @@ class SPAPI:
 		append_to_base_uri: str = "",
 		params: dict | None = None,
 		data: dict | None = None,
+		json: dict | None = None,
 	) -> dict:
 		if isinstance(params, dict):
 			params = Util.remove_empty(params)
@@ -167,17 +169,36 @@ class SPAPI:
 			data = Util.remove_empty(data)
 
 		url = self.endpoint + self.BASE_URI + append_to_base_uri
+		headers = self.get_headers()
+		if json is not None:
+			headers["Content-Type"] = "application/json"
 
 		try:
 			return frappe_make_request(
-				method=method, url=url, params=params, data=data, headers=self.get_headers()
+				method=method, url=url, params=params, data=data, json=json, headers=headers
 			)
 		except Exception as e:
 			if isinstance(e, SPAPIError):
 				raise
+			if isinstance(e, requests.exceptions.HTTPError) and e.response is not None:
+				try:
+					body = e.response.json()
+					errors = body.get("errors", [])
+					if errors:
+						description = "; ".join(
+							f"{err.get('code', '')}: {err.get('message', '')}" for err in errors
+						)
+					else:
+						description = cstr(body)
+				except Exception:
+					description = e.response.text or cstr(e)
+				raise SPAPIError(
+					error=f"HTTP {e.response.status_code}",
+					error_description=description,
+				)
 			raise SPAPIError(
 				error=type(e).__name__,
-				error_description=str(e),
+				error_description=cstr(e),
 			)
 
 	def list_to_dict(self, key: str, values: list, data: dict) -> None:
@@ -715,3 +736,177 @@ class Feeds(SPAPI):
 
 		append_to_base_uri = "feeds"
 		return self.make_request(append_to_base_uri=append_to_base_uri, params=data)
+
+
+class FulfillmentInbound(SPAPI):
+	BASE_URI = "/inbound/fba/2024-03-20/"
+	POLL_INTERVAL = 5
+	MAX_POLL_ATTEMPTS = 10
+
+	def create_inbound_plan(self, name, source_address, destination_marketplaces, items):
+		return self.make_request(
+			method="POST",
+			append_to_base_uri="inboundPlans",
+			json={
+				"name": name,
+				"sourceAddress": source_address,
+				"destinationMarketplaces": destination_marketplaces,
+				"items": items,
+			},
+		)
+
+	def get_inbound_plan(self, inbound_plan_id):
+		return self.make_request(append_to_base_uri=f"inboundPlans/{inbound_plan_id}")
+
+	def cancel_inbound_plan(self, inbound_plan_id):
+		return self.make_request(
+			method="PUT", append_to_base_uri=f"inboundPlans/{inbound_plan_id}/cancellation"
+		)
+
+	def get_operation(self, operation_id):
+		return self.make_request(append_to_base_uri=f"operations/{operation_id}")
+
+	def poll_operation(self, operation_id):
+		for attempt in range(self.MAX_POLL_ATTEMPTS):
+			result = self.get_operation(operation_id)
+			status = result.get("operationStatus")
+			if status == "SUCCESS":
+				return result
+			if status == "FAILED":
+				problems = result.get("operationProblems", [])
+				errors = [p for p in problems if p.get("severity") == "ERROR"]
+				if errors:
+					raise SPAPIError(
+						error="OperationFailed",
+						error_description=f"Operation {operation_id} failed: {problems}",
+					)
+				return result
+			time.sleep(self.POLL_INTERVAL * (2**attempt))
+
+		raise SPAPIError(
+			error="OperationTimeout",
+			error_description=f"Operation {operation_id} did not complete after {self.MAX_POLL_ATTEMPTS} attempts",
+		)
+
+	def generate_packing_options(self, inbound_plan_id):
+		return self.make_request(
+			method="POST",
+			append_to_base_uri=f"inboundPlans/{inbound_plan_id}/packingOptions",
+			json={},
+		)
+
+	def list_packing_options(self, inbound_plan_id):
+		return self.make_request(append_to_base_uri=f"inboundPlans/{inbound_plan_id}/packingOptions")
+
+	def confirm_packing_option(self, inbound_plan_id, packing_option_id):
+		return self.make_request(
+			method="POST",
+			append_to_base_uri=f"inboundPlans/{inbound_plan_id}/packingOptions/{packing_option_id}/confirmation",
+			json={},
+		)
+
+	def set_packing_information(self, inbound_plan_id, body):
+		return self.make_request(
+			method="POST",
+			append_to_base_uri=f"inboundPlans/{inbound_plan_id}/packingInformation",
+			json=body,
+		)
+
+	def generate_placement_options(self, inbound_plan_id):
+		return self.make_request(
+			method="POST",
+			append_to_base_uri=f"inboundPlans/{inbound_plan_id}/placementOptions",
+			json={},
+		)
+
+	def list_placement_options(self, inbound_plan_id):
+		return self.make_request(append_to_base_uri=f"inboundPlans/{inbound_plan_id}/placementOptions")
+
+	def confirm_placement_option(self, inbound_plan_id, placement_option_id):
+		return self.make_request(
+			method="POST",
+			append_to_base_uri=f"inboundPlans/{inbound_plan_id}/placementOptions/{placement_option_id}/confirmation",
+			json={},
+		)
+
+	def get_shipment(self, inbound_plan_id, shipment_id):
+		return self.make_request(append_to_base_uri=f"inboundPlans/{inbound_plan_id}/shipments/{shipment_id}")
+
+	def list_shipment_items(self, inbound_plan_id, shipment_id):
+		return self.make_request(
+			append_to_base_uri=f"inboundPlans/{inbound_plan_id}/shipments/{shipment_id}/items"
+		)
+
+	def list_shipment_boxes(self, inbound_plan_id, shipment_id):
+		return self.make_request(
+			append_to_base_uri=f"inboundPlans/{inbound_plan_id}/shipments/{shipment_id}/boxes"
+		)
+
+	def generate_transportation_options(self, inbound_plan_id, body):
+		return self.make_request(
+			method="POST",
+			append_to_base_uri=f"inboundPlans/{inbound_plan_id}/transportationOptions",
+			json=body,
+		)
+
+	def list_transportation_options(self, inbound_plan_id, placement_option_id=None, shipment_id=None):
+		params = {}
+		if placement_option_id:
+			params["placementOptionId"] = placement_option_id
+		if shipment_id:
+			params["shipmentId"] = shipment_id
+		return self.make_request(
+			append_to_base_uri=f"inboundPlans/{inbound_plan_id}/transportationOptions",
+			params=params or None,
+		)
+
+	def confirm_transportation_options(self, inbound_plan_id, body):
+		return self.make_request(
+			method="POST",
+			append_to_base_uri=f"inboundPlans/{inbound_plan_id}/transportationOptions/confirmation",
+			json=body,
+		)
+
+	def get_labels_v0(self, shipment_confirmation_id, page_type="PackageLabel_Plain_Paper", page_size=1):
+		url = self.endpoint + f"/fba/inbound/v0/shipments/{shipment_confirmation_id}/labels"
+		params = {"PageType": page_type, "PageSize": page_size}
+		try:
+			result = frappe.make_get_request(url=url, params=params, headers=self.get_headers())
+			return result.get("payload", result)
+		except SPAPIError:
+			raise
+		except Exception as e:
+			raise SPAPIError(
+				error="Failed to get labels",
+				error_description=cstr(e),
+			)
+
+	def download_label_pdf(self, url):
+		session = get_request_session()
+		response = session.get(url, timeout=60)
+		response.raise_for_status()
+		return response.content
+
+	def update_shipment_tracking(self, inbound_plan_id, shipment_id, body):
+		return self.make_request(
+			method="PUT",
+			append_to_base_uri=f"inboundPlans/{inbound_plan_id}/shipments/{shipment_id}/trackingDetails",
+			json=body,
+		)
+
+	def generate_delivery_window_options(self, shipment_id):
+		return self.make_request(
+			method="POST",
+			append_to_base_uri=f"shipments/{shipment_id}/deliveryWindowOptions",
+			json={},
+		)
+
+	def list_delivery_window_options(self, shipment_id):
+		return self.make_request(append_to_base_uri=f"shipments/{shipment_id}/deliveryWindowOptions")
+
+	def confirm_delivery_window(self, shipment_id, delivery_window_option_id):
+		return self.make_request(
+			method="POST",
+			append_to_base_uri=f"shipments/{shipment_id}/deliveryWindowOptions/{delivery_window_option_id}/confirmation",
+			json={},
+		)

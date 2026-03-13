@@ -42,12 +42,31 @@ def get_item_weight_map(item_codes: list):
 
 
 def recalculate_net_weight(doc):
-	item_codes = {item.item_code for item in doc.items}
+	item_codes = list({item.item_code for item in doc.items})
 	item_weights = get_item_weight_map(item_codes)
+
+	conversion_details = frappe.get_all(
+		"UOM Conversion Detail",
+		filters={"parent": ["in", item_codes], "parenttype": "Item"},
+		fields=["parent", "uom", "conversion_factor"],
+	)
+	conversion_map = {(row.parent, row.uom): flt(row.conversion_factor) for row in conversion_details}
+
+	total_net_weight = 0.0
+	net_weight_uom = ""
 
 	for item in doc.items:
 		weight_info = item_weights.get(item.item_code, {})
 		weight_per_unit = flt(weight_info.get("weight_per_unit"))
 		if weight_per_unit:
-			item.net_weight = weight_per_unit * flt(item.qty)
+			uom = item.stock_uom or "Nos"
+			conversion_factor = conversion_map.get((item.item_code, uom), 1.0)
+			item.net_weight = weight_per_unit * flt(item.qty) * conversion_factor
 			item.weight_uom = weight_info.get("weight_uom", "")
+			total_net_weight += flt(item.net_weight)
+			if not net_weight_uom:
+				net_weight_uom = item.weight_uom
+
+	doc.net_weight_pkg = total_net_weight
+	if net_weight_uom:
+		doc.net_weight_uom = net_weight_uom

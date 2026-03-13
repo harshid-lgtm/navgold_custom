@@ -17,11 +17,12 @@ frappe.ui.form.on('Pick List', {
 				async () => {
 					const response = await frappe.call({
 						method:
-							'erpnext.stock.doctype.pick_list.pick_list.create_stock_entry',
-						args: { pick_list: frm.doc },
+							'navgold_custom.navgold_custom.custom_script.pick_list.pick_list.create_fba_transfer_stock_entry',
+						args: { pick_list_name: frm.doc.name },
+						freeze: true,
+						freeze_message: __('Creating FBA Transfer Stock Entry...'),
 					});
 					const stock_entry = response.message;
-					stock_entry.stock_entry_type = 'FBA Transfer';
 					frappe.model.sync(stock_entry);
 					frappe.set_route('Form', 'Stock Entry', stock_entry.name);
 				},

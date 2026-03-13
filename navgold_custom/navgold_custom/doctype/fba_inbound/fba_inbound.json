@@ -1,0 +1,251 @@
+{
+	"actions": [],
+	"autoname": "naming_series:",
+	"creation": "2026-03-09 12:00:00",
+	"doctype": "DocType",
+	"engine": "InnoDB",
+	"field_order": [
+		"naming_series",
+		"stock_entry",
+		"column_break_0",
+		"amazon_sp_api_settings",
+		"status",
+		"plan_details_section",
+		"inbound_plan_id",
+		"column_break_plan",
+		"operation_id",
+		"items_section",
+		"items",
+		"boxes_section",
+		"boxes",
+		"packing_options_section",
+		"packing_options",
+		"placement_options_section",
+		"placement_options",
+		"shipments_section",
+		"shipments",
+		"transportation_options_section",
+		"transportation_options",
+		"labels_section",
+		"box_labels",
+		"column_break_labels",
+		"pallet_labels",
+		"misc_section",
+		"amended_from"
+	],
+	"fields": [
+		{
+			"default": "FBA-IN-.YYYY.-.#####",
+			"fieldname": "naming_series",
+			"fieldtype": "Select",
+			"label": "Series",
+			"options": "FBA-IN-.YYYY.-.#####",
+			"reqd": 1
+		},
+		{
+			"fieldname": "stock_entry",
+			"fieldtype": "Link",
+			"in_list_view": 1,
+			"label": "Stock Entry",
+			"options": "Stock Entry",
+			"reqd": 1
+		},
+		{
+			"fieldname": "column_break_0",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "amazon_sp_api_settings",
+			"fieldtype": "Link",
+			"label": "Amazon SP API Settings",
+			"options": "Amazon SP API Settings",
+			"reqd": 1
+		},
+		{
+			"default": "Draft",
+			"fieldname": "status",
+			"fieldtype": "Select",
+			"in_list_view": 1,
+			"label": "Status",
+			"options": "Draft\nPlan Created\nPacking Options Ready\nPacking Confirmed\nPlacement Options Ready\nPlacement Confirmed\nTransport Options Ready\nTransport Confirmed\nLabels Ready\nShipped\nCancelled",
+			"read_only": 1
+		},
+		{
+			"collapsible": 1,
+			"collapsible_depends_on": "eval:!doc.inbound_plan_id",
+			"fieldname": "plan_details_section",
+			"fieldtype": "Section Break",
+			"label": "Plan Details"
+		},
+		{
+			"fieldname": "inbound_plan_id",
+			"fieldtype": "Data",
+			"label": "Inbound Plan ID",
+			"read_only": 1
+		},
+		{
+			"fieldname": "column_break_plan",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "operation_id",
+			"fieldtype": "Data",
+			"hidden": 1,
+			"label": "Operation ID",
+			"read_only": 1
+		},
+		{
+			"fieldname": "items_section",
+			"fieldtype": "Section Break",
+			"label": "Items"
+		},
+		{
+			"fieldname": "items",
+			"fieldtype": "Table",
+			"label": "Items",
+			"options": "FBA Inbound Item",
+			"reqd": 1
+		},
+		{
+			"fieldname": "boxes_section",
+			"fieldtype": "Section Break",
+			"label": "Boxes"
+		},
+		{
+			"fieldname": "boxes",
+			"fieldtype": "Table",
+			"label": "Boxes",
+			"options": "FBA Inbound Box"
+		},
+		{
+			"depends_on": "eval:doc.status !== 'Draft'",
+			"fieldname": "packing_options_section",
+			"fieldtype": "Section Break",
+			"label": "Packing Options"
+		},
+		{
+			"fieldname": "packing_options",
+			"fieldtype": "Table",
+			"label": "Packing Options",
+			"options": "FBA Inbound Packing Option",
+			"read_only": 0
+		},
+		{
+			"depends_on": "eval:['Placement Options Ready','Placement Confirmed','Transport Options Ready','Transport Confirmed','Labels Ready','Shipped'].includes(doc.status)",
+			"fieldname": "placement_options_section",
+			"fieldtype": "Section Break",
+			"label": "Placement Options"
+		},
+		{
+			"fieldname": "placement_options",
+			"fieldtype": "Table",
+			"label": "Placement Options",
+			"options": "FBA Inbound Placement Option",
+			"read_only": 0
+		},
+		{
+			"depends_on": "eval:['Placement Confirmed','Transport Options Ready','Transport Confirmed','Labels Ready','Shipped'].includes(doc.status)",
+			"fieldname": "shipments_section",
+			"fieldtype": "Section Break",
+			"label": "Shipments"
+		},
+		{
+			"fieldname": "shipments",
+			"fieldtype": "Table",
+			"label": "Shipments",
+			"options": "FBA Inbound Shipment",
+			"read_only": 0
+		},
+		{
+			"depends_on": "eval:['Transport Options Ready','Transport Confirmed','Labels Ready','Shipped'].includes(doc.status)",
+			"fieldname": "transportation_options_section",
+			"fieldtype": "Section Break",
+			"label": "Transportation Options"
+		},
+		{
+			"fieldname": "transportation_options",
+			"fieldtype": "Table",
+			"label": "Transportation Options",
+			"options": "FBA Inbound Transportation Option",
+			"read_only": 0
+		},
+		{
+			"depends_on": "eval:['Transport Confirmed','Labels Ready','Shipped'].includes(doc.status)",
+			"fieldname": "labels_section",
+			"fieldtype": "Section Break",
+			"label": "Labels"
+		},
+		{
+			"fieldname": "box_labels",
+			"fieldtype": "Attach",
+			"label": "Box Labels"
+		},
+		{
+			"fieldname": "column_break_labels",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "pallet_labels",
+			"fieldtype": "Attach",
+			"label": "Pallet Labels"
+		},
+		{
+			"fieldname": "misc_section",
+			"fieldtype": "Section Break"
+		},
+		{
+			"fieldname": "amended_from",
+			"fieldtype": "Link",
+			"ignore_user_permissions": 1,
+			"label": "Amended From",
+			"no_copy": 1,
+			"options": "FBA Inbound",
+			"read_only": 1
+		}
+	],
+	"index_web_pages_for_search": 1,
+	"is_submittable": 1,
+	"links": [],
+	"modified": "2026-03-09 12:00:00",
+	"modified_by": "Administrator",
+	"module": "Navgold Custom",
+	"name": "FBA Inbound",
+	"naming_rule": "By \"Naming Series\" field",
+	"owner": "Administrator",
+	"permissions": [
+		{
+			"amend": 1,
+			"cancel": 1,
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "System Manager",
+			"share": 1,
+			"submit": 1,
+			"write": 1
+		},
+		{
+			"amend": 1,
+			"cancel": 1,
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "Stock Manager",
+			"share": 1,
+			"submit": 1,
+			"write": 1
+		}
+	],
+	"sort_field": "creation",
+	"sort_order": "DESC",
+	"states": [],
+	"track_changes": 1
+}

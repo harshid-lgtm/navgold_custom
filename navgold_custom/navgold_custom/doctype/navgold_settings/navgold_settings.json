@@ -5,6 +5,7 @@
 	"doctype": "DocType",
 	"engine": "InnoDB",
 	"field_order": [
+		"general_tab",
 		"buying_price_list",
 		"column_break_zziq",
 		"tote_weight_limit",
@@ -31,9 +32,59 @@
 		"repricer_enabled",
 		"column_break_repricer",
 		"repricer_api_username",
-		"repricer_api_password"
+		"repricer_api_password",
+		"fba_inbound_tab",
+		"fba_inbound_enabled",
+		"fba_source_address",
+		"column_break_fba_defaults",
+		"default_prep_owner",
+		"default_label_owner"
 	],
 	"fields": [
+		{
+			"fieldname": "general_tab",
+			"fieldtype": "Tab Break",
+			"label": "General"
+		},
+		{
+			"fieldname": "fba_inbound_tab",
+			"fieldtype": "Tab Break",
+			"label": "FBA Inbound"
+		},
+		{
+			"default": "0",
+			"fieldname": "fba_inbound_enabled",
+			"fieldtype": "Check",
+			"label": "FBA Inbound Enabled"
+		},
+		{
+			"depends_on": "eval:doc.fba_inbound_enabled",
+			"fieldname": "fba_source_address",
+			"fieldtype": "Link",
+			"label": "Source Address",
+			"link_filters": "[[\"Address\",\"address_type\",\"=\",\"Warehouse\"]]",
+			"options": "Address"
+		},
+		{
+			"fieldname": "column_break_fba_defaults",
+			"fieldtype": "Column Break"
+		},
+		{
+			"default": "SELLER",
+			"depends_on": "eval:doc.fba_inbound_enabled",
+			"fieldname": "default_prep_owner",
+			"fieldtype": "Select",
+			"label": "Default Prep Owner",
+			"options": "AMAZON\nSELLER\nNONE"
+		},
+		{
+			"default": "SELLER",
+			"depends_on": "eval:doc.fba_inbound_enabled",
+			"fieldname": "default_label_owner",
+			"fieldtype": "Select",
+			"label": "Default Label Owner",
+			"options": "AMAZON\nSELLER\nNONE"
+		},
 		{
 			"fieldname": "buying_price_list",
 			"fieldtype": "Link",
@@ -207,7 +258,7 @@
 	"index_web_pages_for_search": 1,
 	"issingle": 1,
 	"links": [],
-	"modified": "2026-01-27 03:35:05.113021",
+	"modified": "2026-03-09 12:16:29.267908",
 	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Navgold Settings",

@@ -3,8 +3,9 @@
 
 import frappe
 from erpnext.selling.doctype.sales_order.sales_order import create_pick_list
+from erpnext.stock.doctype.pick_list.pick_list import create_stock_entry
 from frappe import _
-from frappe.utils import flt
+from frappe.utils import flt, orjson_dumps
 
 
 @frappe.whitelist()
@@ -133,6 +134,22 @@ def map_sales_orders_to_pick_list(sales_order_names: str, target_pr_doc_json: st
 	target_doc.run_method("set_item_locations")
 
 	return target_doc
+
+
+@frappe.whitelist()
+def create_fba_transfer_stock_entry(pick_list_name: str) -> dict:
+	existing = frappe.db.exists("Stock Entry", {"pick_list": pick_list_name})
+	if existing:
+		return frappe.get_cached_doc("Stock Entry", existing).as_dict()
+
+	pick_list_doc = frappe.get_cached_doc("Pick List", pick_list_name)
+	stock_entry = create_stock_entry(orjson_dumps(pick_list_doc.as_dict()))
+
+	if not stock_entry:
+		frappe.throw(_("Could not create Stock Entry for Pick List {0}").format(pick_list_name))
+
+	stock_entry["stock_entry_type"] = "FBA Transfer"
+	return stock_entry
 
 
 def sort_item_locations_by_walk_route(doc, method):

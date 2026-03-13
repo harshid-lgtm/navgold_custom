@@ -4,7 +4,7 @@
 frappe.ui.form.on('FBA Packing Slip', {
 	setup(frm) {
 		frm.set_query('stock_entry', () => ({
-			filters: { docstatus: 0, stock_entry_type: 'FBA Transfer' },
+			filters: { stock_entry_type: 'FBA Transfer' },
 		}));
 	},
 
@@ -166,9 +166,11 @@ async function set_stock_entry_and_load_items(
 }
 
 async function show_packed_qty_dialog(frm, item_code) {
-	const row = (frm.doc.items || []).find((row) => row.item_code === item_code);
+	const matching_rows = (frm.doc.items || []).filter(
+		(row) => row.item_code === item_code,
+	);
 
-	if (!row) {
+	if (!matching_rows.length) {
 		frappe.show_alert(
 			{
 				message: __('Item {0} not found in the items table', [item_code]),
@@ -179,10 +181,49 @@ async function show_packed_qty_dialog(frm, item_code) {
 		return;
 	}
 
+	if (matching_rows.length > 1) {
+		show_uom_selection_dialog(frm, item_code, matching_rows);
+		return;
+	}
+
+	await show_qty_dialog_for_row(frm, matching_rows[0]);
+}
+
+function show_uom_selection_dialog(frm, item_code, rows) {
+	const uom_options = rows.map((row) => {
+		const remaining_singles = flt(row.qty) - flt(row.custom_packed_qty);
+		return `${row.stock_uom} (${remaining_singles} remaining)`;
+	});
+
+	const dialog = new frappe.ui.Dialog({
+		title: __('Select UOM — {0}', [item_code]),
+		fields: [
+			{
+				fieldname: 'uom_choice',
+				fieldtype: 'Select',
+				label: __('Which UOM are you packing?'),
+				options: uom_options.join('\n'),
+				default: uom_options[0],
+				reqd: 1,
+			},
+		],
+		primary_action_label: __('Continue'),
+		async primary_action({ uom_choice }) {
+			dialog.hide();
+			const selected_index = uom_options.indexOf(uom_choice);
+			await show_qty_dialog_for_row(frm, rows[selected_index]);
+		},
+	});
+	dialog.show();
+}
+
+async function show_qty_dialog_for_row(frm, row) {
+	const item_code = row.item_code;
+
 	const factor_response = await frappe.call({
 		method:
 			'navgold_custom.navgold_custom.doctype.fba_packing_slip.fba_packing_slip.get_singles_conversion_factor',
-		args: { item_code },
+		args: { item_code, uom: row.stock_uom },
 	});
 	const singles_factor = flt(factor_response.message) || 1;
 
@@ -195,7 +236,7 @@ async function show_packed_qty_dialog(frm, item_code) {
 	const remaining_singles = Math.round(remaining * singles_factor);
 
 	const dialog = new frappe.ui.Dialog({
-		title: __('Update Packed Qty (Singles)'),
+		title: __('Update Packed Qty for {0} ({1})', [item_code, row.stock_uom]),
 		fields: [
 			{
 				fieldname: 'item_code',
@@ -259,8 +300,9 @@ async function show_packed_qty_dialog(frm, item_code) {
 			frm.dirty();
 
 			frappe.show_alert({
-				message: __('Packed {0}: {1}/{2} singles', [
+				message: __('Packed {0} ({1}): {2}/{3} singles', [
 					item_code,
+					row.stock_uom,
 					new_packed_singles,
 					required_qty_singles,
 				]),

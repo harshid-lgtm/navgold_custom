@@ -81,7 +81,7 @@ def get_stock_entry_items(stock_entry: str):
 	rows = frappe.get_all(
 		"Stock Entry Detail",
 		filters={"parent": stock_entry},
-		fields=["item_code", "item_name", "description", "transfer_qty", "stock_uom"],
+		fields=["item_code", "item_name", "description", "qty", "uom"],
 	)
 
 	item_codes = list({row.item_code for row in rows})
@@ -89,25 +89,25 @@ def get_stock_entry_items(stock_entry: str):
 
 	consolidated = {}
 	for row in rows:
-		key = row.item_code
+		key = (row.item_code, row.uom)
 		if key in consolidated:
-			consolidated[key]["qty"] += flt(row.transfer_qty)
+			consolidated[key]["qty"] += flt(row.qty)
 		else:
-			weight_info = item_weights.get(key, {})
+			weight_info = item_weights.get(row.item_code, {})
 			consolidated[key] = {
 				"item_code": row.item_code,
 				"item_name": row.item_name,
 				"description": row.description,
-				"qty": flt(row.transfer_qty),
-				"uom": row.stock_uom,
+				"qty": flt(row.qty),
+				"uom": row.uom,
 				"weight_per_unit": flt(weight_info.get("weight_per_unit")),
 				"weight_uom": weight_info.get("weight_uom", ""),
 			}
 
 	already_packed = get_already_packed_qty(stock_entry)
-	for item_code, packed_qty in already_packed.items():
-		if item_code in consolidated:
-			consolidated[item_code]["qty"] -= packed_qty
+	for (item_code, uom), packed_qty in already_packed.items():
+		if (item_code, uom) in consolidated:
+			consolidated[(item_code, uom)]["qty"] -= packed_qty
 
 	return [item for item in consolidated.values() if flt(item["qty"]) > 0]
 
@@ -131,30 +131,27 @@ def get_already_packed_qty(stock_entry: str):
 			"parent": ["in", packing_slips],
 			"parenttype": "FBA Packing Slip",
 		},
-		fields=["item_code", "qty"],
+		fields=["item_code", "uom", "qty"],
 	)
 
 	packed_map = {}
 	for item in packed_items:
-		packed_map[item.item_code] = flt(packed_map.get(item.item_code, 0)) + flt(item.qty)
+		key = (item.item_code, item.uom)
+		packed_map[key] = flt(packed_map.get(key, 0)) + flt(item.qty)
 
 	return packed_map
 
 
 @frappe.whitelist()
 @redis_cache(ttl=300)
-def get_singles_conversion_factor(item_code: str):
-	item_stock_uom = frappe.db.get_value("Item", item_code, "stock_uom")
-	if item_stock_uom == "Nos":
+def get_singles_conversion_factor(item_code: str, uom: str = "Nos"):
+	if not uom or uom == "Nos":
 		return 1.0
 
-	nos_factor = frappe.db.get_value(
+	conversion_factor = frappe.db.get_value(
 		"UOM Conversion Detail",
-		{"parent": item_code, "parenttype": "Item", "uom": "Nos"},
+		{"parent": item_code, "parenttype": "Item", "uom": uom},
 		"conversion_factor",
 	)
 
-	if nos_factor:
-		return 1.0 / flt(nos_factor)
-
-	return 1.0
+	return flt(conversion_factor) or 1.0

@@ -22,8 +22,12 @@ class NavgoldSettings(Document):
 		cogs_supplier: DF.Link | None
 		commission_threshold: DF.Float
 		default_cost_set_template: DF.Link | None
+		default_label_owner: DF.Literal["AMAZON", "SELLER", "NONE"]
+		default_prep_owner: DF.Literal["AMAZON", "SELLER", "NONE"]
 		default_stock_allocation_warehouse: DF.Link | None
 		default_strategy_template: DF.Link | None
+		fba_inbound_enabled: DF.Check
+		fba_source_address: DF.Link | None
 		high_price_commission_adjustment: DF.Float
 		min_shelf_expiry_in_days: DF.Int
 		multiple_active_item_uom: DF.Check

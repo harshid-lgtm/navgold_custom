@@ -297,16 +297,29 @@ def parse_listings_tsv(tsv_content):
 	return rows
 
 
-def get_proxy_sku_map(sku_names=None):
+def get_proxy_sku_map(sku_names=None, item_codes=None, only_fba=False):
 	proxy_sku = DocType("Proxy SKU")
 	query = (
 		frappe.qb.from_(proxy_sku)
-		.select(proxy_sku.name, proxy_sku.item, proxy_sku.asin, proxy_sku.uom, proxy_sku.is_fba)
+		.select(
+			proxy_sku.name,
+			proxy_sku.item,
+			proxy_sku.asin,
+			proxy_sku.uom,
+			proxy_sku.is_fba,
+			proxy_sku.fnsku,
+		)
 		.where(proxy_sku.is_active == 1)
 	)
 
 	if sku_names:
 		query = query.where(proxy_sku.name.isin(sku_names))
+
+	if item_codes:
+		query = query.where(proxy_sku.item.isin(item_codes))
+
+	if only_fba:
+		query = query.where(proxy_sku.is_fba == 1)
 
 	rows = query.run(as_dict=True)
 
@@ -316,6 +329,7 @@ def get_proxy_sku_map(sku_names=None):
 			"asin": row["asin"] or "",
 			"uom": row["uom"],
 			"is_fba": row["is_fba"],
+			"fnsku": row["fnsku"] or "",
 		}
 		for row in rows
 	}
