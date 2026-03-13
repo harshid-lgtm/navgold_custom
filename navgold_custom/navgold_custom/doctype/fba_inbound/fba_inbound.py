@@ -136,7 +136,7 @@ class FBAInbound(Document):
 		frappe.msgprint(_("Confirming placement option in the background. You will be notified when done."))
 
 	@frappe.whitelist()
-	def fetch_transportation_options(self, ready_to_ship_date=""):
+	def fetch_transportation_options(self, ready_to_ship_date: str = ""):
 		if self.status != "Placement Confirmed":
 			frappe.throw(_("Transportation options require status 'Placement Confirmed'"))
 
@@ -200,7 +200,7 @@ class FBAInbound(Document):
 		frappe.msgprint(_("Confirming transportation in the background. You will be notified when done."))
 
 	@frappe.whitelist()
-	def get_labels(self, page_type="PackageLabel_A4_2", include_pallet=False):
+	def get_labels(self, page_type: str = "PackageLabel_A4_2", include_pallet: bool = False):
 		if self.status not in ("Transport Confirmed", "Labels Ready"):
 			frappe.throw(_("Labels can only be fetched after transport is confirmed"))
 
@@ -240,7 +240,7 @@ class FBAInbound(Document):
 
 
 @frappe.whitelist()
-def get_items_from_stock_entry(stock_entry_name):
+def get_items_from_stock_entry(stock_entry_name: str):
 	settings = frappe.get_cached_doc("Navgold Settings")
 
 	stock_entry_details = frappe.get_all(
@@ -322,7 +322,7 @@ def get_items_from_stock_entry(stock_entry_name):
 
 
 @frappe.whitelist()
-def get_boxes_from_packing_slips(stock_entry_name):
+def get_boxes_from_packing_slips(stock_entry_name: str):
 	packing_slips = frappe.get_all(
 		"FBA Packing Slip",
 		filters={"stock_entry": stock_entry_name, "docstatus": 1},
@@ -588,16 +588,16 @@ def _confirm_placement_option(
 			shipment_data = inbound_api.get_shipment(doc.inbound_plan_id, shipment_id)
 			destination = shipment_data.get("destination", {})
 			dest_address = destination.get("address", {})
-			dest_address_str = ", ".join(
-				filter(
-					None,
-					[
-						dest_address.get("addressLine1"),
-						dest_address.get("city"),
-						dest_address.get("countryCode"),
-					],
+			dest_address_parts = [
+				value
+				for value in (
+					dest_address.get("addressLine1"),
+					dest_address.get("city"),
+					dest_address.get("countryCode"),
 				)
-			)
+				if value
+			]
+			dest_address_str = ", ".join(dest_address_parts)
 			doc.append(
 				"shipments",
 				{
