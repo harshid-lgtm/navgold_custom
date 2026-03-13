@@ -10,6 +10,7 @@ import time
 
 import frappe
 import requests
+from frappe.integrations.utils import make_get_request
 from frappe.integrations.utils import make_request as frappe_make_request
 from frappe.utils import cstr, get_request_session
 
@@ -867,11 +868,18 @@ class FulfillmentInbound(SPAPI):
 			json=body,
 		)
 
+	def list_prep_details(self, msku_list, marketplace_id):
+		params = [("marketplaceId", marketplace_id)]
+		for msku in msku_list:
+			params.append(("mskus", msku))
+
+		return self.make_request(append_to_base_uri="items/prepDetails", params=params)
+
 	def get_labels_v0(self, shipment_confirmation_id, page_type="PackageLabel_Plain_Paper", page_size=1):
 		url = self.endpoint + f"/fba/inbound/v0/shipments/{shipment_confirmation_id}/labels"
 		params = {"PageType": page_type, "PageSize": page_size}
 		try:
-			result = frappe.make_get_request(url=url, params=params, headers=self.get_headers())
+			result = make_get_request(url=url, params=params, headers=self.get_headers())
 			return result.get("payload", result)
 		except SPAPIError:
 			raise

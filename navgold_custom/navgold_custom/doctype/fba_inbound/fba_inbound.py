@@ -12,6 +12,12 @@ from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api 
 )
 from navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku import get_proxy_sku_map
 
+OWNER_CONSTRAINT_MAP = {
+	"AMAZON_ONLY": "AMAZON",
+	"SELLER_ONLY": "SELLER",
+	"NONE_ONLY": "NONE",
+}
+
 
 class FBAInbound(Document):
 	def validate(self):
@@ -253,6 +259,15 @@ def get_items_from_stock_entry(stock_entry_name):
 		for name, data in get_proxy_sku_map(item_codes=item_codes, only_fba=True).items()
 	}
 
+	item_expiry_map = {
+		row.name: row
+		for row in frappe.get_all(
+			"Item",
+			filters={"name": ["in", item_codes]},
+			fields=["name", "has_expiry_date", "shelf_life_in_days"],
+		)
+	}
+
 	consolidated = {}
 	for row in stock_entry_details:
 		key = (row.item_code, row.uom)
@@ -267,6 +282,9 @@ def get_items_from_stock_entry(stock_entry_name):
 				"qty": pack_qty,
 			}
 
+	default_shelf_days = cint(settings.min_shelf_expiry_in_days)
+	today = frappe.utils.today()
+
 	result = []
 	for (item_code, uom), data in consolidated.items():
 		proxy_sku = proxy_sku_map.get((item_code, uom))
@@ -280,6 +298,13 @@ def get_items_from_stock_entry(stock_entry_name):
 			)
 			continue
 
+		expiration_date = None
+		item_info = item_expiry_map.get(item_code)
+		if item_info and item_info.has_expiry_date:
+			shelf_days = cint(item_info.shelf_life_in_days) or default_shelf_days
+			if shelf_days:
+				expiration_date = add_days(today, shelf_days)
+
 		result.append(
 			{
 				"item_code": item_code,
@@ -289,6 +314,7 @@ def get_items_from_stock_entry(stock_entry_name):
 				"quantity": cint(round(data["qty"])),
 				"prep_owner": settings.default_prep_owner or "SELLER",
 				"label_owner": settings.default_label_owner or "SELLER",
+				"expiration_date": expiration_date,
 			}
 		)
 
@@ -345,14 +371,26 @@ def _create_plan(fba_inbound_name, enqueued_by="Administrator"):
 	settings = frappe.get_cached_doc("Navgold Settings")
 	source_address = build_source_address(settings)
 	inbound_api = FulfillmentInbound.from_amazon_settings()
+	prep_details_map = get_prep_details_map(inbound_api, doc.items)
 
 	items_payload = []
 	for item in doc.items:
+		prep_owner = item.prep_owner or "SELLER"
+		label_owner = item.label_owner or "SELLER"
+
+		prep_detail = prep_details_map.get(item.msku)
+		if prep_detail:
+			prep_owner = resolve_owner_constraint(prep_detail.get("prepOwnerConstraint"), prep_owner)
+			label_owner = resolve_owner_constraint(prep_detail.get("labelOwnerConstraint"), label_owner)
+
+		item.prep_owner = prep_owner
+		item.label_owner = label_owner
+
 		item_entry = {
 			"msku": item.msku,
 			"quantity": cint(item.quantity),
-			"prepOwner": item.prep_owner or "SELLER",
-			"labelOwner": item.label_owner or "SELLER",
+			"prepOwner": prep_owner,
+			"labelOwner": label_owner,
 		}
 		if item.expiration_date:
 			item_entry["expiration"] = cstr(item.expiration_date)
@@ -378,15 +416,6 @@ def _create_plan(fba_inbound_name, enqueued_by="Administrator"):
 				operation_result.get("operationResult", {}).get("inboundPlanId") or inbound_plan_id
 			)
 
-		frappe.db.set_value(
-			"FBA Inbound",
-			fba_inbound_name,
-			{
-				"inbound_plan_id": inbound_plan_id,
-				"operation_id": operation_id or "",
-				"status": "Plan Created",
-			},
-		)
 		doc.inbound_plan_id = inbound_plan_id
 		doc.operation_id = operation_id
 		doc.status = "Plan Created"
@@ -708,7 +737,6 @@ def _get_labels(
 ):
 	doc = frappe.get_cached_doc("FBA Inbound", fba_inbound_name)
 	inbound_api = FulfillmentInbound.from_amazon_settings()
-
 	try:
 		label_urls = []
 
@@ -913,6 +941,28 @@ def save_label_file(file_name, content, fba_inbound_name):
 	)
 	file_doc.save(ignore_permissions=True)
 	return file_doc.file_url
+
+
+def get_prep_details_map(inbound_api, items):
+	msku_list = list({item.msku for item in items if item.msku})
+	if not msku_list:
+		return {}
+
+	try:
+		response = inbound_api.list_prep_details(msku_list, inbound_api.marketplace_id)
+		return {
+			detail["msku"]: detail for detail in response.get("mskuPrepDetails", []) if detail.get("msku")
+		}
+	except SPAPIError as error:
+		frappe.log_error(
+			title="FBA Prep Details Fetch Failed",
+			message=f"{error.error}: {error.error_description}",
+		)
+		return {}
+
+
+def resolve_owner_constraint(constraint, current_value):
+	return OWNER_CONSTRAINT_MAP.get(constraint, current_value)
 
 
 def handle_step_error(step_label, fba_inbound_name, error, enqueued_by, step_key):
