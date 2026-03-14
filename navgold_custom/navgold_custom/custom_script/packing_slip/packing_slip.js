@@ -5,6 +5,8 @@ frappe.ui.form.on('Packing Slip', {
 	refresh(frm) {
 		toggle_fields(frm);
 		add_scan_buttons(frm);
+		add_sfp_label_button(frm);
+		add_sfp_cancel_button(frm);
 	},
 });
 
@@ -27,6 +29,143 @@ function add_scan_buttons(frm) {
 			navgold.packing.open_scan_item_dialog(frm, process_item_scan),
 		);
 	}
+}
+
+function add_sfp_label_button(frm) {
+	if (frm.doc.docstatus === 2 || !frm.doc.delivery_note) return;
+
+	const label_exists = !!frm.doc.custom_sfp_label;
+	const button_label = label_exists
+		? __('Regenerate SFP Label')
+		: __('Get SFP Label');
+
+	frm.add_custom_button(button_label, async () => {
+		try {
+			const rates_response = await frappe.call({
+				method:
+					'navgold_custom.navgold_custom.custom_script.packing_slip.packing_slip.get_sfp_shipping_rates',
+				args: { packing_slip: frm.doc.name },
+			});
+
+			const rates = rates_response.message || [];
+			if (!rates.length) {
+				frappe.show_alert(
+					{ message: __('No shipping rates returned.'), indicator: 'red' },
+					5,
+				);
+				return;
+			}
+
+			show_sfp_rate_dialog(frm, rates);
+		} catch {
+			frappe.show_alert(
+				{ message: __('Failed to fetch SFP rates.'), indicator: 'red' },
+				5,
+			);
+		}
+	});
+}
+
+function add_sfp_cancel_button(frm) {
+	if (frm.doc.docstatus === 2 || !frm.doc.custom_sfp_shipment_id) return;
+
+	frm.add_custom_button(__('Cancel SFP Shipment'), async () => {
+		try {
+			await frappe.call({
+				method:
+					'navgold_custom.navgold_custom.custom_script.packing_slip.packing_slip.cancel_sfp_shipment',
+				args: { packing_slip: frm.doc.name },
+			});
+
+			await frm.reload_doc();
+			frappe.show_alert(
+				{ message: __('SFP shipment cancelled.'), indicator: 'green' },
+				5,
+			);
+		} catch {
+			frappe.show_alert(
+				{ message: __('Failed to cancel SFP shipment.'), indicator: 'red' },
+				5,
+			);
+		}
+	});
+}
+
+function show_sfp_rate_dialog(frm, rates) {
+	const rate_label_map = new Map();
+	const options = rates.map((rate) => {
+		const charge = rate.total_charge ? `£${rate.total_charge}` : '';
+		const delivery_date = rate.delivery_window_end
+			? rate.delivery_window_end.split('T')[0]
+			: '';
+		const delivery = delivery_date
+			? ` — Delivery by ${frappe.datetime.str_to_user(delivery_date)}`
+			: '';
+		const label = `${rate.carrier_name || ''} — ${
+			rate.service_name || ''
+		} (${charge})${delivery}`;
+		rate_label_map.set(label, rate);
+		return label;
+	});
+
+	const dialog = new frappe.ui.Dialog({
+		title: __('Select Shipping Rate'),
+		fields: [
+			{
+				fieldname: 'rate',
+				fieldtype: 'Select',
+				label: __('Rate'),
+				options: options.join('\n'),
+				reqd: 1,
+				default: options[0],
+			},
+		],
+		primary_action_label: __('Buy Label'),
+		async primary_action({ rate }) {
+			dialog.hide();
+			const selected_rate = rate_label_map.get(rate);
+			if (!selected_rate?.rate_id) {
+				frappe.show_alert(
+					{ message: __('Invalid rate selection.'), indicator: 'red' },
+					5,
+				);
+				return;
+			}
+
+			try {
+				const response = await frappe.call({
+					method:
+						'navgold_custom.navgold_custom.custom_script.packing_slip.packing_slip.purchase_sfp_shipping_label',
+					args: {
+						packing_slip: frm.doc.name,
+						rate_id: selected_rate.rate_id,
+						document_spec: selected_rate.document_spec || null,
+						request_token: selected_rate.request_token || '',
+						value_added_services: selected_rate.value_added_services || [],
+					},
+				});
+
+				const result = response.message || {};
+				await frm.reload_doc();
+
+				if (result.file_url) {
+					frappe.show_alert(
+						{
+							message: __('SFP label generated successfully.'),
+							indicator: 'green',
+						},
+						5,
+					);
+				}
+			} catch {
+				frappe.show_alert(
+					{ message: __('Failed to generate SFP label.'), indicator: 'red' },
+					5,
+				);
+			}
+		},
+	});
+	dialog.show();
 }
 
 async function process_item_scan(frm, barcode) {

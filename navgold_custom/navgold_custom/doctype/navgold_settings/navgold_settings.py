@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import frappe
+from frappe import _
 from frappe.model.document import Document
 
 BATCH_SIZE = 5000
@@ -38,7 +39,35 @@ class NavgoldSettings(Document):
 		tote_weight_limit: DF.Int
 	# end: auto-generated types
 
-	pass
+	def get_source_address(self, state_key="stateOrRegion"):
+		if not self.fba_source_address:
+			frappe.throw(_("Source address is not configured in Navgold Settings."))
+
+		address_doc = frappe.get_cached_doc("Address", self.fba_source_address)
+		country_code = frappe.db.get_value("Country", address_doc.country, "code") or address_doc.country
+
+		address = {
+			"name": address_doc.address_title or "",
+			"addressLine1": address_doc.address_line1,
+			"city": address_doc.city or "",
+			"countryCode": (country_code or "").upper(),
+			"postalCode": address_doc.pincode or "",
+		}
+
+		if address_doc.address_line2:
+			address["addressLine2"] = address_doc.address_line2
+		if address_doc.phone:
+			address["phoneNumber"] = address_doc.phone
+		if address_doc.state:
+			address[state_key] = address_doc.state
+		if address_doc.email_id:
+			address["email"] = address_doc.email_id
+
+		required = ["name", "addressLine1", "city", "postalCode", "countryCode"]
+		if any(not address.get(key) for key in required):
+			frappe.throw(_("Source address is incomplete in Navgold Settings."))
+
+		return address
 
 	@frappe.whitelist()
 	def generate_proxy_skus_for_items(self):

@@ -4,7 +4,7 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import add_days, cint, cstr, flt
+from frappe.utils import add_days, cint, cstr, flt, orjson_dumps
 
 from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import (
 	FulfillmentInbound,
@@ -17,6 +17,7 @@ OWNER_CONSTRAINT_MAP = {
 	"SELLER_ONLY": "SELLER",
 	"NONE_ONLY": "NONE",
 }
+from erpnext.stock.doctype.item.item import get_uom_conv_factor
 
 
 class FBAInbound(Document):
@@ -348,7 +349,7 @@ def get_boxes_from_packing_slips(stock_entry_name: str):
 
 	boxes = []
 	for slip in packing_slips:
-		weight_kg = convert_weight_to_kg(flt(slip.gross_weight_pkg), slip.gross_weight_uom or "KG")
+		weight_kg = flt(slip.gross_weight_pkg) * flt(get_uom_conv_factor(slip.gross_weight_uom, "Kg"))
 		boxes.append(
 			{
 				"fba_packing_slip": slip.name,
@@ -359,7 +360,7 @@ def get_boxes_from_packing_slips(stock_entry_name: str):
 				"height": flt(slip.height_cm),
 				"dimension_unit": "CM",
 				"quantity": 1,
-				"items_detail": frappe.as_json(items_by_slip.get(slip.name, [])),
+				"items_detail": orjson_dumps(items_by_slip.get(slip.name, [])),
 			}
 		)
 
@@ -369,7 +370,7 @@ def get_boxes_from_packing_slips(stock_entry_name: str):
 def _create_plan(fba_inbound_name, enqueued_by="Administrator"):
 	doc = frappe.get_cached_doc("FBA Inbound", fba_inbound_name)
 	settings = frappe.get_cached_doc("Navgold Settings")
-	source_address = build_source_address(settings)
+	source_address = settings.get_source_address(state_key="stateOrProvinceCode")
 	inbound_api = FulfillmentInbound.from_amazon_settings()
 	prep_details_map = get_prep_details_map(inbound_api, doc.items)
 
@@ -770,12 +771,18 @@ def _get_labels(
 			download_url = label_response.get("DownloadURL") or label_response.get("downloadUrl")
 			if download_url:
 				pdf_content = inbound_api.download_label_pdf(download_url)
-				file_url = save_label_file(
-					f"BoxLabels-{shipment_confirmation_id}.pdf",
-					pdf_content,
-					fba_inbound_name,
+				file_doc = frappe.get_doc(
+					{
+						"doctype": "File",
+						"file_name": f"BoxLabels-{shipment_confirmation_id}.pdf",
+						"attached_to_doctype": "FBA Inbound",
+						"attached_to_name": fba_inbound_name,
+						"content": pdf_content,
+						"is_private": 0,
+					}
 				)
-				label_urls.append(file_url)
+				file_doc.insert(ignore_permissions=True).save()
+				label_urls.append(file_doc.file_url)
 
 			if include_pallet:
 				try:
@@ -787,12 +794,18 @@ def _get_labels(
 					pallet_url = pallet_response.get("DownloadURL") or pallet_response.get("downloadUrl")
 					if pallet_url:
 						pallet_content = inbound_api.download_label_pdf(pallet_url)
-						file_url = save_label_file(
-							f"PalletLabels-{shipment_confirmation_id}.pdf",
-							pallet_content,
-							fba_inbound_name,
+						pallet_file_doc = frappe.get_doc(
+							{
+								"doctype": "File",
+								"file_name": f"PalletLabels-{shipment_confirmation_id}.pdf",
+								"attached_to_doctype": "FBA Inbound",
+								"attached_to_name": fba_inbound_name,
+								"content": pallet_content,
+								"is_private": 0,
+							}
 						)
-						label_urls.append(file_url)
+						pallet_file_doc.insert(ignore_permissions=True).save()
+						label_urls.append(pallet_file_doc.file_url)
 				except Exception as pallet_error:
 					frappe.log_error(
 						title=f"FBA Pallet Label Fetch Skipped: {shipment_confirmation_id}",
@@ -845,34 +858,6 @@ def _cancel_plan(fba_inbound_name, enqueued_by="Administrator"):
 		handle_step_error("Cancel Plan", fba_inbound_name, error, enqueued_by, "cancel_plan")
 
 
-def build_source_address(settings):
-	if not settings.fba_source_address:
-		frappe.throw(_("Source address is not configured in Navgold Settings (FBA Inbound tab)"))
-
-	address_doc = frappe.get_cached_doc("Address", settings.fba_source_address)
-
-	if not address_doc.address_line1:
-		frappe.throw(_("Address Line 1 is missing on the selected source address"))
-
-	country_code = frappe.db.get_value("Country", address_doc.country, "code") or "GB"
-
-	payload = {
-		"name": address_doc.address_title or "",
-		"addressLine1": address_doc.address_line1,
-		"city": address_doc.city or "",
-		"countryCode": country_code.upper(),
-		"postalCode": address_doc.pincode or "",
-		"phoneNumber": address_doc.phone or "",
-	}
-
-	if address_doc.address_line2:
-		payload["addressLine2"] = address_doc.address_line2
-	if address_doc.state:
-		payload["stateOrProvinceCode"] = address_doc.state
-
-	return payload
-
-
 def build_boxes_payload(doc, packing_group_id=None):
 	items_by_item_code = {item.item_code: item for item in doc.items}
 
@@ -917,30 +902,6 @@ def build_boxes_payload(doc, packing_group_id=None):
 		grouping["packingGroupId"] = packing_group_id
 
 	return [grouping]
-
-
-def convert_weight_to_kg(weight, uom):
-	uom_lower = (uom or "").lower()
-	if uom_lower in ("gram", "g", "grams"):
-		return round(weight / 1000, 4)
-	if uom_lower in ("lb", "lbs", "pound", "pounds"):
-		return round(weight * 0.453592, 4)
-	return weight
-
-
-def save_label_file(file_name, content, fba_inbound_name):
-	file_doc = frappe.get_doc(
-		{
-			"doctype": "File",
-			"file_name": file_name,
-			"attached_to_doctype": "FBA Inbound",
-			"attached_to_name": fba_inbound_name,
-			"content": content,
-			"is_private": 0,
-		}
-	)
-	file_doc.save(ignore_permissions=True)
-	return file_doc.file_url
 
 
 def get_prep_details_map(inbound_api, items):

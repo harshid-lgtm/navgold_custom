@@ -178,25 +178,33 @@ class SPAPI:
 			return frappe_make_request(
 				method=method, url=url, params=params, data=data, json=json, headers=headers
 			)
-		except Exception as e:
-			if isinstance(e, SPAPIError):
-				raise
-			if isinstance(e, requests.exceptions.HTTPError) and e.response is not None:
-				try:
-					body = e.response.json()
-					errors = body.get("errors", [])
-					if errors:
-						description = "; ".join(
-							f"{err.get('code', '')}: {err.get('message', '')}" for err in errors
-						)
-					else:
-						description = cstr(body)
-				except Exception:
-					description = e.response.text or cstr(e)
-				raise SPAPIError(
-					error=f"HTTP {e.response.status_code}",
-					error_description=description,
+		except SPAPIError:
+			raise
+		except requests.exceptions.HTTPError as e:
+			if e.response is None:
+				raise SPAPIError(error="HTTPError", error_description=cstr(e))
+
+			response_text = e.response.text or ""
+			try:
+				body = e.response.json()
+				errors = body.get("errors", [])
+				description = (
+					"; ".join(f"{err.get('code', '')}: {err.get('message', '')}" for err in errors)
+					if errors
+					else cstr(body)
 				)
+			except Exception:
+				description = response_text or cstr(e)
+
+			frappe.log_error(
+				message=f"HTTP {e.response.status_code} response: {response_text}",
+				title="SP-API HTTP Error Body",
+			)
+			raise SPAPIError(
+				error=f"HTTP {e.response.status_code}",
+				error_description=description,
+			)
+		except Exception as e:
 			raise SPAPIError(
 				error=type(e).__name__,
 				error_description=cstr(e),
@@ -298,6 +306,52 @@ class Orders(SPAPI):
 		"""Returns the shipping address for the order indicated by the specified order ID."""
 		append_to_base_uri = f"/{order_id}/address"
 		return self.make_request(append_to_base_uri=append_to_base_uri)
+
+
+class Shipping(SPAPI):
+	"""Amazon Shipping API (Buy Shipping v2)"""
+
+	BASE_URI = "/shipping/v2/"
+
+	def get_headers(self):
+		headers = super().get_headers()
+		country_code = (self.country_code or "").upper()
+		business_id_map = {
+			"US": "AmazonShipping_US",
+			"GB": "AmazonShipping_UK",
+			"UK": "AmazonShipping_UK",
+			"IN": "AmazonShipping_IN",
+			"IT": "AmazonShipping_IT",
+			"ES": "AmazonShipping_ES",
+			"FR": "AmazonShipping_FR",
+		}
+		headers["x-amzn-shipping-business-id"] = business_id_map.get(country_code, "AmazonShipping_UK")
+		return headers
+
+	def get_shipping_rates(self, payload: dict) -> dict:
+		return self.make_request(method="POST", append_to_base_uri="shipments/rates", json=payload)
+
+	def purchase_shipment(
+		self,
+		rate_id: str,
+		request_token: str = "",
+		document_spec: dict | None = None,
+		value_added_services: list | None = None,
+	) -> dict:
+		body = {"rateId": rate_id}
+		if request_token:
+			body["requestToken"] = request_token
+		if document_spec:
+			body["requestedDocumentSpecification"] = document_spec
+		if value_added_services:
+			body["requestedValueAddedServices"] = value_added_services
+		return self.make_request(method="POST", append_to_base_uri="shipments", json=body)
+
+	def get_shipment_documents(self, shipment_id: str) -> dict:
+		return self.make_request(append_to_base_uri=f"shipments/{shipment_id}/documents")
+
+	def cancel_shipment(self, shipment_id: str) -> dict:
+		return self.make_request(method="PUT", append_to_base_uri=f"shipments/{shipment_id}/cancel")
 
 
 class CatalogItems(SPAPI):
