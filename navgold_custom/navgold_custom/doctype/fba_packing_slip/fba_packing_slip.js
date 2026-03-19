@@ -246,11 +246,18 @@ async function show_qty_dialog_for_row(frm, row) {
 				default: item_code,
 			},
 			{
-				fieldname: 'item_name',
-				fieldtype: 'Data',
-				label: __('Item Name'),
+				fieldname: 'description',
+				fieldtype: 'Small Text',
+				label: __('Description'),
 				read_only: 1,
-				default: row.item_name,
+				default: row.description,
+			},
+			{
+				fieldname: 'uom',
+				fieldtype: 'Data',
+				label: __('UOM'),
+				read_only: 1,
+				default: row.stock_uom,
 			},
 			{
 				fieldname: 'required_qty',
