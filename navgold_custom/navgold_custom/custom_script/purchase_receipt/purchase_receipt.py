@@ -181,10 +181,13 @@ def add_scanned_po_item_to_pr(
 
 	pr_doc_parsed = frappe.parse_json(target_pr_doc) if isinstance(target_pr_doc, str) else target_pr_doc
 
-	# Build map of qty already in current PR for each PO line item
+	existing_item_names = set()
 	qty_in_current_pr = {}
+
 	if pr_doc_parsed and pr_doc_parsed.get("items"):
 		for item in pr_doc_parsed.get("items"):
+			if item.get("item_code"):
+				existing_item_names.add(item.get("name"))
 			if item.get("purchase_order") == po_name and item.get("item_code") == item_code:
 				po_item_name = item.get("purchase_order_item")
 				if po_item_name:
@@ -237,19 +240,23 @@ def add_scanned_po_item_to_pr(
 
 	updated_doc = make_purchase_receipt(source_name=po_name, target_doc=target_pr_doc, args=json.dumps(args))
 
-	# Update quantities for each distributed item
-	for dist in distribution:
-		for item in updated_doc.items:
-			if item.purchase_order_item == dist["po_item_name"] and item.purchase_order == po_name:
-				item.qty = dist["qty"]
-				item.amount = flt(item.qty) * flt(item.rate)
-				item.base_amount = flt(item.qty) * flt(item.rate) * flt(item.conversion_factor)
-				item.stock_qty = flt(item.qty) * flt(item.conversion_factor)
-				item.batch_no = get_or_create_batch(batch_no, expiry_date, item.item_code)
-				if warehouse:
-					item.warehouse = warehouse
-				break
+	batch = get_or_create_batch(batch_no, expiry_date, item_code)
 
-	# Filter out empty items
+	distributed_items = {d["po_item_name"]: d["qty"] for d in distribution}
+	for item in updated_doc.items:
+		if item.name in existing_item_names:
+			continue
+		if item.purchase_order == po_name and item.purchase_order_item in distributed_items:
+			item.qty = distributed_items[item.purchase_order_item]
+			item.amount = flt(item.qty) * flt(item.rate)
+			item.base_amount = flt(item.qty) * flt(item.rate) * flt(item.conversion_factor)
+			item.stock_qty = flt(item.qty) * flt(item.conversion_factor)
+			item.batch_no = batch
+			if warehouse:
+				item.warehouse = warehouse
+
 	updated_doc.items = [item for item in updated_doc.items if item.get("item_code")]
+	for idx, item in enumerate(updated_doc.items, 1):
+		item.idx = idx
+
 	return updated_doc
