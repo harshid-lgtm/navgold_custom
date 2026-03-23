@@ -32,7 +32,7 @@ function add_scan_buttons(frm) {
 }
 
 function add_sfp_label_button(frm) {
-	if (frm.doc.docstatus === 2 || !frm.doc.delivery_note) return;
+	if (frm.is_new() || frm.doc.docstatus === 2 || !frm.doc.delivery_note) return;
 
 	const label_exists = !!frm.doc.custom_sfp_label;
 	const button_label = label_exists
@@ -282,6 +282,8 @@ async function set_delivery_note_and_load_items(
 
 	const items = response.message || [];
 
+	frm._row_conversion_factors = {};
+
 	frm.clear_table('items');
 	for (const item of items) {
 		const row = frm.add_child('items');
@@ -292,6 +294,10 @@ async function set_delivery_note_and_load_items(
 		row.stock_uom = item.uom;
 		row.dn_detail = item.dn_detail || '';
 		row.custom_packed_qty = 0;
+
+		frm._row_conversion_factors[item.dn_detail] =
+			flt(item.conversion_factor) || 1;
+
 		if (item.weight_per_unit) {
 			row.net_weight = flt(item.weight_per_unit) * flt(item.qty);
 			row.weight_uom = item.weight_uom;
@@ -309,10 +315,16 @@ async function set_delivery_note_and_load_items(
 	show_packed_qty_dialog(frm, scanned_item_code);
 }
 
-function show_packed_qty_dialog(frm, item_code) {
-	const row = (frm.doc.items || []).find((r) => r.item_code === item_code);
+function get_row_conversion_factor(frm, row) {
+	return flt(frm._row_conversion_factors?.[row.dn_detail]) || 1;
+}
 
-	if (!row) {
+function show_packed_qty_dialog(frm, item_code) {
+	const matching_rows = (frm.doc.items || []).filter(
+		(r) => r.item_code === item_code,
+	);
+
+	if (!matching_rows.length) {
 		frappe.show_alert(
 			{
 				message: __('Item {0} not found in the items table', [item_code]),
@@ -323,9 +335,22 @@ function show_packed_qty_dialog(frm, item_code) {
 		return;
 	}
 
-	const current_packed = flt(row.custom_packed_qty);
-	const required_qty = flt(row.qty);
-	const remaining = required_qty - current_packed;
+	let total_required_nos = 0;
+	let total_packed_nos = 0;
+	let total_required_uom = 0;
+
+	const original_uom = matching_rows[0].stock_uom || 'Nos';
+
+	for (const row of matching_rows) {
+		const conversion_factor = get_row_conversion_factor(frm, row);
+		total_required_nos += flt(row.qty) * conversion_factor;
+		total_packed_nos += flt(row.custom_packed_qty) * conversion_factor;
+		total_required_uom += flt(row.qty);
+	}
+
+	const remaining_nos = total_required_nos - total_packed_nos;
+	const show_original_uom =
+		original_uom !== 'Nos' && total_required_uom !== total_required_nos;
 
 	const dialog = new frappe.ui.Dialog({
 		title: __('Update Packed Qty'),
@@ -342,48 +367,49 @@ function show_packed_qty_dialog(frm, item_code) {
 				fieldtype: 'Small Text',
 				label: __('Description'),
 				read_only: 1,
-				default: row.description,
+				default: matching_rows[0].description,
 			},
 			{
-				fieldname: 'uom',
+				fieldname: 'original_uom_info',
 				fieldtype: 'Data',
-				label: __('UOM'),
+				label: __('Original UOM'),
 				read_only: 1,
-				default: row.stock_uom,
+				default: `${total_required_uom} ${original_uom}`,
+				hidden: !show_original_uom,
 			},
 			{
 				fieldname: 'required_qty',
 				fieldtype: 'Data',
-				label: __('Required Qty'),
+				label: __('Required Qty (Nos)'),
 				read_only: 1,
-				default: cstr(required_qty),
+				default: cstr(total_required_nos),
 			},
 			{
 				fieldname: 'current_packed_qty',
 				fieldtype: 'Data',
-				label: __('Already Packed'),
+				label: __('Already Packed (Nos)'),
 				read_only: 1,
-				default: cstr(current_packed),
+				default: cstr(total_packed_nos),
 			},
 			{
 				fieldname: 'qty',
 				fieldtype: 'Float',
-				label: __('Qty to Pack'),
-				default: remaining > 0 ? remaining : 1,
+				label: __('Qty to Pack (Nos)'),
+				default: remaining_nos > 0 ? remaining_nos : 1,
 				reqd: 1,
 			},
 		],
 		primary_action_label: __('Confirm'),
 		primary_action({ qty }) {
-			const new_packed_qty = current_packed + flt(qty);
+			const new_total_packed_nos = total_packed_nos + flt(qty);
 
-			if (new_packed_qty > required_qty) {
+			if (new_total_packed_nos > total_required_nos) {
 				frappe.show_alert(
 					{
 						message: __('Packed qty for {0} ({1}) exceeds required qty ({2})', [
 							item_code,
-							new_packed_qty,
-							required_qty,
+							new_total_packed_nos,
+							total_required_nos,
 						]),
 						indicator: 'orange',
 					},
@@ -391,16 +417,16 @@ function show_packed_qty_dialog(frm, item_code) {
 				);
 			}
 
-			row.custom_packed_qty = new_packed_qty;
-			row.custom_is_scanned = 1;
+			distribute_packed_qty(frm, matching_rows, new_total_packed_nos);
+
 			frm.refresh_field('items');
 			frm.dirty();
 
 			frappe.show_alert({
 				message: __('Packed {0}: {1}/{2}', [
 					item_code,
-					new_packed_qty,
-					required_qty,
+					new_total_packed_nos,
+					total_required_nos,
 				]),
 				indicator: 'green',
 			});
@@ -410,4 +436,18 @@ function show_packed_qty_dialog(frm, item_code) {
 	});
 	dialog.show();
 	setTimeout(() => dialog.fields_dict.qty.$input.select(), 150);
+}
+
+function distribute_packed_qty(frm, rows, total_packed_nos) {
+	let remaining_nos = total_packed_nos;
+
+	for (const row of rows) {
+		const conversion_factor = get_row_conversion_factor(frm, row);
+		const row_capacity_nos = flt(row.qty) * conversion_factor;
+		const packed_nos_for_row = Math.min(remaining_nos, row_capacity_nos);
+
+		row.custom_packed_qty = packed_nos_for_row / conversion_factor;
+		row.custom_is_scanned = packed_nos_for_row > 0 ? 1 : 0;
+		remaining_nos -= packed_nos_for_row;
+	}
 }

@@ -12,6 +12,7 @@ from frappe.utils.data import cstr
 
 from navgold_custom.navgold_custom.custom_script.packing_slip.packing_utils import (
 	get_item_weight_map,
+	get_uom_conversion_map,
 	recalculate_net_weight,
 )
 from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import (
@@ -115,6 +116,7 @@ def get_delivery_note_items(delivery_note: str):
 	packing_slip_doc = make_packing_slip(delivery_note)
 	item_codes = {item.item_code for item in packing_slip_doc.items}
 	item_weights = get_item_weight_map(item_codes)
+	uom_conversion_map = get_uom_conversion_map(list(item_codes))
 
 	return [
 		{
@@ -124,6 +126,7 @@ def get_delivery_note_items(delivery_note: str):
 			"qty": item.qty,
 			"uom": item.stock_uom,
 			"dn_detail": item.dn_detail,
+			"conversion_factor": uom_conversion_map.get((item.item_code, item.stock_uom), 1),
 			"weight_per_unit": flt(item_weights.get(item.item_code, {}).get("weight_per_unit")),
 			"weight_uom": item_weights.get(item.item_code, {}).get("weight_uom", ""),
 		}

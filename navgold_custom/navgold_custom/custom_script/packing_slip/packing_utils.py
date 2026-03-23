@@ -41,16 +41,22 @@ def get_item_weight_map(item_codes: list):
 	return {item.name: item for item in items}
 
 
-def recalculate_net_weight(doc):
-	item_codes = list({item.item_code for item in doc.items})
-	item_weights = get_item_weight_map(item_codes)
+def get_uom_conversion_map(item_codes: list) -> dict:
+	if not item_codes:
+		return {}
 
 	conversion_details = frappe.get_all(
 		"UOM Conversion Detail",
 		filters={"parent": ["in", item_codes], "parenttype": "Item"},
 		fields=["parent", "uom", "conversion_factor"],
 	)
-	conversion_map = {(row.parent, row.uom): flt(row.conversion_factor) for row in conversion_details}
+	return {(row.parent, row.uom): flt(row.conversion_factor) for row in conversion_details}
+
+
+def recalculate_net_weight(doc):
+	item_codes = list({item.item_code for item in doc.items})
+	item_weights = get_item_weight_map(item_codes)
+	conversion_map = get_uom_conversion_map(item_codes)
 
 	total_net_weight = 0.0
 	net_weight_uom = ""
