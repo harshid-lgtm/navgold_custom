@@ -3,7 +3,7 @@
 
 import frappe
 from erpnext.selling.doctype.sales_order.sales_order import create_pick_list
-from erpnext.stock.doctype.pick_list.pick_list import create_stock_entry
+from erpnext.stock.doctype.pick_list.pick_list import create_delivery_note, create_stock_entry
 from frappe import _
 from frappe.utils import flt, orjson_dumps
 
@@ -154,3 +154,17 @@ def create_fba_transfer_stock_entry(pick_list_name: str) -> dict:
 
 def sort_item_locations_by_walk_route(doc, method):
 	doc.locations.sort(key=lambda x: x.custom_walk_route or 0)
+
+
+def auto_create_delivery_notes(doc, method):
+	has_sales_order_items = any(location.sales_order for location in doc.locations)
+	if not has_sales_order_items:
+		return
+
+	delivery_note = create_delivery_note(doc.name)
+	if delivery_note:
+		frappe.msgprint(
+			_("Delivery Note {0} created automatically").format(delivery_note.name),
+			indicator="green",
+			alert=True,
+		)

@@ -25,6 +25,32 @@ def before_validate(doc, method):
 	validate_packed_qty(doc)
 
 
+def on_submit(doc, method):
+	if not doc.delivery_note:
+		return
+
+	auto_submit_delivery_note(doc.delivery_note)
+
+
+def auto_submit_delivery_note(delivery_note_name):
+	delivery_note = frappe.get_cached_doc("Delivery Note", delivery_note_name)
+
+	if delivery_note.docstatus != 0:
+		return
+
+	all_items_packed = all(flt(item.packed_qty) >= flt(item.qty) for item in delivery_note.items)
+
+	if not all_items_packed:
+		return
+
+	delivery_note.submit()
+	frappe.msgprint(
+		_("Delivery Note {0} auto-submitted as all items are packed").format(delivery_note_name),
+		indicator="green",
+		alert=True,
+	)
+
+
 def validate_packed_qty(doc):
 	for item in doc.items:
 		packed_qty = flt(item.custom_packed_qty)
