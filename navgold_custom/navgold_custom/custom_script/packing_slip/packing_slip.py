@@ -4,7 +4,7 @@
 import base64
 
 import frappe
-from erpnext.stock.doctype.delivery_note.delivery_note import make_packing_slip
+from erpnext.stock.doctype.delivery_note.delivery_note import make_packing_slip, make_sales_invoice
 from erpnext.stock.doctype.item.item import get_uom_conv_factor
 from frappe import _
 from frappe.utils import flt
@@ -50,6 +50,29 @@ def auto_submit_delivery_note(delivery_note_name):
 		indicator="green",
 		alert=True,
 	)
+
+	auto_create_sales_invoice(delivery_note_name)
+
+
+def auto_create_sales_invoice(delivery_note_name):
+	try:
+		sales_invoice = make_sales_invoice(delivery_note_name)
+		sales_invoice.insert()
+		sales_invoice.submit()
+		frappe.msgprint(
+			_("Sales Invoice {0} created and submitted automatically").format(sales_invoice.name),
+			indicator="green",
+			alert=True,
+		)
+	except Exception:
+		frappe.log_error(title=_("Auto Sales Invoice Creation Failed for DN {0}").format(delivery_note_name))
+		frappe.msgprint(
+			_("Sales Invoice creation failed for Delivery Note {0}. Please create it manually.").format(
+				delivery_note_name
+			),
+			indicator="orange",
+			alert=True,
+		)
 
 
 def validate_packed_qty(doc):
