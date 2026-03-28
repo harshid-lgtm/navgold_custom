@@ -156,6 +156,22 @@ def sort_item_locations_by_walk_route(doc, method):
 	doc.locations.sort(key=lambda x: x.custom_walk_route or 0)
 
 
+def auto_reserve_stock(doc, method):
+	has_sales_order_items = any(location.sales_order for location in doc.locations)
+	if not has_sales_order_items:
+		return
+
+	try:
+		doc.create_stock_reservation_entries(notify=True)
+	except Exception:
+		frappe.log_error(title=_("Auto Stock Reservation Failed for Pick List {0}").format(doc.name))
+		frappe.msgprint(
+			_("Stock reservation failed for Pick List {0}. Please reserve stock manually.").format(doc.name),
+			indicator="orange",
+			alert=True,
+		)
+
+
 def auto_create_delivery_notes(doc, method):
 	has_sales_order_items = any(location.sales_order for location in doc.locations)
 	if not has_sales_order_items:

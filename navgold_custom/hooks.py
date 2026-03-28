@@ -286,7 +286,10 @@ doc_events = {
 	},
 	"Pick List": {
 		"validate": "navgold_custom.navgold_custom.custom_script.pick_list.pick_list.sort_item_locations_by_walk_route",
-		"on_submit": "navgold_custom.navgold_custom.custom_script.pick_list.pick_list.auto_create_delivery_notes",
+		"on_submit": [
+			"navgold_custom.navgold_custom.custom_script.pick_list.pick_list.auto_reserve_stock",
+			"navgold_custom.navgold_custom.custom_script.pick_list.pick_list.auto_create_delivery_notes",
+		],
 	},
 }
 
