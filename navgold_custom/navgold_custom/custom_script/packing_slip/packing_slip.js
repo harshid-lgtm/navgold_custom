@@ -156,6 +156,7 @@ function show_sfp_rate_dialog(frm, rates) {
 						},
 						5,
 					);
+					window.open(result.file_url, '_blank');
 				}
 			} catch {
 				frappe.show_alert(
