@@ -65,7 +65,7 @@ def calculate_adjusted_qty(raw_qty: float, pool_size: int, pack_size: float) -> 
 	return max(math.floor(raw_qty / pool_size / pack_size), 0)
 
 
-def get_sku_inventory_data(pricing: dict) -> dict:
+def get_sku_inventory_data(pricing: dict, zero_stock_proxy_skus: set | None = None) -> dict:
 	stock_info = get_stock_info(pricing.proxy_sku)
 
 	pricing_doc = frappe.get_cached_doc("Amazon Product Pricing", pricing.name)
@@ -83,17 +83,18 @@ def get_sku_inventory_data(pricing: dict) -> dict:
 			"is_fba": True,
 		}
 
-	# Get supplier lead time
 	item_code = frappe.db.get_value("Proxy SKU", pricing.proxy_sku, "item")
 
-	# Adjust stock by pool size and pack size
 	raw_qty = flt(stock_info.get("mfn_stock", 0))
 	pool_size, pack_size = get_pool_and_pack_size(pricing.proxy_sku, item_code)
 	quantity = calculate_adjusted_qty(raw_qty, pool_size, pack_size)
+
+	if zero_stock_proxy_skus is not None and pricing.proxy_sku in zero_stock_proxy_skus:
+		quantity = 0
+
 	top_supplier = get_top_supplier_for_item(item_code) if item_code else None
 	lead_time_days = get_supplier_lead_time(top_supplier.supplier) if top_supplier else 1
 
-	# Use actual PO delivery date if available, otherwise fall back to lead time calculation
 	restock_date = None
 	if stock_info.get("has_restock_date", False):
 		po_date = stock_info.get("restock_date")
@@ -111,8 +112,24 @@ def get_sku_inventory_data(pricing: dict) -> dict:
 	}
 
 
+def get_zero_stock_proxy_skus() -> set | None:
+	settings = frappe.get_cached_doc("Navgold Settings")
+	mode = settings.stock_publishing_mode or "Publish Actual Stock"
+
+	if mode == "Publish Actual Stock":
+		return None
+
+	if mode == "Publish Zero Stock for All Items":
+		all_proxy_skus = frappe.get_all("Proxy SKU", filters={"is_active": 1}, pluck="name")
+		return set(all_proxy_skus)
+
+	if mode == "Publish Zero Stock for Selected Items":
+		return {row.proxy_sku for row in settings.zero_stock_items if row.proxy_sku}
+
+	return None
+
+
 def _build_inventory_patches(inv: dict, marketplace_id: str) -> list:
-	"""Build fulfillment_availability and merchant_shipping_group patches from inventory data."""
 	patches = []
 
 	if inv["is_fba"]:
@@ -186,6 +203,9 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 		filters={"name": ["in", pricing_names], "is_active": True},
 		fields=["name", "proxy_sku", "current_min_price", "current_max_price", "is_active"],
 	)
+
+	zero_stock_proxy_skus = get_zero_stock_proxy_skus()
+
 	for pricing in pricing_records:
 		if not pricing.current_min_price or not pricing.current_max_price:
 			frappe.log_error(f"Skipping {pricing.name}: No calculated prices", "Amazon Feed Builder")
@@ -214,7 +234,7 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 
 		# Get inventory data and build fulfillment patches
 		try:
-			inv = get_sku_inventory_data(pricing)
+			inv = get_sku_inventory_data(pricing, zero_stock_proxy_skus)
 		except Exception as e:
 			frappe.log_error(f"Skipping inventory patches for {pricing.name}: {e!s}", "Amazon Feed Builder")
 			inv = None

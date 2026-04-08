@@ -17,6 +17,10 @@ class NavgoldSettings(Document):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
+		from navgold_custom.navgold_custom.doctype.navgold_zero_stock_item.navgold_zero_stock_item import (
+			NavgoldZeroStockItem,
+		)
+
 		amazon_pricing_enabled: DF.Check
 		auto_sync_cogs: DF.Check
 		buying_price_list: DF.Link
@@ -35,8 +39,14 @@ class NavgoldSettings(Document):
 		repricer_api_password: DF.Password | None
 		repricer_api_username: DF.Data | None
 		repricer_enabled: DF.Check
+		stock_publishing_mode: DF.Literal[
+			"Publish Actual Stock",
+			"Publish Zero Stock for All Items",
+			"Publish Zero Stock for Selected Items",
+		]
 		subscribe_and_save_warehouse: DF.Link
 		tote_weight_limit: DF.Int
+		zero_stock_items: DF.Table[NavgoldZeroStockItem]
 	# end: auto-generated types
 
 	def get_source_address(self, state_key="stateOrRegion"):

@@ -38,7 +38,10 @@
 		"fba_source_address",
 		"column_break_fba_defaults",
 		"default_prep_owner",
-		"default_label_owner"
+		"default_label_owner",
+		"stock_tab",
+		"stock_publishing_mode",
+		"zero_stock_items"
 	],
 	"fields": [
 		{
@@ -252,6 +255,25 @@
 			"fieldname": "high_price_commission_adjustment",
 			"fieldtype": "Float",
 			"label": "High Price Commission Adjustment"
+		},
+		{
+			"fieldname": "stock_tab",
+			"fieldtype": "Tab Break",
+			"label": "Stock"
+		},
+		{
+			"default": "Publish Actual Stock",
+			"fieldname": "stock_publishing_mode",
+			"fieldtype": "Select",
+			"label": "Stock Publishing Mode",
+			"options": "Publish Actual Stock\nPublish Zero Stock for All Items\nPublish Zero Stock for Selected Items"
+		},
+		{
+			"depends_on": "eval:doc.stock_publishing_mode === 'Publish Zero Stock for Selected Items'",
+			"fieldname": "zero_stock_items",
+			"fieldtype": "Table",
+			"label": "Zero Stock Items",
+			"options": "Navgold Zero Stock Item"
 		}
 	],
 	"grid_page_length": 50,
