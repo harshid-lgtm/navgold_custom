@@ -151,6 +151,28 @@ frappe.ui.form.on('Navgold Settings', {
 		}
 	},
 
+	async group_strategies_into_pricing(frm) {
+		if (
+			!frm.doc.strategy_name_mapping ||
+			frm.doc.strategy_name_mapping.length === 0
+		) {
+			frappe.msgprint(__('Please configure Strategy Name Mapping first.'));
+			return;
+		}
+
+		frappe.confirm(
+			__(
+				'This will group orphaned Amazon Product Strategy records into Amazon Product Pricing records using the configured mapping. Continue?',
+			),
+			async () => {
+				await frappe.call({
+					doc: frm.doc,
+					method: 'group_strategies_into_pricing',
+				});
+			},
+		);
+	},
+
 	async generate_proxy_skus(frm) {
 		frm.call({
 			doc: frm.doc,

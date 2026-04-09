@@ -93,6 +93,43 @@ class NavgoldSettings(Document):
 			)
 
 	@frappe.whitelist()
+	def group_strategies_into_pricing(self):
+		if not self.strategy_name_mapping:
+			frappe.throw(_("Please configure Strategy Name Mapping before grouping."))
+
+		field_map = {
+			"FBA Strategy": "fba_strategy",
+			"SFP Strategy": "sfp_strategy",
+			"Backorder Strategy": "backorder_strategy",
+			"Default Strategy": "default_strategy",
+		}
+
+		strategy_to_field = {}
+		for row in self.strategy_name_mapping:
+			pricing_field = field_map.get(row.pricing_field)
+			if pricing_field:
+				strategy_to_field[row.strategy_name] = pricing_field
+
+		if not strategy_to_field:
+			frappe.throw(_("No valid strategy mappings found."))
+
+		total = frappe.db.count("Amazon Product Strategy")
+		batch = BATCH_SIZE
+		for start in range(0, total, batch):
+			frappe.enqueue(
+				"navgold_custom.navgold_custom.doctype.navgold_settings.navgold_settings.group_strategies_batch",
+				strategy_to_field=strategy_to_field,
+				start=start,
+				batch=batch,
+				queue="long",
+			)
+
+		frappe.msgprint(
+			_("Queued {0} strategies for grouping into pricing records.").format(total),
+			alert=True,
+		)
+
+	@frappe.whitelist()
 	def generate_amazon_pricing_for_all(self):
 		"""
 		Generate Amazon Product Pricing for all active Proxy SKUs that don't have one.
@@ -176,3 +213,64 @@ def generate_pricing_batch(start, batch):
 
 	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- background job batch, commit to persist partial progress
 	frappe.logger().info(f"Bulk Pricing: Created {created}, Skipped {skipped}")
+
+
+def group_strategies_batch(strategy_to_field, start, batch):
+	strategies = frappe.get_all(
+		"Amazon Product Strategy",
+		fields=["name", "proxy_sku", "strategy_name"],
+		limit_start=start,
+		limit_page_length=batch,
+	)
+
+	# Group strategies by proxy_sku
+	proxy_sku_strategies = {}
+	for strategy in strategies:
+		proxy_sku_strategies.setdefault(strategy.proxy_sku, []).append(strategy)
+
+	created = 0
+	updated = 0
+	skipped = 0
+
+	for proxy_sku, strategy_list in proxy_sku_strategies.items():
+		try:
+			field_values = {}
+			for strategy in strategy_list:
+				pricing_field = strategy_to_field.get(strategy.strategy_name)
+				if pricing_field:
+					field_values[pricing_field] = strategy.name
+
+			if not field_values:
+				continue
+
+			existing_pricing = frappe.db.get_value("Amazon Product Pricing", {"proxy_sku": proxy_sku}, "name")
+
+			if existing_pricing:
+				# Only fill in blank strategy slots on the existing pricing
+				pricing = frappe.get_cached_doc("Amazon Product Pricing", existing_pricing)
+				has_update = False
+				for field, strategy_name in field_values.items():
+					if not getattr(pricing, field, None):
+						setattr(pricing, field, strategy_name)
+						has_update = True
+
+				if has_update:
+					pricing.save(ignore_permissions=True)
+					updated += 1
+				else:
+					skipped += 1
+			else:
+				pricing = frappe.new_doc("Amazon Product Pricing")
+				pricing.proxy_sku = proxy_sku
+				pricing.is_active = 1
+				pricing.update(field_values)
+				pricing.insert(ignore_permissions=True)
+				created += 1
+
+		except Exception as e:
+			frappe.log_error(
+				title=f"Error grouping strategies for {proxy_sku} ",
+				message=e,
+			)
+
+	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- background job batch, commit to persist partial progress

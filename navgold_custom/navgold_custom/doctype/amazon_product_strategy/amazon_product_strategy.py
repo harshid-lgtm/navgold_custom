@@ -40,20 +40,18 @@ class AmazonProductStrategy(Document):
 	def on_update(self):
 		product_pricing = frappe.get_all(
 			"Amazon Product Pricing",
-			filters=[
-				["Amazon Product Pricing", "fba_strategy", "=", self.name],
-				"or",
-				["Amazon Product Pricing", "sfp_strategy", "=", self.name],
-				"or",
-				["Amazon Product Pricing", "backorder_strategy", "=", self.name],
-				"or",
-				["Amazon Product Pricing", "default_strategy", "=", self.name],
-			],
+			or_filters={
+				"fba_strategy": self.name,
+				"sfp_strategy": self.name,
+				"backorder_strategy": self.name,
+				"default_strategy": self.name,
+			},
+			pluck="name",
 		)
-		for pricing in product_pricing:
-			pricing = frappe.get_cached_doc("Amazon Product Pricing", pricing)
+		for pricing_name in product_pricing:
+			pricing = frappe.get_cached_doc("Amazon Product Pricing", pricing_name)
 			pricing.update_current_prices()
-			pricing.save()
+			pricing.save(ignore_permissions=True)
 
 	def validate_margin(self):
 		"""Ensure min_margin <= max_margin"""

@@ -39,6 +39,11 @@
 		"column_break_fba_defaults",
 		"default_prep_owner",
 		"default_label_owner",
+		"pricing_tab",
+		"strategy_mapping_section",
+		"strategy_name_mapping",
+		"group_strategies_section",
+		"group_strategies_into_pricing",
 		"stock_tab",
 		"stock_publishing_mode",
 		"zero_stock_items"
@@ -255,6 +260,32 @@
 			"fieldname": "high_price_commission_adjustment",
 			"fieldtype": "Float",
 			"label": "High Price Commission Adjustment"
+		},
+		{
+			"fieldname": "pricing_tab",
+			"fieldtype": "Tab Break",
+			"label": "Pricing"
+		},
+		{
+			"fieldname": "strategy_mapping_section",
+			"fieldtype": "Section Break",
+			"label": "Strategy Name Mapping",
+			"description": "Map strategy names to pricing fields. These mappings are used when grouping strategies into Amazon Product Pricing records."
+		},
+		{
+			"fieldname": "strategy_name_mapping",
+			"fieldtype": "Table",
+			"label": "Strategy Name Mapping",
+			"options": "Strategy Name Mapping"
+		},
+		{
+			"fieldname": "group_strategies_section",
+			"fieldtype": "Section Break"
+		},
+		{
+			"fieldname": "group_strategies_into_pricing",
+			"fieldtype": "Button",
+			"label": "Group Strategies into Pricing"
 		},
 		{
 			"fieldname": "stock_tab",
