@@ -1,8 +1,9 @@
 {
 	"actions": [],
+	"allow_import": 1,
 	"allow_rename": 1,
 	"autoname": "format:{cost_type}-{sub_type_name}",
-	"creation": "2026-01-20 10:00:00.000000",
+	"creation": "2026-01-20 10:00:00",
 	"doctype": "DocType",
 	"engine": "InnoDB",
 	"field_order": [
@@ -54,11 +55,11 @@
 	"grid_page_length": 50,
 	"index_web_pages_for_search": 1,
 	"links": [],
-	"modified": "2026-01-20 10:00:00.000000",
+	"modified": "2026-04-09 14:07:52.660905",
 	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Cost Sub Type",
-	"naming_rule": "Expression",
+	"naming_rule": "Expression (old style)",
 	"owner": "Administrator",
 	"permissions": [
 		{

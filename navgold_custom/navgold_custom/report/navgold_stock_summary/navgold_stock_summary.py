@@ -90,7 +90,7 @@ def get_data() -> list[list]:
 		)
 		.select(
 			item.name.as_("item_code"),
-			Sum(bin.actual_qty) - Sum(bin.reserved_qty).as_("free_qty"),
+			(Sum(bin.actual_qty) - Sum(bin.reserved_qty)).as_("free_qty"),
 			Sum(bin.actual_qty),
 			Sum(bin.projected_qty),
 			Sum(bin.reserved_qty),

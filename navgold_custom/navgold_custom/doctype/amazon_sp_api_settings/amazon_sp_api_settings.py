@@ -102,27 +102,31 @@ class AmazonSPAPISettings(Document):
 			get_orders,
 		)
 
-		# frappe.throw("helo")
-		get_orders(amz_setting_name=self.name, last_updated_after=self.after_date)
-		# if self.is_active == 1:
-		# 	job_name = f"Get Amazon Orders - {self.name}"
+		if not self.is_active:
+			frappe.msgprint(_("Please enable the Amazon SP API Settings {0}.").format(frappe.bold(self.name)))
+			return
 
-		# 	if frappe.db.get_all("RQ Job", {"job_name": job_name, "status": ["in", ["queued", "started"]]}):
-		# 		return frappe.msgprint(_("The order details are currently being fetched in the background."))
+		if frappe.conf.developer_mode:
+			get_orders(amz_setting_name=self.name, last_updated_after=self.after_date)
+			return
 
-		# 	frappe.enqueue(
-		# 		job_name=job_name,
-		# 		method=get_orders,
-		# 		amz_setting_name=self.name,
-		# 		last_updated_after=self.after_date,
-		# 		sync_selected_date_only=self.sync_selected_date_only,
-		# 		timeout=6000,
-		# 		now=frappe.flags.in_test,
-		# 	)
+		job_name = f"Get Amazon Orders - {self.name}"
 
-		# 	frappe.msgprint(_("Order details will be fetched in the background."))
-		# else:
-		# 	frappe.msgprint(_("Please enable the Amazon SP API Settings {0}.").format(frappe.bold(self.name)))
+		if frappe.db.get_all("RQ Job", {"job_name": job_name, "status": ["in", ["queued", "started"]]}):
+			frappe.msgprint(_("The order details are currently being fetched in the background."))
+			return
+
+		frappe.enqueue(
+			job_name=job_name,
+			method=get_orders,
+			amz_setting_name=self.name,
+			last_updated_after=self.after_date,
+			sync_selected_date_only=self.sync_selected_date_only,
+			timeout=6000,
+			now=frappe.flags.in_test,
+		)
+
+		frappe.msgprint(_("Order details will be fetched in the background."))
 
 	def get_marketplace_id(self) -> str:
 		from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import MARKETPLACES
@@ -184,29 +188,3 @@ def schedule_get_order_details_daily():
 
 	for amz_setting in amz_settings:
 		get_orders(amz_setting_name=amz_setting.name, last_updated_after=from_date)
-		frappe.enqueue(
-			"navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api_settings.enq_si_submit",
-			queue="long",
-		)
-
-
-def enq_si_submit(sales_orders=None):
-	if not sales_orders:
-		sales_invoices = frappe.db.get_all(
-			"Sales Invoice", {"docstatus": 0, "amazon_order_id": ["is", "set"]}, pluck="name"
-		)
-	else:
-		sales_invoices = frappe.db.get_all(
-			"Sales Invoice Item", {"sales_order": ["in", sales_orders]}, pluck="parent"
-		)
-	for sales_invoice in sales_invoices:
-		sales_invoice = frappe.get_doc("Sales Invoice", sales_invoice)
-		frappe.db.savepoint("before_testing_si_submit")
-		try:
-			sales_invoice.submit()
-		except Exception as e:
-			frappe.db.rollback(save_point="before_testing_si_submit")
-			if not frappe.db.exists("Amazon Failed Invoice Record", {"invoice_id": sales_invoice.name}):
-				frappe.get_doc(
-					{"doctype": "Amazon Failed Invoice Record", "invoice_id": sales_invoice.name, "error": e}
-				).insert()

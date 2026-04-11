@@ -2,7 +2,7 @@
 # For license information, please see license.txt
 import frappe
 from frappe import _
-from frappe.query_builder import DocType
+from frappe.query_builder import DocType, Order
 from frappe.query_builder.functions import Sum
 from frappe.utils import ceil, flt
 from frappe.utils.caching import redis_cache
@@ -477,8 +477,8 @@ def get_last_purchase_rate_map(supplier_list):
 			po.transaction_date,
 		)
 		.where((po.docstatus == 1) & (po_item.item_code.isin(items)) & (po.supplier.isin(suppliers)))
-		.orderby(po.transaction_date, order=frappe.qb.desc)
-		.orderby(po.creation, order=frappe.qb.desc)
+		.orderby(po.transaction_date, order=Order.desc)
+		.orderby(po.creation, order=Order.desc)
 	).run(as_dict=True)
 
 	rate_map = {}
@@ -532,7 +532,7 @@ def get_po_history_for_item(item_code: str) -> list[dict]:
 		)
 		.where((po_item.item_code == item_code) & (po.docstatus == 1))
 		.groupby(po.name, po_item.item_code)
-		.orderby(po.transaction_date, order=frappe.qb.desc)
+		.orderby(po.transaction_date, order=Order.desc)
 		.limit(50)
 	).run(as_dict=True)
 

@@ -21,6 +21,14 @@ frappe.ui.form.on('Amazon SP API Settings', {
 			};
 		});
 
+		frm.set_query('customer_group', () => {
+			return {
+				filters: {
+					is_group: 0,
+				},
+			};
+		});
+
 		frm.set_query('market_place_account_group', () => {
 			return {
 				filters: {

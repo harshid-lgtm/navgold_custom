@@ -127,7 +127,6 @@ class AmazonProductStrategy(Document):
 
 	def populate_costs(self):
 		for cost in self.costs:
-			# The rank is redundant here will change it later
 			cost.is_active = 1 if cost.rank == 1 else 0
 
 			if cost.source == "Supplier-Sync":
