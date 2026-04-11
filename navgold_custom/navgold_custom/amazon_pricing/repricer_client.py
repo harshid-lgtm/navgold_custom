@@ -44,7 +44,7 @@ class RepricerClient:
 
 def sync_to_repricer(pricing_names: list) -> dict:
 	settings = frappe.get_single("Navgold Settings")
-	amazon_settings = frappe.get_last_doc("Amazon SP API Settings", {"is_active": 1})
+	amazon_settings = frappe.get_single("Amazon SP API Settings")
 
 	if not settings.repricer_enabled:
 		frappe.throw(_("Repricer.com integration is not enabled"))

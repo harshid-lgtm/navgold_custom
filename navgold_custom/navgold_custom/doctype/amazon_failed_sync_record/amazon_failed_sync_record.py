@@ -41,12 +41,8 @@ class AmazonFailedSyncRecord(Document):
 			self.save()
 			return [existing_so]
 
-		amz_setting_name = frappe.db.get_value("Amazon SP API Settings", {"is_active": 1})
-		if not amz_setting_name:
-			return 0
-
 		try:
-			result = get_order(amz_setting_name=amz_setting_name, amazon_order_ids=self.amazon_order_id)
+			result = get_order(amazon_order_ids=self.amazon_order_id)
 			if result:
 				self.status = "Resolved"
 				self.save()

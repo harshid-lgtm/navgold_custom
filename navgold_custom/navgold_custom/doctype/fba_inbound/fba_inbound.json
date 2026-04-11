@@ -8,7 +8,6 @@
 		"naming_series",
 		"stock_entry",
 		"column_break_0",
-		"amazon_sp_api_settings",
 		"status",
 		"plan_details_section",
 		"inbound_plan_id",
@@ -53,13 +52,6 @@
 		{
 			"fieldname": "column_break_0",
 			"fieldtype": "Column Break"
-		},
-		{
-			"fieldname": "amazon_sp_api_settings",
-			"fieldtype": "Link",
-			"label": "Amazon SP API Settings",
-			"options": "Amazon SP API Settings",
-			"reqd": 1
 		},
 		{
 			"default": "Draft",

@@ -801,7 +801,7 @@ def create_material_requests_from_forecast_report(selected_items: str | list[dic
 
 	sku_info = {row["name"]: {"item": row["item"], "uom": row["uom"]} for row in sku_rows}
 
-	amz_setting = frappe.get_last_doc("Amazon SP API Settings", {"is_active": 1})
+	amz_setting = frappe.get_single("Amazon SP API Settings")
 	company = amz_setting.company
 	target_warehouse = amz_setting.afn_warehouse
 
@@ -1027,7 +1027,7 @@ def create_purchase_orders_from_forecast_report(selected_items: str | list[dict]
 
 	sku_info = build_sku_info(selected_items)
 
-	amz_setting = frappe.get_last_doc("Amazon SP API Settings", {"is_active": 1})
+	amz_setting = frappe.get_single("Amazon SP API Settings")
 	company = amz_setting.company
 	warehouse = amz_setting.warehouse
 
@@ -1053,7 +1053,7 @@ def create_purchase_orders_and_material_request_from_forecast_report(selected_it
 
 	sku_info = build_sku_info(selected_items)
 
-	amz_setting = frappe.get_last_doc("Amazon SP API Settings", {"is_active": 1})
+	amz_setting = frappe.get_single("Amazon SP API Settings")
 	company = amz_setting.company
 	warehouse = amz_setting.warehouse
 	target_warehouse = amz_setting.afn_warehouse

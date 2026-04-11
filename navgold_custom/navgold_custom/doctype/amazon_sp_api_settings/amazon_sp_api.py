@@ -120,7 +120,7 @@ class SPAPI:
 	@classmethod
 	def from_amazon_settings(cls, settings=None):
 		if not settings:
-			settings = frappe.get_last_doc("Amazon SP API Settings", {"is_active": 1})
+			settings = frappe.get_single("Amazon SP API Settings")
 		instance = cls(
 			client_id=settings.client_id,
 			client_secret=settings.get_password("client_secret"),

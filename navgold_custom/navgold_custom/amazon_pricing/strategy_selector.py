@@ -75,27 +75,24 @@ def get_stock_info(proxy_sku: str) -> dict:
 
 	proxy = frappe.get_cached_doc("Proxy SKU", proxy_sku)
 
-	sp_api_settings = frappe.get_all(
-		"Amazon SP API Settings", filters={"is_active": 1}, fields=["warehouse", "afn_warehouse"]
-	)
+	sp_api_settings = frappe.get_single("Amazon SP API Settings")
 
 	fba_stock = 0
 	mfn_stock = 0
 
 	# Calculate stock from Bin table
-	for settings in sp_api_settings:
-		if settings.afn_warehouse:
-			afn_qty = (
-				frappe.db.get_value(
-					"Bin", {"item_code": proxy.item, "warehouse": settings.afn_warehouse}, "actual_qty"
-				)
-				or 0
+	if sp_api_settings.afn_warehouse:
+		afn_qty = (
+			frappe.db.get_value(
+				"Bin", {"item_code": proxy.item, "warehouse": sp_api_settings.afn_warehouse}, "actual_qty"
 			)
-			fba_stock += afn_qty
+			or 0
+		)
+		fba_stock += afn_qty
 
-		# MFN stock (All warehouse)
-		mfn_qty = get_free_qty_map([proxy.item]).get(proxy.item, {}).get("free_qty", 0)
-		mfn_stock += mfn_qty
+	# MFN stock (All warehouse)
+	mfn_qty = get_free_qty_map([proxy.item]).get(proxy.item, {}).get("free_qty", 0)
+	mfn_stock += mfn_qty
 
 	# Check for restock
 	restock_info = check_pending_restock(proxy.item)

@@ -153,13 +153,6 @@ function add_action_buttons(frm) {
 }
 
 async function create_plan(frm) {
-	if (!frm.doc.amazon_sp_api_settings) {
-		frappe.msgprint(
-			__('Please select Amazon SP API Settings before creating a plan.'),
-		);
-		return;
-	}
-
 	if (!frm.doc.items?.length) {
 		frappe.msgprint(__('Add items before creating the plan.'));
 		return;

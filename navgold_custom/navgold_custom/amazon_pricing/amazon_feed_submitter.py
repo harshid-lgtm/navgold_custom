@@ -16,7 +16,7 @@ PRICING_FEED_TYPE = "JSON_LISTINGS_FEED"
 
 def get_feeds_client(settings=None):
 	if not settings:
-		settings = frappe.get_last_doc("Amazon SP API Settings", {"is_active": 1})
+		settings = frappe.get_single("Amazon SP API Settings")
 
 	return Feeds(
 		client_id=settings.client_id,
@@ -27,7 +27,7 @@ def get_feeds_client(settings=None):
 
 
 def submit_pricing(pricing_names: list, test_mode: bool = False) -> dict:
-	settings = frappe.get_last_doc("Amazon SP API Settings", {"is_active": 1})
+	settings = frappe.get_single("Amazon SP API Settings")
 
 	seller_id = settings.merchant_id
 

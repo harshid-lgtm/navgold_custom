@@ -9,10 +9,13 @@
 from datetime import datetime, timedelta
 
 import frappe
-import pytz
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import add_days, get_date_str, getdate, now_datetime, today
+from frappe.utils import add_days, get_date_str, now_datetime, today
+
+from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_repository import (
+	get_orders,
+)
 
 
 class AmazonSPAPISettings(Document):
@@ -107,10 +110,10 @@ class AmazonSPAPISettings(Document):
 			return
 
 		if frappe.conf.developer_mode:
-			get_orders(amz_setting_name=self.name, last_updated_after=self.after_date)
+			get_orders(last_updated_after=self.after_date)
 			return
 
-		job_name = f"Get Amazon Orders - {self.name}"
+		job_name = "Get Amazon Orders"
 
 		if frappe.db.get_all("RQ Job", {"job_name": job_name, "status": ["in", ["queued", "started"]]}):
 			frappe.msgprint(_("The order details are currently being fetched in the background."))
@@ -119,7 +122,6 @@ class AmazonSPAPISettings(Document):
 		frappe.enqueue(
 			job_name=job_name,
 			method=get_orders,
-			amz_setting_name=self.name,
 			last_updated_after=self.after_date,
 			sync_selected_date_only=self.sync_selected_date_only,
 			timeout=6000,
@@ -137,54 +139,23 @@ class AmazonSPAPISettings(Document):
 		return ""
 
 
-# Called via a hook in every hour.
 def schedule_get_order_details():
-	current_datetime = now_datetime()
-
-	yesterday_23 = (current_datetime - timedelta(days=1)).replace(hour=23, minute=0, second=0, microsecond=0)
-	today_01 = current_datetime.replace(hour=1, minute=0, second=0, microsecond=0)
-
-	if (
-		yesterday_23 <= current_datetime < today_01
-	):  # Makes it so that the hourly scheduler won't work at midnight and the daily one will
+	amz_setting = frappe.get_single("Amazon SP API Settings")
+	if not amz_setting.enable_sync:
 		return
 
-	from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_repository import (
-		get_orders,
+	job_name = "Scheduled Amazon Order Sync"
+	if frappe.db.get_all("RQ Job", {"job_name": job_name, "status": ["in", ["queued", "started"]]}):
+		return
+
+	if amz_setting.last_synced_at:
+		fetch_after = amz_setting.last_synced_at - timedelta(minutes=10)
+	else:
+		fetch_after = today()
+
+	frappe.enqueue(
+		job_name=job_name,
+		method=get_orders,
+		last_updated_after=fetch_after,
+		timeout=6000,
 	)
-
-	system_timezone = frappe.db.get_single_value("System Settings", "time_zone")
-
-	local_tz = pytz.timezone(system_timezone)
-	gmt_tz = pytz.timezone("GMT")
-
-	local_datetime = local_tz.localize(current_datetime)
-	gmt_datetime = local_datetime.astimezone(gmt_tz)
-	current_date = gmt_datetime.strftime("%Y-%m-%d")
-
-	amz_settings = frappe.get_all(
-		"Amazon SP API Settings",
-		filters={"is_active": 1, "enable_sync": 1},
-		fields=["name"],
-	)
-
-	for amz_setting in amz_settings:
-		get_orders(amz_setting_name=amz_setting.name, last_updated_after=current_date)
-
-
-# Called via a hook every day to sync data of the previous day.
-def schedule_get_order_details_daily():
-	from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_repository import (
-		get_orders,
-	)
-
-	from_date = add_days(getdate(), -1).strftime("%Y-%m-%d")
-
-	amz_settings = frappe.get_all(
-		"Amazon SP API Settings",
-		filters={"is_active": 1, "enable_sync": 1},
-		fields=["name"],
-	)
-
-	for amz_setting in amz_settings:
-		get_orders(amz_setting_name=amz_setting.name, last_updated_after=from_date)

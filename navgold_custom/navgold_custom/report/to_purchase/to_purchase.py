@@ -331,7 +331,7 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 		.orderby(material_request_item.schedule_date)
 	).run(as_dict=True)
 
-	amz_setting = frappe.get_last_doc("Amazon SP API Settings", {"is_active": 1})
+	amz_setting = frappe.get_single("Amazon SP API Settings")
 	warehouse = amz_setting.warehouse
 	mr_by_item = {}
 	company = amz_setting.company

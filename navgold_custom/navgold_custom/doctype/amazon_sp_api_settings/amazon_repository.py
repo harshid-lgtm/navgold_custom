@@ -2,7 +2,7 @@ import time
 from datetime import datetime, timedelta
 
 import frappe
-from frappe.utils import add_days, convert_utc_to_system_timezone, flt, getdate, now_datetime
+from frappe.utils import add_days, convert_utc_to_system_timezone, flt, get_datetime, getdate, now_datetime
 
 from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import (
 	Orders,
@@ -17,11 +17,8 @@ def parse_amazon_utc(utc_time_str):
 
 
 class AmazonRepository:
-	def __init__(self, amz_setting):
-		if isinstance(amz_setting, str):
-			amz_setting = frappe.get_cached_doc("Amazon SP API Settings", amz_setting)
-
-		self.amz_setting = amz_setting
+	def __init__(self):
+		self.amz_setting = frappe.get_single("Amazon SP API Settings")
 		self.instance_params = {
 			"client_id": self.amz_setting.client_id,
 			"client_secret": self.amz_setting.get_password("client_secret"),
@@ -47,10 +44,6 @@ class AmazonRepository:
 				title=f'SP-API method "{sp_api_method.__name__}" failed',
 				message=f"{error_code}: {description}",
 			)
-
-		self.amz_setting.enable_sync = 0
-		self.amz_setting.save()
-		frappe.throw(frappe._("Sync disabled — maximum retries exceeded for SP-API calls."))
 
 	def get_orders_instance(self):
 		return Orders(**self.instance_params)
@@ -373,7 +366,7 @@ class AmazonRepository:
 			"max_results": 50,
 		}
 		if sync_selected_date_only:
-			end_of_day = datetime.combine(add_days(getdate(last_updated_after), 1), datetime.min.time())
+			end_of_day = get_datetime(add_days(getdate(last_updated_after), 1))
 			two_minutes_ago = now_datetime() - timedelta(minutes=3)
 			last_updated_before = min(end_of_day, two_minutes_ago)
 			kwargs["last_updated_before"] = last_updated_before.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -437,12 +430,16 @@ class AmazonRepository:
 
 
 @frappe.whitelist()
-def get_orders(amz_setting_name, last_updated_after, sync_selected_date_only=0):
-	repository = AmazonRepository(amz_setting_name)
-	return repository.get_orders(last_updated_after, sync_selected_date_only)
+def get_orders(last_updated_after, sync_selected_date_only=0):
+	repository = AmazonRepository()
+	result = repository.get_orders(last_updated_after, sync_selected_date_only)
+
+	frappe.db.set_single_value("Amazon SP API Settings", "last_synced_at", frappe.utils.now_datetime())
+
+	return result
 
 
 @frappe.whitelist()
-def get_order(amz_setting_name, amazon_order_ids):
-	repository = AmazonRepository(amz_setting_name)
+def get_order(amazon_order_ids):
+	repository = AmazonRepository()
 	return repository.get_order(amazon_order_ids)

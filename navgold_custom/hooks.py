@@ -264,11 +264,6 @@ doc_events = {
 	"Supplier": {
 		"validate": "navgold_custom.navgold_custom.custom_script.supplier.supplier.validate_lead_time",
 	},
-	"Stock Entry": {
-		# "before_validate": "navgold_custom.navgold_custom.custom_script.purchase_receipt.purchase_receipt.create_barcodes",
-		# "before_submit": "navgold_custom.navgold_custom.custom_script.stock_entry.stock_entry.transfer_barcodes",
-		# "before_insert": "navgold_custom.navgold_custom.custom_script.stock_entry.stock_entry.before_insert_custom",
-	},
 	"Sales Order": {
 		"on_submit": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.sales_order_on_submit",
 	},
@@ -293,7 +288,12 @@ after_migrate = "navgold_custom.setup.after_migrate"
 before_uninstall = "navgold_custom.setup.before_uninstall"
 
 scheduler_events = {
+	"cron": {
+		"*/30 * * * *": [
+			"navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api_settings.schedule_get_order_details",
+		],
+	},
 	"daily": [
-		"navgold_custom.navgold_custom.doctype.supplier_item_price_and_stock.supplier_item_price_and_stock._update_supplier_rank"
+		"navgold_custom.navgold_custom.doctype.supplier_item_price_and_stock.supplier_item_price_and_stock._update_supplier_rank",
 	],
 }
