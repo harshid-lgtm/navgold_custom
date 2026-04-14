@@ -1,8 +1,6 @@
 # Copyright (c) 2025, developers@buildwithhussain.com and contributors
 # For license information, please see license.txt
 
-import json
-
 import frappe
 from erpnext.buying.doctype.purchase_order.purchase_order import make_purchase_receipt
 from frappe import _
@@ -238,7 +236,9 @@ def add_scanned_po_item_to_pr(
 	filtered_children = [d["po_item_name"] for d in distribution]
 	args = {"filtered_children": filtered_children}
 
-	updated_doc = make_purchase_receipt(source_name=po_name, target_doc=target_pr_doc, args=json.dumps(args))
+	updated_doc = make_purchase_receipt(
+		source_name=po_name, target_doc=target_pr_doc, args=frappe.as_json(args)
+	)
 
 	batch = get_or_create_batch(batch_no, expiry_date, item_code)
 

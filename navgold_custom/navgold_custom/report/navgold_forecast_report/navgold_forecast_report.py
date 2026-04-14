@@ -13,7 +13,7 @@ from frappe.utils.csvutils import read_csv_content
 from frappe.utils.xlsxutils import read_xlsx_file_from_attached_file
 
 from navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku import get_proxy_sku_map
-from navgold_custom.navgold_custom.utils import get_free_qty_map
+from navgold_custom.navgold_custom.utils import get_conversion_factor, get_free_qty_map
 
 
 def execute(filters=None):
@@ -783,70 +783,6 @@ def compute_total_forecast(hwr, forecast):
 	return flt(hwr) + flt(forecast)
 
 
-@frappe.whitelist()
-def create_material_requests_from_forecast_report(selected_items: str | list[dict]):
-	if isinstance(selected_items, str):
-		selected_items = frappe.parse_json(selected_items)
-
-	if not selected_items:
-		frappe.throw(_("No items selected"))
-
-	sku_names = [item.get("sku") for item in selected_items if item.get("sku")]
-	if not sku_names:
-		frappe.throw(_("No valid SKUs found in selection"))
-
-	sku_rows = frappe.get_all(
-		"Proxy SKU", filters={"name": ("in", sku_names)}, fields=["name", "item", "uom"]
-	)
-
-	sku_info = {row["name"]: {"item": row["item"], "uom": row["uom"]} for row in sku_rows}
-
-	amz_setting = frappe.get_single("Amazon SP API Settings")
-	company = amz_setting.company
-	target_warehouse = amz_setting.afn_warehouse
-
-	if not target_warehouse:
-		frappe.throw(_("AFN Warehouse not configured in Amazon SP API Settings"))
-
-	material_request = frappe.new_doc("Material Request")
-	material_request.material_request_type = "Material Transfer"
-	material_request.company = company
-	material_request.schedule_date = frappe.utils.today()
-
-	for item in selected_items:
-		sku = item.get("sku")
-		info = sku_info.get(sku)
-		if not info or not info["item"]:
-			continue
-
-		qty = flt(item.get("quantity_to_transfer") or 0)
-		if qty <= 0:
-			continue
-
-		material_request.append(
-			"items",
-			{
-				"item_code": info["item"],
-				"qty": qty,
-				"uom": info["uom"],
-				"schedule_date": frappe.utils.today(),
-				"warehouse": target_warehouse,
-			},
-		)
-
-	if not material_request.items:
-		frappe.throw(_("No valid items with positive quantity to transfer"))
-
-	material_request.insert(ignore_permissions=True)
-	material_request.submit()
-
-	return {
-		"success": True,
-		"material_request": material_request.name,
-		"message": _("Created Material Request {0}").format(material_request.name),
-	}
-
-
 def build_sku_info(selected_items):
 	sku_names = [item.get("sku") for item in selected_items if item.get("sku")]
 	if not sku_names:
@@ -900,7 +836,6 @@ def create_material_request_doc(selected_items, sku_info, company, target_wareho
 
 
 def get_supplier_uom_map(selected_items, sku_info):
-	"""Batch-fetch supplier UOM from Supplier Item Price and Stock for each item+supplier pair."""
 	pairs = []
 	for item in selected_items:
 		supplier = item.get("top_supplier")
@@ -930,14 +865,6 @@ def get_supplier_uom_map(selected_items, sku_info):
 	).run(as_dict=True)
 
 	return {(row["item"], row["supplier"]): row["uom"] for row in rows}
-
-
-def get_conversion_factor(item_code, supplier_uom):
-	"""Fetch conversion factor from Item UOM conversion table."""
-	conversion_factor = frappe.db.get_value(
-		"UOM Conversion Detail", {"parent": item_code, "uom": supplier_uom}, "conversion_factor"
-	)
-	return flt(conversion_factor) or 1.0
 
 
 def create_purchase_orders(selected_items, sku_info, company, warehouse, mr_item_map=None):

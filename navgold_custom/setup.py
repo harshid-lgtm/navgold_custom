@@ -434,18 +434,3 @@ def get_stock_entry_custom_fields():
 			},
 		],
 	}
-
-
-def create_property_setters(property_setter_datas):
-	"""
-	Method to create custom property setters
-	args:
-		property_setter_datas : list of dict of property setter obj
-	"""
-	for property_setter_data in property_setter_datas:
-		if frappe.db.exists("Property Setter", property_setter_data):
-			continue
-		property_setter = frappe.new_doc("Property Setter")
-		property_setter.update(property_setter_data)
-		property_setter.flags.ignore_permissions = True
-		property_setter.insert()

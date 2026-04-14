@@ -8,22 +8,9 @@ from frappe import _
 
 @frappe.whitelist()
 def apply_template_to_pricing(template_name: str, pricing_name: str) -> dict:
-	"""
-	Apply a Strategy Template to an Amazon Product Pricing record.
-
-	Creates all strategies defined in the template and links them to the pricing record.
-
-	Args:
-		template_name: Name of the Amazon Strategy Template
-		pricing_name: Name of the Amazon Product Pricing record
-
-	Returns:
-		dict with success status and count of strategies created
-	"""
 	template = frappe.get_cached_doc("Amazon Strategy Template", template_name)
 	pricing = frappe.get_doc("Amazon Product Pricing", pricing_name)
 
-	# Check for existing strategies
 	existing_strategies = frappe.get_all(
 		"Amazon Product Strategy", filters={"proxy_sku": pricing.proxy_sku}, pluck="name"
 	)
@@ -36,13 +23,11 @@ def apply_template_to_pricing(template_name: str, pricing_name: str) -> dict:
 			).format(len(existing_strategies))
 		)
 
-	# Create strategies for each template item
 	strategy_map = {}
 	for template_strategy in template.strategies:
-		strategy = _create_strategy_from_template(template_strategy, pricing.proxy_sku)
+		strategy = create_strategy_from_template(template_strategy, pricing.proxy_sku)
 		strategy_map[template_strategy.strategy_type] = strategy.name
 
-	# Link strategies to pricing
 	if "FBA" in strategy_map:
 		pricing.fba_strategy = strategy_map["FBA"]
 	if "SFP" in strategy_map:
@@ -62,17 +47,7 @@ def apply_template_to_pricing(template_name: str, pricing_name: str) -> dict:
 	}
 
 
-def _create_strategy_from_template(template_strategy, proxy_sku: str):
-	"""
-	Create a single Amazon Product Strategy from a template item.
-
-	Args:
-		template_strategy: AmazonStrategyTemplateItem record
-		proxy_sku: Proxy SKU to link the strategy to
-
-	Returns:
-		The created Amazon Product Strategy document
-	"""
+def create_strategy_from_template(template_strategy, proxy_sku: str):
 	strategy = frappe.new_doc("Amazon Product Strategy")
 	strategy.strategy_name = template_strategy.strategy_name
 	strategy.proxy_sku = proxy_sku
@@ -81,7 +56,6 @@ def _create_strategy_from_template(template_strategy, proxy_sku: str):
 	strategy.repricer_rule = template_strategy.repricer_rule
 	strategy.is_active = 1
 
-	# Apply cost set template if specified
 	if template_strategy.cost_set_template:
 		cost_template = frappe.get_cached_doc("Amazon Cost Set Template", template_strategy.cost_set_template)
 		for cost in cost_template.costs:
@@ -103,19 +77,6 @@ def _create_strategy_from_template(template_strategy, proxy_sku: str):
 
 @frappe.whitelist()
 def apply_default_template_to_new_pricing(pricing_name: str) -> dict:
-	"""
-	Apply the default template to a new pricing record.
-
-	Called automatically when a new Amazon Product Pricing is created,
-	if a default template exists.
-
-	Args:
-		pricing_name: Name of the new Amazon Product Pricing record
-
-	Returns:
-		dict with success status or None if no default template
-	"""
-	# Find default template
 	default_template = frappe.db.get_value("Amazon Strategy Template", {"is_default": 1}, "name")
 
 	if not default_template:
@@ -126,21 +87,10 @@ def apply_default_template_to_new_pricing(pricing_name: str) -> dict:
 
 @frappe.whitelist()
 def bulk_apply_template(template_name: str, pricing_names: list | None = None) -> dict:
-	"""
-	Apply a template to multiple pricing records.
-
-	Args:
-		template_name: Name of the Amazon Strategy Template
-		pricing_names: List of Amazon Product Pricing names (or None for all without strategies)
-
-	Returns:
-		dict with counts of success/errors
-	"""
 	if isinstance(pricing_names, str):
 		pricing_names = frappe.parse_json(pricing_names)
 
 	if not pricing_names:
-		# Get all pricing records without any linked strategies
 		pricing_names = frappe.get_all(
 			"Amazon Product Pricing",
 			filters={
@@ -153,6 +103,23 @@ def bulk_apply_template(template_name: str, pricing_names: list | None = None) -
 			pluck="name",
 		)
 
+	if not pricing_names:
+		frappe.throw(_("No pricing records found to apply template"))
+
+	frappe.enqueue(
+		run_bulk_apply_template,
+		template_name=template_name,
+		pricing_names=pricing_names,
+		queue="long",
+		timeout=6000,
+		job_name="Bulk Apply Strategy Template",
+	)
+
+	frappe.msgprint(_("Bulk template application has been queued. You will be notified on completion."))
+	return {"queued": True, "count": len(pricing_names)}
+
+
+def run_bulk_apply_template(template_name: str, pricing_names: list):
 	success = 0
 	errors = []
 
@@ -160,10 +127,13 @@ def bulk_apply_template(template_name: str, pricing_names: list | None = None) -
 		try:
 			apply_template_to_pricing(template_name, pricing_name)
 			success += 1
-		except Exception as e:
-			errors.append({"pricing": pricing_name, "error": str(e)})
+		except Exception as error:
+			errors.append({"pricing": pricing_name, "error": str(error)})
 			frappe.log_error(
-				f"Template application error for {pricing_name}: {e!s}", "Bulk Template Application"
+				f"Template application error for {pricing_name}: {error!s}", "Bulk Template Application"
 			)
 
-	return {"success_count": success, "error_count": len(errors), "errors": errors}
+	frappe.publish_realtime(
+		"bulk_template_complete",
+		{"success_count": success, "error_count": len(errors)},
+	)

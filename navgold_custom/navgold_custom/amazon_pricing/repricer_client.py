@@ -58,12 +58,49 @@ def sync_to_repricer(pricing_names: list) -> dict:
 	log.pricing_records = "\n".join(pricing_names)
 	log.insert()
 
+	# Batch fetch all data upfront to avoid N+1 queries
+	pricing_records = {
+		row.name: row
+		for row in frappe.get_all(
+			"Amazon Product Pricing",
+			filters={"name": ["in", pricing_names]},
+			fields=[
+				"name",
+				"proxy_sku",
+				"is_active",
+				"current_min_price",
+				"current_max_price",
+				"active_strategy",
+			],
+		)
+	}
+
+	proxy_sku_names = [row.proxy_sku for row in pricing_records.values() if row.proxy_sku]
+	fba_map = {
+		row.name: row.is_fba
+		for row in frappe.get_all(
+			"Proxy SKU", filters={"name": ["in", proxy_sku_names]}, fields=["name", "is_fba"]
+		)
+	}
+
+	strategy_names = [row.active_strategy for row in pricing_records.values() if row.active_strategy]
+	strategy_map = {
+		row.name: row.repricer_rule
+		for row in frappe.get_all(
+			"Amazon Product Strategy",
+			filters={"name": ["in", strategy_names]},
+			fields=["name", "repricer_rule"],
+		)
+	}
+
 	products_to_update = []
 	errors = []
 	for pricing_name in pricing_names:
 		try:
-			pricing = frappe.get_cached_doc("Amazon Product Pricing", pricing_name)
-			is_fba = frappe.db.get_value("Proxy SKU", pricing.proxy_sku, "is_fba")
+			pricing = pricing_records.get(pricing_name)
+			if not pricing:
+				errors.append(f"{pricing_name}: Not found")
+				continue
 
 			if not pricing.is_active:
 				errors.append(f"{pricing_name}: Inactive")
@@ -73,12 +110,12 @@ def sync_to_repricer(pricing_names: list) -> dict:
 				errors.append(f"{pricing_name}: No calculated prices")
 				continue
 
-			# Get repricer rule ID if available
 			if not pricing.active_strategy:
 				errors.append(f"{pricing_name}: No active strategy")
 				continue
 
-			strategy = frappe.get_cached_doc("Amazon Product Strategy", pricing.active_strategy)
+			is_fba = fba_map.get(pricing.proxy_sku)
+			repricer_rule = strategy_map.get(pricing.active_strategy) or ""
 
 			product_update = {
 				"sku": pricing.proxy_sku,
@@ -95,7 +132,7 @@ def sync_to_repricer(pricing_names: list) -> dict:
 				"vat_rate": 0.0,
 				"fba_fee": 0.0,
 				"fba_currency": "GBP",
-				"repricer_name": strategy.repricer_rule or "",
+				"repricer_name": repricer_rule,
 				"fee_listing": 15,
 				"rrp_price": 0.0,
 				"rrp_currency": "GBP",
@@ -116,17 +153,17 @@ def sync_to_repricer(pricing_names: list) -> dict:
 	try:
 		# Bulk update to Repricer.com
 		csv_data = dict_list_to_csv(products_to_update)
-		result = client.post_repricer_data(csv_data)
-		print("this is result")
-		print(result)
+		response = client.post_repricer_data(csv_data)
 		log.status = "Completed"
 		log.completed_at = now_datetime()
 		log.feed_content = csv_data
+		log.response_content = frappe.as_json(response)
 		log.save()
 
 		# Update pricing records
+		errored_names = {e.split(":")[0] for e in errors}
 		for pricing_name in pricing_names:
-			if pricing_name not in [e.split(":")[0] for e in errors]:
+			if pricing_name not in errored_names:
 				frappe.db.set_value(
 					"Amazon Product Pricing", pricing_name, "last_repricer_sync", now_datetime()
 				)

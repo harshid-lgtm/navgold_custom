@@ -2,6 +2,7 @@ import frappe
 from frappe.query_builder import DocType
 from frappe.query_builder.functions import Sum
 from frappe.utils import flt
+from frappe.utils.caching import redis_cache
 
 
 def get_free_qty_map(item_codes: list[str]) -> dict[str, dict[str, float]]:
@@ -31,3 +32,11 @@ def get_free_qty_map(item_codes: list[str]) -> dict[str, dict[str, float]]:
 		}
 		for r in result
 	}
+
+
+@redis_cache()
+def get_conversion_factor(item_code, uom):
+	conversion_factor = frappe.db.get_value(
+		"UOM Conversion Detail", {"parent": item_code, "uom": uom}, "conversion_factor"
+	)
+	return flt(conversion_factor) or 1.0

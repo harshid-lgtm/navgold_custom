@@ -12,8 +12,8 @@ from erpnext.stock.doctype.stock_reservation_entry.stock_reservation_entry impor
 	get_sre_reserved_qty_for_items_and_warehouses as get_reserved_stock_details,
 )
 from frappe import _
-from frappe.model.db_query import DatabaseQuery
 from frappe.query_builder import DocType
+from frappe.query_builder.functions import Sum
 from frappe.utils import cint, flt, getdate, nowdate
 
 
@@ -51,12 +51,9 @@ def get_item_bin_data(item_code, warehouse=None):
 	if warehouse:
 		query = query.where(Bin.warehouse == warehouse)
 
-	try:
-		if DatabaseQuery("Warehouse", user=frappe.session.user).build_match_conditions():
-			allowed_wh = [w.name for w in frappe.get_list("Warehouse")]
-			query = query.where(Bin.warehouse.isin(allowed_wh))
-	except frappe.PermissionError:
-		return []
+	allowed_wh = frappe.get_list("Warehouse", pluck="name", ignore_permissions=False)
+	if allowed_wh:
+		query = query.where(Bin.warehouse.isin(allowed_wh))
 	query = query.where(
 		(Bin.projected_qty != 0)
 		| (Bin.reserved_qty != 0)
@@ -93,12 +90,38 @@ def get_item_bin_data(item_code, warehouse=None):
 	return items
 
 
-def create_material_request(doc):
-	items_needing_stock = {}
+def get_projected_qty_map(item_codes: list) -> dict:
+	if not item_codes:
+		return {}
 
+	Bin = DocType("Bin")
+	Warehouse = DocType("Warehouse")
+
+	allowed_wh = frappe.get_list("Warehouse", pluck="name", ignore_permissions=False)
+
+	query = (
+		frappe.qb.from_(Bin)
+		.join(Warehouse)
+		.on(Bin.warehouse == Warehouse.name)
+		.select(Bin.item_code, Sum(Bin.projected_qty).as_("projected_qty"))
+		.where((Bin.item_code.isin(item_codes)) & (Warehouse.is_rejected_warehouse != 1))
+		.groupby(Bin.item_code)
+	)
+
+	if allowed_wh:
+		query = query.where(Bin.warehouse.isin(allowed_wh))
+
+	rows = query.run(as_dict=True)
+	return {row.item_code: flt(row.projected_qty) for row in rows}
+
+
+def create_material_request(doc):
+	item_codes = [item.item_code for item in doc.items]
+	projected_qty_map = get_projected_qty_map(item_codes)
+
+	items_needing_stock = {}
 	for item in doc.items:
-		bin_data = get_item_bin_data(item.item_code)
-		total_projected_qty = sum([b["projected_qty"] for b in bin_data])
+		total_projected_qty = projected_qty_map.get(item.item_code, 0)
 		delivery_date = getdate(item.delivery_date) if item.delivery_date else getdate(doc.delivery_date)
 		today = getdate(nowdate())
 

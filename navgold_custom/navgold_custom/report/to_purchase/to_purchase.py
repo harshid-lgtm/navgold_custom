@@ -5,9 +5,8 @@ from frappe import _
 from frappe.query_builder import DocType, Order
 from frappe.query_builder.functions import Sum
 from frappe.utils import ceil, flt
-from frappe.utils.caching import redis_cache
 
-from navgold_custom.navgold_custom.utils import get_free_qty_map
+from navgold_custom.navgold_custom.utils import get_conversion_factor, get_free_qty_map
 
 material_request_status_list = ["Pending", "Partially Ordered", "Partially Received"]
 
@@ -437,14 +436,6 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 		return po
 
 	return None
-
-
-@redis_cache()
-def get_conversion_factor(item, supplier_uom):
-	conv = frappe.db.get_value(
-		"UOM Conversion Detail", {"parent": item, "uom": supplier_uom}, "conversion_factor"
-	)
-	return conv or 1
 
 
 # Cannot use set_value doc_events 👀

@@ -231,19 +231,6 @@ class AmazonRepository:
 		if existing:
 			return
 
-		# Check if customer already has an address with same line1 + pincode
-		customer_addresses = frappe.get_all(
-			"Dynamic Link",
-			filters={"link_doctype": "Customer", "link_name": customer_name, "parenttype": "Address"},
-			pluck="parent",
-		)
-		for address_name in customer_addresses:
-			existing_line1, existing_pincode = frappe.db.get_value(
-				"Address", address_name, ["address_line1", "pincode"]
-			)
-			if existing_line1 == address_line1 and existing_pincode == pincode:
-				return
-
 		country = frappe.db.get_value("Country", {"code": shipping_address.get("CountryCode", "")}, "name")
 
 		new_address = frappe.new_doc("Address")

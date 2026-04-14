@@ -9,12 +9,54 @@ import gzip
 import time
 
 import frappe
-import requests
 from frappe.integrations.utils import make_get_request
 from frappe.integrations.utils import make_request as frappe_make_request
 from frappe.utils import cstr, get_request_session
+from frappe.utils.caching import redis_cache
+from requests.exceptions import HTTPError
 
 MAX_RETRIES = 3
+LWA_AUTH_URL = "https://api.amazon.com/auth/o2/token"
+
+
+# Frappe's make_get_request / make_put_request parse JSON and cannot handle raw binary payloads
+# or S3 pre-signed URLs that expect exact Content-Type headers. These thin wrappers use the
+# underlying requests session directly for those cases only.
+def download_binary(url: str, timeout: int = 60) -> bytes:
+	session = get_request_session()
+	response = session.get(url, timeout=timeout)
+	response.raise_for_status()
+	return response.content
+
+
+def upload_binary(url: str, content: bytes, content_type: str) -> None:
+	session = get_request_session()
+	response = session.put(url=url, data=content, headers={"Content-Type": content_type})
+	response.raise_for_status()
+
+
+@redis_cache(ttl=3500)  # Amazon LWA tokens expire in 3600s; 3500s gives buffer for clock skew
+def fetch_access_token(client_id: str, client_secret: str, refresh_token: str) -> str:
+	data = {
+		"grant_type": "refresh_token",
+		"client_id": client_id,
+		"client_secret": client_secret,
+		"refresh_token": refresh_token,
+	}
+	try:
+		result = frappe_make_request("POST", LWA_AUTH_URL, data=data)
+		if result and result.get("access_token"):
+			return result.get("access_token")
+		raise SPAPIError(
+			error=result.get("error", "UnknownError"),
+			error_description=result.get("error_description", "Failed to get access token"),
+		)
+	except Exception as e:
+		if isinstance(e, SPAPIError):
+			raise
+		raise SPAPIError(
+			error="AuthenticationError", error_description=f"Failed to authenticate with Amazon: {e!s}"
+		)
 
 
 def retry_with_backoff(func, error_title="SP-API Error", max_retries=MAX_RETRIES):
@@ -100,7 +142,6 @@ class SPAPI:
 	"""Base Amazon SP-API class"""
 
 	# https://github.com/amzn/selling-partner-api-docs/blob/main/guides/en-US/developer-guide/SellingPartnerApiDeveloperGuide.md#connecting-to-the-selling-partner-api
-	AUTH_URL = "https://api.amazon.com/auth/o2/token"
 
 	BASE_URI = "/"
 
@@ -131,27 +172,7 @@ class SPAPI:
 		return instance
 
 	def get_access_token(self) -> str:
-		data = {
-			"grant_type": "refresh_token",
-			"client_id": self.client_id,
-			"client_secret": self.client_secret,
-			"refresh_token": self.refresh_token,
-		}
-
-		try:
-			result = frappe_make_request("POST", self.AUTH_URL, data=data)
-			if result and result.get("access_token"):
-				return result.get("access_token")
-			raise SPAPIError(
-				error=result.get("error", "UnknownError"),
-				error_description=result.get("error_description", "Failed to get access token"),
-			)
-		except Exception as e:
-			if isinstance(e, SPAPIError):
-				raise
-			raise SPAPIError(
-				error="AuthenticationError", error_description=f"Failed to authenticate with Amazon: {e!s}"
-			)
+		return fetch_access_token(self.client_id, self.client_secret, self.refresh_token)
 
 	def get_headers(self) -> dict:
 		return {"x-amz-access-token": self.get_access_token()}
@@ -180,7 +201,7 @@ class SPAPI:
 			)
 		except SPAPIError:
 			raise
-		except requests.exceptions.HTTPError as e:
+		except HTTPError as e:
 			if e.response is None:
 				raise SPAPIError(error="HTTPError", error_description=cstr(e))
 
@@ -571,11 +592,7 @@ class Reports(SPAPI):
 		return self.make_request(append_to_base_uri=f"documents/{report_document_id}")
 
 	def download_report_file(self, url, compression=None):
-		session = get_request_session()
-		response = session.get(url)
-		response.raise_for_status()
-
-		content = response.content
+		content = download_binary(url)
 		if compression and compression.upper() == "GZIP":
 			content = gzip.decompress(content)
 
@@ -684,10 +701,7 @@ class Feeds(SPAPI):
 			content = content.encode("utf-8")
 
 		try:
-			# Use Frappe's request session for S3 upload
-			session = get_request_session()
-			response = session.put(url=url, data=content, headers={"Content-Type": content_type})
-			response.raise_for_status()
+			upload_binary(url, content, content_type)
 			return True
 		except Exception as e:
 			raise SPAPIError(
@@ -944,10 +958,7 @@ class FulfillmentInbound(SPAPI):
 			)
 
 	def download_label_pdf(self, url):
-		session = get_request_session()
-		response = session.get(url, timeout=60)
-		response.raise_for_status()
-		return response.content
+		return download_binary(url, timeout=60)
 
 	def update_shipment_tracking(self, inbound_plan_id, shipment_id, body):
 		return self.make_request(

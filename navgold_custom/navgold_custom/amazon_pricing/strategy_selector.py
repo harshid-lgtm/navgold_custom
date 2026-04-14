@@ -4,75 +4,62 @@
 
 import frappe
 from frappe import _
+from frappe.query_builder import DocType, Order
+from frappe.query_builder.functions import Count
 
 from navgold_custom.navgold_custom.utils import get_free_qty_map
 
 
 def select_strategy(pricing_doc) -> str | None:
-	"""
-	Select the active strategy for an Amazon Product Pricing record.
-
-	Strategy selection priority:
-	1. FBA Strategy - If FBA stock > 0
-	2. SFP Strategy - If Seller Fulfilled Prime is available
-	3. Backorder Strategy - If product has a restock date
-	4. Default Strategy - Fallback
-
-	Args:
-		pricing_doc: Amazon Product Pricing document
-
-	Returns:
-		Strategy name or None if no strategy available
-	"""
-	# Get stock information for this product
 	stock_info = get_stock_info(pricing_doc.proxy_sku)
+	# Get all set strategies
+	all_strategies = [
+		strategy
+		for strategy in [
+			pricing_doc.fba_strategy,
+			pricing_doc.sfp_strategy,
+			pricing_doc.backorder_strategy,
+			pricing_doc.default_strategy,
+		]
+		if strategy
+	]
+
+	if not all_strategies:
+		return None
+
+	active_strategies = set(
+		frappe.get_all(
+			"Amazon Product Strategy",
+			filters={"name": ["in", all_strategies], "is_active": 1},
+			pluck="name",
+		)
+	)
 
 	# Priority 1: FBA Strategy
-	if pricing_doc.fba_strategy and stock_info.get("fba_stock", 0) > 0:
-		strategy = frappe.get_cached_doc("Amazon Product Strategy", pricing_doc.fba_strategy)
-		if strategy.is_active:
-			return pricing_doc.fba_strategy
+	if pricing_doc.fba_strategy in active_strategies and stock_info.get("fba_stock", 0) > 0:
+		return pricing_doc.fba_strategy
 
-	# Priority 2: SFP Strategy (Seller Fulfilled Prime - when no restock date)
-	if pricing_doc.sfp_strategy and not stock_info.get("has_restock_date", False):
-		strategy = frappe.get_cached_doc("Amazon Product Strategy", pricing_doc.sfp_strategy)
-		if strategy.is_active:
-			return pricing_doc.sfp_strategy
+	# Priority 2: SFP Strategy (Seller Fulfilled Prime, when no restock date)
+	if pricing_doc.sfp_strategy in active_strategies and not stock_info.get("has_restock_date", False):
+		return pricing_doc.sfp_strategy
 
 	# Priority 3: Backorder Strategy (when has restock date)
-	if pricing_doc.backorder_strategy and stock_info.get("has_restock_date", False):
-		strategy = frappe.get_cached_doc("Amazon Product Strategy", pricing_doc.backorder_strategy)
-		if strategy.is_active:
-			return pricing_doc.backorder_strategy
-
+	if pricing_doc.backorder_strategy in active_strategies and stock_info.get("has_restock_date", False):
+		return pricing_doc.backorder_strategy
 	# Priority 4: Default Strategy (fallback)
-	if pricing_doc.default_strategy:
-		strategy = frappe.get_cached_doc("Amazon Product Strategy", pricing_doc.default_strategy)
-		if strategy.is_active:
-			return pricing_doc.default_strategy
+	if pricing_doc.default_strategy in active_strategies:
+		return pricing_doc.default_strategy
 
 	return None
 
 
 def get_stock_info(proxy_sku: str) -> dict:
 	"""
-	Get stock information for a Proxy SKU.
-
 	This function checks:
 	- FBA warehouse stock (AFN warehouse)
 	- MFN warehouse stock
 	- Restock date information
-
-	Args:
-		proxy_sku: The Proxy SKU name
-
-	Returns:
-		Dictionary with stock information:
-		- fba_stock: FBA warehouse quantity
-		- mfn_stock: MFN warehouse quantity
-		- has_restock_date: Whether product has expected restock
 	"""
-
 	proxy = frappe.get_cached_doc("Proxy SKU", proxy_sku)
 
 	sp_api_settings = frappe.get_single("Amazon SP API Settings")
@@ -113,59 +100,47 @@ def check_pending_restock(item: str) -> dict:
 	Checks:
 	- Open Material Requests with expected delivery date
 	- Open Purchase Orders with expected delivery date
-
-	Returns:
-		Dictionary with:
-		- has_restock: bool
-		- restock_date: date or None (latest expected delivery date from PO)
 	"""
 
-	mr_exists = frappe.db.exists(
-		"Material Request Item",
-		{
-			"item_code": item,
-			"docstatus": 1,
-			"parent": [
-				"in",
-				frappe.get_all(
-					"Material Request",
-					filters={"docstatus": 1, "status": ["not in", ["Stopped", "Cancelled"]]},
-					pluck="name",
-				),
-			],
-		},
-	)
+	material_request = DocType("Material Request")
+	material_request_item = DocType("Material Request Item")
 
-	open_po_names = frappe.get_all(
-		"Purchase Order",
-		filters={"docstatus": 1, "status": ["not in", ["Closed", "Cancelled", "Completed"]]},
-		pluck="name",
-	)
-
-	restock_date = None
-	if open_po_names:
-		po_items = frappe.get_all(
-			"Purchase Order Item",
-			filters={"item_code": item, "docstatus": 1, "parent": ["in", open_po_names]},
-			fields=["schedule_date"],
-			order_by="schedule_date desc",
-			limit=1,
+	mr_count = (
+		frappe.qb.from_(material_request)
+		.join(material_request_item)
+		.on(material_request.name == material_request_item.parent)
+		.select(Count("*"))
+		.where(
+			(material_request.docstatus == 1)
+			& (material_request.status.notin(["Stopped", "Cancelled"]))
+			& (material_request_item.item_code == item)
 		)
-		if po_items:
-			restock_date = po_items[0].schedule_date
+	).run()[0][0]
 
-	has_restock = bool(mr_exists) or bool(restock_date)
+	purchase_order = DocType("Purchase Order")
+	purchase_order_item = DocType("Purchase Order Item")
+
+	po_items = (
+		frappe.qb.from_(purchase_order)
+		.join(purchase_order_item)
+		.on(purchase_order.name == purchase_order_item.parent)
+		.select(purchase_order_item.schedule_date)
+		.where(
+			(purchase_order.docstatus == 1)
+			& (purchase_order.status.notin(["Closed", "Cancelled", "Completed"]))
+			& (purchase_order_item.item_code == item)
+		)
+		.orderby(purchase_order_item.schedule_date, order=Order.desc)
+		.limit(1)
+	).run(as_dict=True)
+
+	restock_date = po_items[0].schedule_date if po_items else None
+	has_restock = bool(mr_count) or bool(restock_date)
 
 	return {"has_restock": has_restock, "restock_date": restock_date}
 
 
 def refresh_active_strategy(pricing_name: str):
-	"""
-	Refresh the active strategy for a pricing record.
-
-	Args:
-		pricing_name: Name of the Amazon Product Pricing record
-	"""
 	pricing = frappe.get_doc("Amazon Product Pricing", pricing_name)
 	old_strategy = pricing.active_strategy
 

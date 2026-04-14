@@ -334,7 +334,9 @@ frappe.ui.form.on('Purchase Receipt', {
 									d,
 									scan_dialog,
 								);
+								resolve();
 							},
+							() => resolve(),
 						);
 					} else {
 						await frm.events.map_po_item_to_pr(
@@ -348,9 +350,8 @@ frappe.ui.form.on('Purchase Receipt', {
 							d,
 							scan_dialog,
 						);
+						resolve();
 					}
-
-					resolve();
 				},
 			});
 

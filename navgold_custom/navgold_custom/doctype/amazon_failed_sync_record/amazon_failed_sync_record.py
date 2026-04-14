@@ -4,7 +4,7 @@
 import frappe
 from frappe.model.document import Document
 
-from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_repository import get_order
+from navgold_custom.navgold_custom.amazon_repository import get_order
 
 
 class AmazonFailedSyncRecord(Document):

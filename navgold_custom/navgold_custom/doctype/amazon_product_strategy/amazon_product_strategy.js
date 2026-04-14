@@ -17,9 +17,6 @@ frappe.ui.form.on('Amazon Product Strategy', {
 							reqd: 1,
 						},
 						(values) => {
-							// doc = frappe.get_doc("Amazon Cost Set Template", values.cost_template);
-							// console.log(doc);
-							// frappe.throw();
 							frappe.call({
 								method: 'frappe.client.get',
 								args: {
@@ -127,10 +124,8 @@ frappe.ui.form.on('Amazon Product Strategy', {
 	},
 
 	validate(frm) {
-		// Validate that min_margin <= max_margin
 		if (frm.doc.min_margin > frm.doc.max_margin) {
-			frappe.msgprint(__('Min Margin cannot be greater than Max Margin'));
-			frappe.validated = false;
+			frappe.throw(__('Min Margin cannot be greater than Max Margin'));
 		}
 	},
 

@@ -59,7 +59,7 @@ class SupplierItemPriceandStock(Document):
 			item_price.save()
 		except DoesNotExistError:
 			if not frappe.db.exists("Supplier", self.supplier):
-				frappe.throw(_(f"Supplier not found {self.supplier}"))
+				frappe.throw(_("Supplier not found {0}").format(self.supplier))
 			item_price = frappe.get_doc(
 				{
 					"doctype": "Item Price",
@@ -80,7 +80,7 @@ class SupplierItemPriceandStock(Document):
 				"Supplier Item Price And Stock",
 				{"item": self.item, "supplier": self.supplier, "name": ["!=", self.name]},
 			):
-				frappe.throw(_(f"Entry with {self.supplier} and {self.item} already exists"))
+				frappe.throw(_("Entry with {0} and {1} already exists").format(self.supplier, self.item))
 		if not self.item_price:
 			self.populate_item_price()
 		if self.get_value_before_save("price") != self.price:
@@ -108,12 +108,12 @@ class SupplierItemPriceandStock(Document):
 @frappe.whitelist()
 def update_supplier_rank():
 	frappe.enqueue(
-		"navgold_custom.navgold_custom.doctype.supplier_item_price_and_stock.supplier_item_price_and_stock._update_supplier_rank",
+		"navgold_custom.navgold_custom.doctype.supplier_item_price_and_stock.supplier_item_price_and_stock.run_update_supplier_rank",
 		now=True,
 	)
 
 
-def _update_supplier_rank():
+def run_update_supplier_rank():
 	records = frappe.db.get_all(
 		"Supplier Item Price and Stock",
 		fields=["name", "item", "uom", "price", "purchase_blocked", "supplier"],

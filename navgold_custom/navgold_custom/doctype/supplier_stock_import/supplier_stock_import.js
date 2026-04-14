@@ -166,14 +166,7 @@ frappe.ui.form.on('Supplier Stock Import', {
 	},
 
 	start_import(frm) {
-		frappe.call({
-			method: 'run_doc_method',
-			args: {
-				method: 'start_import',
-				dt: 'Supplier Stock Import',
-				dn: frm.doc.name,
-			},
-		});
+		frm.call('start_import');
 		frappe.show_alert({
 			message: __('Import started in background'),
 			indicator: 'green',

@@ -158,7 +158,7 @@ async function create_plan(frm) {
 		return;
 	}
 
-	const confirm_plan_creation = await confirm_dialog(
+	const confirm_plan_creation = await navgold.confirm_dialog(
 		__('This will create an FBA Inbound Plan on Amazon. Proceed?'),
 	);
 	if (!confirm_plan_creation) return;
@@ -167,7 +167,7 @@ async function create_plan(frm) {
 }
 
 async function fetch_packing_options(frm) {
-	const confirm_fetch_packing = await confirm_dialog(
+	const confirm_fetch_packing = await navgold.confirm_dialog(
 		__('Generate packing options from Amazon? This will take ~30 seconds.'),
 	);
 	if (!confirm_fetch_packing) return;
@@ -184,7 +184,7 @@ async function confirm_packing_option(frm) {
 		return;
 	}
 
-	const confirm_packing_option = await confirm_dialog(
+	const confirm_packing_option = await navgold.confirm_dialog(
 		__('Confirm the selected packing option and send box details to Amazon?'),
 	);
 	if (!confirm_packing_option) return;
@@ -193,7 +193,7 @@ async function confirm_packing_option(frm) {
 }
 
 async function fetch_placement_options(frm) {
-	const confirm_fetch_placement = await confirm_dialog(
+	const confirm_fetch_placement = await navgold.confirm_dialog(
 		__(
 			'Generate placement options from Amazon? Amazon will assign shipments to fulfilment centres.',
 		),
@@ -212,7 +212,7 @@ async function confirm_placement_option(frm) {
 		return;
 	}
 
-	const confirm_placement_option = await confirm_dialog(
+	const confirm_placement_option = await navgold.confirm_dialog(
 		__(
 			'Confirm the selected placement option? This will create actual Amazon shipments.',
 		),
@@ -231,7 +231,7 @@ async function confirm_transportation_options(frm) {
 		return;
 	}
 
-	const transport_confirmed = await confirm_dialog(
+	const transport_confirmed = await navgold.confirm_dialog(
 		__('Confirm the selected transport option(s) with Amazon?'),
 	);
 	if (!transport_confirmed) return;
@@ -335,7 +335,7 @@ async function cancel_plan(frm) {
 		  )
 		: __('No Amazon plan exists yet. Mark this document as Cancelled?');
 
-	const confirm_cancel = await confirm_dialog(msg);
+	const confirm_cancel = await navgold.confirm_dialog(msg);
 	if (!confirm_cancel) return;
 
 	await frm.call('cancel_plan');
@@ -358,14 +358,19 @@ const FBA_REALTIME_EVENTS = [
 ];
 
 function setup_realtime_listeners(frm) {
-	if (frm._fba_realtime_setup) return;
-	frm._fba_realtime_setup = true;
-
-	for (const event of FBA_REALTIME_EVENTS) {
-		frappe.realtime.off(event);
+	if (frm._fba_listeners) {
+		for (const [event, handler] of Object.entries(frm._fba_listeners)) {
+			frappe.realtime.off(event, handler);
+		}
 	}
+	frm._fba_listeners = {};
 
-	frappe.realtime.on('fba_inbound_plan_created', (data) => {
+	const on = (event, handler) => {
+		frm._fba_listeners[event] = handler;
+		frappe.realtime.on(event, handler);
+	};
+
+	on('fba_inbound_plan_created', (data) => {
 		if (data.name !== frm.doc.name) return;
 
 		frappe.show_alert(
@@ -378,7 +383,7 @@ function setup_realtime_listeners(frm) {
 		frm.reload_doc();
 	});
 
-	frappe.realtime.on('fba_inbound_plan_failed', (data) => {
+	on('fba_inbound_plan_failed', (data) => {
 		if (data.name !== frm.doc.name) return;
 
 		frappe.show_alert(
@@ -390,7 +395,7 @@ function setup_realtime_listeners(frm) {
 		);
 	});
 
-	frappe.realtime.on('fba_inbound_packing_options_ready', (data) => {
+	on('fba_inbound_packing_options_ready', (data) => {
 		if (data.name !== frm.doc.name) return;
 
 		frappe.show_alert(
@@ -406,7 +411,7 @@ function setup_realtime_listeners(frm) {
 		frm.reload_doc();
 	});
 
-	frappe.realtime.on('fba_inbound_packing_confirmed', (data) => {
+	on('fba_inbound_packing_confirmed', (data) => {
 		if (data.name !== frm.doc.name) return;
 
 		frappe.show_alert(
@@ -419,7 +424,7 @@ function setup_realtime_listeners(frm) {
 		frm.reload_doc();
 	});
 
-	frappe.realtime.on('fba_inbound_placement_options_ready', (data) => {
+	on('fba_inbound_placement_options_ready', (data) => {
 		if (data.name !== frm.doc.name) return;
 		frappe.show_alert(
 			{
@@ -434,7 +439,7 @@ function setup_realtime_listeners(frm) {
 		frm.reload_doc();
 	});
 
-	frappe.realtime.on('fba_inbound_placement_confirmed', (data) => {
+	on('fba_inbound_placement_confirmed', (data) => {
 		if (data.name !== frm.doc.name) return;
 		frappe.show_alert(
 			{
@@ -448,7 +453,7 @@ function setup_realtime_listeners(frm) {
 		frm.reload_doc();
 	});
 
-	frappe.realtime.on('fba_inbound_transport_options_ready', (data) => {
+	on('fba_inbound_transport_options_ready', (data) => {
 		if (data.name !== frm.doc.name) return;
 		frappe.show_alert(
 			{
@@ -463,7 +468,7 @@ function setup_realtime_listeners(frm) {
 		frm.reload_doc();
 	});
 
-	frappe.realtime.on('fba_inbound_cancelled', (data) => {
+	on('fba_inbound_cancelled', (data) => {
 		if (data.name !== frm.doc.name) return;
 		frappe.show_alert(
 			{
@@ -475,7 +480,7 @@ function setup_realtime_listeners(frm) {
 		frm.reload_doc();
 	});
 
-	frappe.realtime.on('fba_inbound_transport_confirmed', (data) => {
+	on('fba_inbound_transport_confirmed', (data) => {
 		if (data.name !== frm.doc.name) return;
 		frappe.show_alert(
 			{
@@ -487,7 +492,7 @@ function setup_realtime_listeners(frm) {
 		frm.reload_doc();
 	});
 
-	frappe.realtime.on('fba_inbound_labels_ready', (data) => {
+	on('fba_inbound_labels_ready', (data) => {
 		if (data.name !== frm.doc.name) return;
 		frappe.show_alert(
 			{
@@ -501,7 +506,7 @@ function setup_realtime_listeners(frm) {
 		frm.reload_doc();
 	});
 
-	frappe.realtime.on('fba_inbound_step_failed', (data) => {
+	on('fba_inbound_step_failed', (data) => {
 		if (data.name !== frm.doc.name) return;
 
 		frappe.show_alert(

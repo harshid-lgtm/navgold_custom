@@ -1,8 +1,6 @@
 # Copyright (c) 2025, developers@buildwithhussain.com and contributors
 # For license information, please see license.txt
 
-import json
-
 import frappe
 from frappe import _
 from frappe.model.document import Document
@@ -147,7 +145,7 @@ class SupplierStockImport(Document):
 			if row_idx % 100 == 0:
 				frappe.db.commit()  # nosemgrep: frappe-manual-commit
 
-		self.errored_rows = json.dumps(errored_rows_data) if errored_rows_data else ""
+		self.errored_rows = frappe.as_json(errored_rows_data) if errored_rows_data else ""
 
 		if self.failed_imports == 0:
 			self.status = "Success"
@@ -236,6 +234,7 @@ class SupplierStockImport(Document):
 	def get_item_from_barcode(self, barcode):
 		return frappe.db.get_value("Item Barcode", {"barcode": barcode}, "parent")
 
+	# We need to run validate() to populate price therefore we use get_cached_doc and save instead of direct db calls
 	def update_record(self, name, stock_qty, price, supplier_part_number):
 		record = frappe.get_cached_doc("Supplier Item Price and Stock", name)
 		if self.import_stock:

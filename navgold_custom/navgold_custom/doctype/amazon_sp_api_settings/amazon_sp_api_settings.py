@@ -11,9 +11,9 @@ from datetime import datetime, timedelta
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import add_days, get_date_str, now_datetime, today
+from frappe.utils import add_days, get_date_str, get_datetime, now_datetime, today
 
-from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_repository import (
+from navgold_custom.navgold_custom.amazon_repository import (
 	get_orders,
 )
 
@@ -101,10 +101,6 @@ class AmazonSPAPISettings(Document):
 
 	@frappe.whitelist()
 	def get_order_details(self):
-		from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_repository import (
-			get_orders,
-		)
-
 		if not self.is_active:
 			frappe.msgprint(_("Please enable the Amazon SP API Settings {0}.").format(frappe.bold(self.name)))
 			return
@@ -149,7 +145,7 @@ def schedule_get_order_details():
 		return
 
 	if amz_setting.last_synced_at:
-		fetch_after = amz_setting.last_synced_at - timedelta(minutes=10)
+		fetch_after = get_datetime(amz_setting.last_synced_at) - timedelta(minutes=10)
 	else:
 		fetch_after = today()
 

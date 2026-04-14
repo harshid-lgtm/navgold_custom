@@ -47,8 +47,7 @@ function handle_retry_btn(frm) {
 			primary_action(values) {
 				d.hide();
 				frappe.call({
-					method:
-						'navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_repository.get_order',
+					method: 'navgold_custom.navgold_custom.amazon_repository.get_order',
 					args: {
 						amazon_order_ids: values.amazon_order_id,
 					},
@@ -88,8 +87,7 @@ function handle_retry_btn(frm) {
 				const amazon_order_ids = values.amazon_order_ids.split('\n');
 				for (let i = 0; i < amazon_order_ids.length; i++) {
 					frappe.call({
-						method:
-							'navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_repository.get_order',
+						method: 'navgold_custom.navgold_custom.amazon_repository.get_order',
 						args: {
 							amazon_order_ids: amazon_order_ids[i],
 						},

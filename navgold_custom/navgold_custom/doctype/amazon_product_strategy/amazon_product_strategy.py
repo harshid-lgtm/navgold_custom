@@ -6,6 +6,12 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils.data import flt
 
+from navgold_custom.navgold_custom.amazon_pricing.price_calculator import (
+	calculate_margin_from_price,
+	calculate_prices,
+)
+from navgold_custom.navgold_custom.amazon_pricing.price_calculator_api import get_cost_data_for_strategy
+
 
 class AmazonProductStrategy(Document):
 	# begin: auto-generated types
@@ -54,34 +60,16 @@ class AmazonProductStrategy(Document):
 			pricing.save(ignore_permissions=True)
 
 	def validate_margin(self):
-		"""Ensure min_margin <= max_margin"""
 		if self.min_margin > self.max_margin:
 			frappe.throw(_("Min Margin cannot be greater than Max Margin"))
 
 	def calculate_prices(self):
-		"""Calculate min and max prices based on costs and margins"""
-		from navgold_custom.navgold_custom.amazon_pricing.price_calculator import calculate_prices
+		cost_data = get_cost_data_for_strategy(self)
 
-		active_costs = [cost for cost in self.costs if cost.is_active]
-
-		if not active_costs:
+		if not cost_data:
 			self.calculated_min_price = 0
 			self.calculated_max_price = 0
 			return
-
-		# Build cost data for calculator
-		cost_data = []
-		for cost in active_costs:
-			cost_type = frappe.get_cached_doc("Cost Type", cost.cost_type)
-			cost_data.append(
-				{
-					"type": cost.cost_type,
-					"is_absolute": cost_type.is_absolute,
-					"is_relative": cost_type.is_relative,
-					"is_vat": cost_type.is_vat,
-					"value": cost.value,
-				}
-			)
 
 		prices = calculate_prices(
 			costs=cost_data, min_margin=flt(self.min_margin) / 100, max_margin=flt(self.max_margin) / 100
@@ -91,34 +79,17 @@ class AmazonProductStrategy(Document):
 		self.calculated_max_price = prices.get("max_price", 0)
 
 	def calculate_reverse_margin(self):
-		"""Calculate margin from target price using reverse calculation"""
-		from navgold_custom.navgold_custom.amazon_pricing.price_calculator import calculate_margin_from_price
-
 		if not self.target_price:
 			self.calculated_margin = 0
 			self.calculated_profit = 0
 			return
 
-		active_costs = [cost for cost in self.costs if cost.is_active]
+		cost_data = get_cost_data_for_strategy(self)
 
-		if not active_costs:
+		if not cost_data:
 			self.calculated_margin = 0
 			self.calculated_profit = 0
 			return
-
-		# Build cost data for calculator
-		cost_data = []
-		for cost in active_costs:
-			cost_type = frappe.get_cached_doc("Cost Type", cost.cost_type)
-			cost_data.append(
-				{
-					"type": cost.cost_type,
-					"is_absolute": cost_type.is_absolute,
-					"is_relative": cost_type.is_relative,
-					"is_vat": cost_type.is_vat,
-					"value": cost.value,
-				}
-			)
 
 		result = calculate_margin_from_price(costs=cost_data, selling_price=self.target_price)
 
@@ -126,32 +97,56 @@ class AmazonProductStrategy(Document):
 		self.calculated_profit = result.get("profit", 0)
 
 	def populate_costs(self):
+		synced_sources = {cost.source for cost in self.costs if cost.source not in (None, "", "Manual")}
+
+		item_code = None
+		if synced_sources & {"Supplier-Sync", "PO-Sync"}:
+			item_code = frappe.db.get_value("Proxy SKU", self.proxy_sku, "item")
+
+		last_transfer_rate = None
+		if "FBA-Transfer" in synced_sources:
+			last_transfer_rate = frappe.db.get_value("Proxy SKU", self.proxy_sku, "last_transfer_rate")
+
+		supplier_price = None
+		if "Supplier-Sync" in synced_sources and item_code:
+			supplier_price = frappe.db.get_value(
+				"Supplier Item Price and Stock",
+				{"item": item_code, "purchase_blocked": 0, "stock_qty": [">", 0]},
+				order_by="rank",
+				fieldname="price",
+			)
+
+		po_cost = None
+		if "PO-Sync" in synced_sources and item_code:
+			po_cost = frappe.db.get_value(
+				"Purchase Order Item",
+				{"item_code": item_code, "docstatus": 1},
+				order_by="creation desc",
+				fieldname="rate",
+			)
+
+		sub_type_names = [
+			cost.cost_sub_type for cost in self.costs if cost.source == "Auto-Sync" and cost.cost_sub_type
+		]
+		sub_type_defaults = {}
+		if sub_type_names:
+			sub_type_defaults = {
+				row.name: row.default_value
+				for row in frappe.get_all(
+					"Cost Sub Type",
+					filters={"name": ["in", sub_type_names]},
+					fields=["name", "default_value"],
+				)
+			}
+
 		for cost in self.costs:
 			cost.is_active = 1 if cost.rank == 1 else 0
 
 			if cost.source == "Supplier-Sync":
-				item = frappe.db.get_value("Proxy SKU", self.proxy_sku, "item")
-				supplier_price = frappe.db.get_value(
-					"Supplier Item Price and Stock",
-					{"item": item, "purchase_blocked": 0, "stock_qty": [">", 0]},
-					order_by="rank",
-					fieldname="price",
-				)
 				cost.value = flt(supplier_price)
-
-			if cost.source == "PO-Sync":
-				item = frappe.db.get_value("Proxy SKU", self.proxy_sku, "item")
-				po_cost = frappe.db.get_value(
-					"Purchase Order Item",
-					{"item_code": item, "docstatus": 1},
-					order_by="creation desc",
-					fieldname="rate",
-				)
+			elif cost.source == "PO-Sync":
 				cost.value = flt(po_cost)
-
-			if cost.source == "FBA-Transfer":
-				last_transfer_cost = frappe.db.get_value("Proxy SKU", self.proxy_sku, "last_transfer_rate")
-				cost.value = flt(last_transfer_cost)
-			if cost.source == "Auto-Sync":
-				value = frappe.db.get_value("Cost Sub Type", cost.cost_sub_type, "default_value")
-				cost.value = flt(value)
+			elif cost.source == "FBA-Transfer":
+				cost.value = flt(last_transfer_rate)
+			elif cost.source == "Auto-Sync":
+				cost.value = flt(sub_type_defaults.get(cost.cost_sub_type))

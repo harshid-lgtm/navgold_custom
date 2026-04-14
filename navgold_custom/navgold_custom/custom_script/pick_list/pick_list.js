@@ -19,7 +19,7 @@ frappe.ui.form.on('Pick List', {
 				async () => {
 					const response = await frappe.call({
 						method:
-							'navgold_custom.navgold_custom.custom_script.pick_list.pick_list.create_fba_transfer_stock_entry',
+							'navgold_custom.navgold_custom.custom_script.pick_list.pick_list_api.create_fba_transfer_stock_entry',
 						args: { pick_list_name: frm.doc.name },
 						freeze: true,
 						freeze_message: __('Creating FBA Transfer Stock Entry...'),
@@ -49,7 +49,7 @@ frappe.ui.form.on('Pick List', {
 		try {
 			const response = await frappe.call({
 				method:
-					'navgold_custom.navgold_custom.custom_script.pick_list.pick_list.get_open_sales_orders_for_delivery',
+					'navgold_custom.navgold_custom.custom_script.pick_list.pick_list_api.get_open_sales_orders_for_delivery',
 				args: {
 					customer: frm.doc.customer || null,
 					company: frm.doc.company,
@@ -212,7 +212,7 @@ frappe.ui.form.on('Pick List', {
 		try {
 			const response = await frappe.call({
 				method:
-					'navgold_custom.navgold_custom.custom_script.pick_list.pick_list.map_sales_orders_to_pick_list',
+					'navgold_custom.navgold_custom.custom_script.pick_list.pick_list_api.map_sales_orders_to_pick_list',
 				args: {
 					sales_order_names: JSON.stringify(selected_orders),
 					target_pr_doc_json: JSON.stringify(frm.doc),

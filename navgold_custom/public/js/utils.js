@@ -1,4 +1,6 @@
-function confirm_dialog(message) {
+frappe.provide('navgold');
+
+navgold.confirm_dialog = function confirm_dialog(message) {
 	return new Promise((resolve) => {
 		frappe.confirm(
 			message,
@@ -6,4 +8,4 @@ function confirm_dialog(message) {
 			() => resolve(false),
 		);
 	});
-}
+};

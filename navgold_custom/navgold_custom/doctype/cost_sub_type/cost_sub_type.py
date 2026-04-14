@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import frappe
+from frappe import _
 from frappe.model.document import Document
 
 
@@ -24,13 +25,13 @@ class CostSubType(Document):
 		self.validate_single_default()
 
 	def validate_single_default(self):
-		"""Ensure only one default per cost type"""
 		if self.is_default:
 			existing = frappe.db.exists(
 				"Cost Sub Type", {"cost_type": self.cost_type, "is_default": 1, "name": ("!=", self.name)}
 			)
 			if existing:
 				frappe.throw(
-					f"Cost Type '{self.cost_type}' already has a default sub type. "
-					"Please unset the current default first."
+					_(
+						"Cost Type '{0}' already has a default sub type. Please unset the current default first."
+					).format(self.cost_type)
 				)

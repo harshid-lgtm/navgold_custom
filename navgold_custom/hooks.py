@@ -248,13 +248,11 @@ export_python_type_annotations = True
 # }
 
 doctype_js = {
-	"Sales Order": "navgold_custom/custom_script/sales_order/sales_order.js",
-	"Purchase Receipt": [
-		"navgold_custom/custom_script/purchase_receipt/purchase_receipt.js",
-	],
+	"Sales Order": ["navgold_custom/custom_script/sales_order/sales_order.js"],
+	"Purchase Receipt": ["navgold_custom/custom_script/purchase_receipt/purchase_receipt.js"],
 	"Pick List": ["navgold_custom/custom_script/pick_list/pick_list.js"],
 	"Packing Slip": ["navgold_custom/custom_script/packing_slip/packing_slip.js"],
-	"Supplier": "navgold_custom/custom_script/supplier/supplier.js",
+	"Supplier": ["navgold_custom/custom_script/supplier/supplier.js"],
 }
 
 doc_events = {
@@ -294,6 +292,6 @@ scheduler_events = {
 		],
 	},
 	"daily": [
-		"navgold_custom.navgold_custom.doctype.supplier_item_price_and_stock.supplier_item_price_and_stock._update_supplier_rank",
+		"navgold_custom.navgold_custom.doctype.supplier_item_price_and_stock.supplier_item_price_and_stock.run_update_supplier_rank",
 	],
 }

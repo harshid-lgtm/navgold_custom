@@ -97,14 +97,12 @@ frappe.ui.form.on('Amazon Strategy Template', {
 	},
 
 	validate(frm) {
-		// Ensure strategy types are unique
 		const types = {};
 		for (const row of frm.doc.strategies) {
 			if (types[row.strategy_type]) {
-				frappe.msgprint(
+				frappe.throw(
 					__("Strategy type '{0}' is duplicated", [row.strategy_type]),
 				);
-				frappe.validated = false;
 			}
 			types[row.strategy_type] = true;
 		}

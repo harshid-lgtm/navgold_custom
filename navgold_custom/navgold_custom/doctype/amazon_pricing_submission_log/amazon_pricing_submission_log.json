@@ -20,6 +20,7 @@
 		"pricing_records",
 		"feed_content_section",
 		"feed_content",
+		"response_content",
 		"error_section",
 		"error_message"
 	],
@@ -110,6 +111,13 @@
 			"fieldtype": "Code",
 			"label": "Feed Content",
 			"options": "XML"
+		},
+		{
+			"fieldname": "response_content",
+			"fieldtype": "Code",
+			"label": "Response Content",
+			"options": "JSON",
+			"read_only": 1
 		},
 		{
 			"collapsible": 1,

@@ -43,7 +43,7 @@ function add_sfp_label_button(frm) {
 		try {
 			const rates_response = await frappe.call({
 				method:
-					'navgold_custom.navgold_custom.custom_script.packing_slip.packing_slip.get_sfp_shipping_rates',
+					'navgold_custom.navgold_custom.custom_script.packing_slip.packing_slip_api.get_sfp_shipping_rates',
 				args: { packing_slip: frm.doc.name },
 			});
 
@@ -73,7 +73,7 @@ function add_sfp_cancel_button(frm) {
 		try {
 			await frappe.call({
 				method:
-					'navgold_custom.navgold_custom.custom_script.packing_slip.packing_slip.cancel_sfp_shipment',
+					'navgold_custom.navgold_custom.custom_script.packing_slip.packing_slip_api.cancel_sfp_shipment',
 				args: { packing_slip: frm.doc.name },
 			});
 
@@ -135,7 +135,7 @@ function show_sfp_rate_dialog(frm, rates) {
 			try {
 				const response = await frappe.call({
 					method:
-						'navgold_custom.navgold_custom.custom_script.packing_slip.packing_slip.purchase_sfp_shipping_label',
+						'navgold_custom.navgold_custom.custom_script.packing_slip.packing_slip_api.purchase_sfp_shipping_label',
 					args: {
 						packing_slip: frm.doc.name,
 						rate_id: selected_rate.rate_id,
@@ -186,7 +186,7 @@ async function process_item_scan(frm, barcode) {
 
 		const response = await frappe.call({
 			method:
-				'navgold_custom.navgold_custom.custom_script.packing_slip.packing_slip.get_draft_delivery_note_items',
+				'navgold_custom.navgold_custom.custom_script.packing_slip.packing_slip_api.get_draft_delivery_note_items',
 			args: { tote: frm.doc.custom_tote },
 		});
 
@@ -276,7 +276,7 @@ async function set_delivery_note_and_load_items(
 
 	const response = await frappe.call({
 		method:
-			'navgold_custom.navgold_custom.custom_script.packing_slip.packing_slip.get_delivery_note_items',
+			'navgold_custom.navgold_custom.custom_script.packing_slip.packing_slip_api.get_delivery_note_items',
 		args: { delivery_note: source_name },
 	});
 

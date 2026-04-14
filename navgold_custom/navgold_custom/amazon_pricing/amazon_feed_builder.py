@@ -5,6 +5,8 @@
 import math
 
 import frappe
+from frappe.query_builder import DocType
+from frappe.query_builder.functions import Count
 from frappe.utils import add_days, getdate, today
 from frappe.utils.caching import redis_cache
 from frappe.utils.data import cint, flt, orjson_dumps
@@ -29,49 +31,74 @@ def get_top_supplier_for_item(item_code: str) -> dict | None:
 
 
 @redis_cache(ttl=3600 * 12)
-def get_supplier_lead_time(supplier_name: str) -> int:
-	today_day = getdate(today()).strftime("%A")
+def get_supplier_lead_time(supplier_name: str, day: str) -> int:
 	lead_time = frappe.db.get_value(
 		"Supplier Lead Time",
-		{"parent": supplier_name, "parenttype": "Supplier", "day": today_day},
+		{"parent": supplier_name, "parenttype": "Supplier", "day": day},
 		"lead_time",
 	)
 	return cint(lead_time) or 1
 
 
-def get_pool_and_pack_size(proxy_sku: str, item_code: str) -> tuple[int, float]:
-	"""Get pool size (active proxy SKUs sharing this item) and pack size (UOM conversion factor)."""
-	pool_size = frappe.db.count("Proxy SKU", filters={"item": item_code, "is_active": 1}) or 1
-
-	proxy_uom = frappe.db.get_value("Proxy SKU", proxy_sku, "uom")
-	pack_size = (
-		flt(
-			frappe.db.get_value(
-				"UOM Conversion Detail",
-				{"parent": item_code, "parenttype": "Item", "uom": proxy_uom},
-				"conversion_factor",
-			)
-		)
-		or 1.0
+# This is a bit complicated
+# You have a Proxy SKU which maps to an Item and UOM. The Item can have multiple active Proxy SKUs (pool), and the UOM has a conversion factor (pack size). So we divide the stock into all the active Proxy Skus
+def build_proxy_sku_info_map(proxy_sku_names: list) -> dict:
+	proxy_sku_rows = frappe.get_all(
+		"Proxy SKU",
+		filters={"name": ["in", proxy_sku_names]},
+		fields=["name", "item", "uom"],
 	)
 
-	return pool_size, pack_size
+	proxy_sku_map = {row.name: row for row in proxy_sku_rows}
+
+	item_codes = list({row.item for row in proxy_sku_rows if row.item})
+	proxy_sku_dt = DocType("Proxy SKU")
+	pool_counts = (
+		frappe.qb.from_(proxy_sku_dt)
+		.select(proxy_sku_dt.item, Count("*").as_("pool_size"))
+		.where((proxy_sku_dt.item.isin(item_codes)) & (proxy_sku_dt.is_active == 1))
+		.groupby(proxy_sku_dt.item)
+	).run(as_dict=True)
+	pool_size_map = {row.item: row.pool_size for row in pool_counts}
+
+	# UOM conversion factors: one batch query
+	uom_conversion_dt = DocType("UOM Conversion Detail")
+	needed_uom_pairs = list({(row.item, row.uom) for row in proxy_sku_rows if row.item and row.uom})
+	if needed_uom_pairs:
+		uom_factors = (
+			frappe.qb.from_(uom_conversion_dt)
+			.select(uom_conversion_dt.parent, uom_conversion_dt.uom, uom_conversion_dt.conversion_factor)
+			.where((uom_conversion_dt.parenttype == "Item") & (uom_conversion_dt.parent.isin(item_codes)))
+		).run(as_dict=True)
+		uom_factor_map = {(row.parent, row.uom): flt(row.conversion_factor) or 1.0 for row in uom_factors}
+	else:
+		uom_factor_map = {}
+
+	result = {}
+	for proxy_sku, row in proxy_sku_map.items():
+		pool_size = pool_size_map.get(row.item, 1)
+		pack_size = uom_factor_map.get((row.item, row.uom), 1.0)
+		result[proxy_sku] = {"item": row.item, "uom": row.uom, "pool_size": pool_size, "pack_size": pack_size}
+
+	return result
 
 
 def calculate_adjusted_qty(raw_qty: float, pool_size: int, pack_size: float) -> int:
-	"""Adjust stock: floor(raw_qty / pool_size / pack_size)."""
 	if pool_size <= 0 or pack_size <= 0:
 		return 0
 	return max(math.floor(raw_qty / pool_size / pack_size), 0)
 
 
-def get_sku_inventory_data(pricing: dict, zero_stock_proxy_skus: set | None = None) -> dict:
+def get_sku_inventory_data(
+	pricing: dict,
+	zero_stock_proxy_skus: set | None = None,
+	proxy_sku_info: dict | None = None,
+) -> dict:
 	stock_info = get_stock_info(pricing.proxy_sku)
 
-	pricing_doc = frappe.get_cached_doc("Amazon Product Pricing", pricing.name)
-	active = pricing_doc.active_strategy
-	is_fba = active and active == pricing_doc.fba_strategy
-	is_sfp = active and active == pricing_doc.sfp_strategy
+	active = pricing.active_strategy
+	is_fba = active and active == pricing.fba_strategy
+	is_sfp = active and active == pricing.sfp_strategy
 
 	if is_fba and stock_info.get("fba_stock", 0) > 0:
 		return {
@@ -83,17 +110,36 @@ def get_sku_inventory_data(pricing: dict, zero_stock_proxy_skus: set | None = No
 			"is_fba": True,
 		}
 
-	item_code = frappe.db.get_value("Proxy SKU", pricing.proxy_sku, "item")
+	sku_info = (proxy_sku_info or {}).get(pricing.proxy_sku)
+	if sku_info:
+		item_code = sku_info["item"]
+		pool_size = sku_info["pool_size"]
+		pack_size = sku_info["pack_size"]
+	else:
+		item_code = frappe.db.get_value("Proxy SKU", pricing.proxy_sku, "item")
+		proxy_uom = frappe.db.get_value("Proxy SKU", pricing.proxy_sku, "uom")
+		pool_size = frappe.db.count("Proxy SKU", filters={"item": item_code, "is_active": 1}) or 1
+		pack_size = (
+			flt(
+				frappe.db.get_value(
+					"UOM Conversion Detail",
+					{"parent": item_code, "parenttype": "Item", "uom": proxy_uom},
+					"conversion_factor",
+				)
+			)
+			or 1.0
+		)
 
 	raw_qty = flt(stock_info.get("mfn_stock", 0))
-	pool_size, pack_size = get_pool_and_pack_size(pricing.proxy_sku, item_code)
 	quantity = calculate_adjusted_qty(raw_qty, pool_size, pack_size)
 
 	if zero_stock_proxy_skus is not None and pricing.proxy_sku in zero_stock_proxy_skus:
 		quantity = 0
 
 	top_supplier = get_top_supplier_for_item(item_code) if item_code else None
-	lead_time_days = get_supplier_lead_time(top_supplier.supplier) if top_supplier else 1
+	lead_time_days = (
+		get_supplier_lead_time(top_supplier.supplier, getdate(today()).strftime("%A")) if top_supplier else 1
+	)
 
 	restock_date = None
 	if stock_info.get("has_restock_date", False):
@@ -129,7 +175,7 @@ def get_zero_stock_proxy_skus() -> set | None:
 	return None
 
 
-def _build_inventory_patches(inv: dict, marketplace_id: str) -> list:
+def build_inventory_patches(inv: dict, marketplace_id: str) -> list:
 	patches = []
 
 	if inv["is_fba"]:
@@ -189,20 +235,25 @@ def _build_inventory_patches(inv: dict, marketplace_id: str) -> list:
 
 
 def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str) -> str:
-	"""
-	Build a JSON pricing feed for submission to Amazon.
-
-	Uses the JSON_LISTINGS_FEED format with PATCH operations
-	for updating pricing attributes.
-
-	"""
 	messages = []
 	message_id = 1
 	pricing_records = frappe.get_all(
 		"Amazon Product Pricing",
 		filters={"name": ["in", pricing_names], "is_active": True},
-		fields=["name", "proxy_sku", "current_min_price", "current_max_price", "is_active"],
+		fields=[
+			"name",
+			"proxy_sku",
+			"current_min_price",
+			"current_max_price",
+			"is_active",
+			"active_strategy",
+			"fba_strategy",
+			"sfp_strategy",
+		],
 	)
+
+	proxy_sku_names = [pricing.proxy_sku for pricing in pricing_records if pricing.proxy_sku]
+	proxy_sku_info = build_proxy_sku_info_map(proxy_sku_names) if proxy_sku_names else {}
 
 	zero_stock_proxy_skus = get_zero_stock_proxy_skus()
 
@@ -234,13 +285,13 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 
 		# Get inventory data and build fulfillment patches
 		try:
-			inv = get_sku_inventory_data(pricing, zero_stock_proxy_skus)
+			inv = get_sku_inventory_data(pricing, zero_stock_proxy_skus, proxy_sku_info)
 		except Exception as e:
 			frappe.log_error(f"Skipping inventory patches for {pricing.name}: {e!s}", "Amazon Feed Builder")
 			inv = None
 
 		if inv:
-			patches.extend(_build_inventory_patches(inv, marketplace_id))
+			patches.extend(build_inventory_patches(inv, marketplace_id))
 
 		message = {
 			"messageId": message_id,
