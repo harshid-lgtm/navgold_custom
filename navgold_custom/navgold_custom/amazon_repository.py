@@ -387,7 +387,7 @@ class AmazonRepository:
 					order_id = (order or {}).get("AmazonOrderId", "Unknown")
 					self.create_failed_sync_record(order_id, frappe.get_traceback(), order=order)
 
-			frappe.db.commit()  # nosemgrep: manual-commit, commit remaining orders
+			frappe.db.commit()  # nosemgrep
 
 			if not next_token:
 				break

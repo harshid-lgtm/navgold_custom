@@ -44,7 +44,7 @@ def get_free_qty_map(item_codes: list[str]) -> dict[str, dict[str, float]]:
 
 @redis_cache()
 @frappe.whitelist()
-def get_conversion_factor(item_code, uom):
+def get_conversion_factor(item_code: str, uom: str):
 	if not uom or uom == "Nos":
 		return 1.0
 	conversion_factor = frappe.db.get_value(
