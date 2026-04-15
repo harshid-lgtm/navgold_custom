@@ -1,3 +1,4 @@
+// async/await based confirm dialog
 frappe.provide('navgold');
 
 navgold.confirm_dialog = function confirm_dialog(message) {

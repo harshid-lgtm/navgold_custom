@@ -78,7 +78,7 @@ def retry_with_backoff(func, error_title="SP-API Error", max_retries=MAX_RETRIES
 			backoff *= 2
 
 
-# https://github.com/amzn/selling-partner-api-docs/blob/main/guides/en-US/developer-guide/SellingPartnerApiDeveloperGuide.md#selling-partner-api-endpoints
+# https://github.com/amzn/selling-partner-api-docs/blob/main/guides/en-US/developer-guide/SellingPartnerApiDeveloperGuide.md
 MARKETPLACES = {
 	"North America": {
 		"CA": "A2EUQ1WTGCTBG2",
@@ -139,8 +139,6 @@ class SPAPIError(Exception):
 
 
 class SPAPI:
-	"""Base Amazon SP-API class"""
-
 	# https://github.com/amzn/selling-partner-api-docs/blob/main/guides/en-US/developer-guide/SellingPartnerApiDeveloperGuide.md#connecting-to-the-selling-partner-api
 
 	BASE_URI = "/"
@@ -238,22 +236,17 @@ class SPAPI:
 
 
 class Finances(SPAPI):
-	"""Amazon Finances API"""
-
 	BASE_URI = "/finances/v0/"
 
 	def list_financial_events_by_order_id(
 		self, order_id: str, max_results: int | None = None, next_token: str | None = None
 	) -> dict:
-		"""Returns all financial events for the specified order."""
 		append_to_base_uri = f"orders/{order_id}/financialEvents"
 		data = dict(MaxResultsPerPage=max_results, NextToken=next_token)
 		return self.make_request(append_to_base_uri=append_to_base_uri, params=data)
 
 
 class Orders(SPAPI):
-	"""Amazon Orders API"""
-
 	BASE_URI = "/orders/v0/orders"
 
 	def get_orders(
@@ -419,9 +412,6 @@ class Util:
 
 	@staticmethod
 	def remove_empty(dict):
-		"""
-		Helper function that removes all keys from a dictionary (dict), that have an empty value.
-		"""
 		for key in list(dict):
 			if not dict[key]:
 				del dict[key]
@@ -694,8 +684,6 @@ class Feeds(SPAPI):
 			content: The feed content to upload (JSON string or bytes)
 			content_type: Content type of the feed
 
-		Returns:
-			True if upload successful
 		"""
 		if isinstance(content, str):
 			content = content.encode("utf-8")

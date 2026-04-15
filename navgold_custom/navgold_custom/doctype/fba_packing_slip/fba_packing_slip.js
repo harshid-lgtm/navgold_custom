@@ -221,8 +221,7 @@ async function show_qty_dialog_for_row(frm, row) {
 	const item_code = row.item_code;
 
 	const factor_response = await frappe.call({
-		method:
-			'navgold_custom.navgold_custom.doctype.fba_packing_slip.fba_packing_slip.get_singles_conversion_factor',
+		method: 'navgold_custom.navgold_custom.utils.get_conversion_factor',
 		args: { item_code, uom: row.stock_uom },
 	});
 	const singles_factor = flt(factor_response.message) || 1;

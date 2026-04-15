@@ -310,7 +310,7 @@ window.edit_quantity = (button) => {
 			}
 
 			if (new_qty > available_stock) {
-				const confirmed = await frappe.confirm(
+				const confirmed = await navgold.confirm_dialog(
 					__(
 						'The quantity you entered ({0}) is greater than the available stock ({1}). Are you sure you want to continue?',
 						[new_qty, available_stock],

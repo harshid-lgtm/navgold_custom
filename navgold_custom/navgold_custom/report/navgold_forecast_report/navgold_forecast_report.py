@@ -287,11 +287,11 @@ def get_data(filters):
 		data.append(row)
 
 	if filters.get("brand"):
-		data = [r for r in data if r["brand"] == filters["brand"]]
+		data = [row for row in data if row["brand"] == filters["brand"]]
 	if filters.get("strategy"):
-		data = [r for r in data if r["strategy"] == filters["strategy"]]
+		data = [row for row in data if row["strategy"] == filters["strategy"]]
 	if filters.get("comment"):
-		data = [r for r in data if r["comment"] == filters["comment"]]
+		data = [row for row in data if row["comment"] == filters["comment"]]
 
 	return data
 
@@ -466,7 +466,7 @@ def get_item_info_map(item_codes):
 		frappe.qb.from_(item).select(item.name, item.brand, item.item_name).where(item.name.isin(item_codes))
 	).run(as_dict=True)
 
-	return {r["name"]: {"brand": r["brand"] or "", "item_name": r["item_name"] or ""} for r in rows}
+	return {row["name"]: {"brand": row["brand"] or "", "item_name": row["item_name"] or ""} for row in rows}
 
 
 def get_sales_by_channel(item_codes):
@@ -551,7 +551,7 @@ def get_top_supplier_map(item_codes):
 		.where((supplier_item_price.item.isin(item_codes)) & (supplier_item_price.rank == 1))
 	).run(as_dict=True)
 
-	result = {r["item"]: {"supplier": r["supplier"], "price": flt(r["price"])} for r in rows}
+	result = {row["item"]: {"supplier": row["supplier"], "price": flt(row["price"])} for row in rows}
 
 	supplier_offer = DocType("Supplier Offer")
 	offer_rows = (

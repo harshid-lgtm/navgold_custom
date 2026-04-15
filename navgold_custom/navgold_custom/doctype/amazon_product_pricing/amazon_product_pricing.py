@@ -6,6 +6,8 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils.data import flt
 
+from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_submitter import submit_pricing
+from navgold_custom.navgold_custom.amazon_pricing.repricer_client import sync_to_repricer
 from navgold_custom.navgold_custom.amazon_pricing.strategy_selector import select_strategy
 
 
@@ -40,7 +42,6 @@ class AmazonProductPricing(Document):
 		self.update_current_prices()
 
 	def validate_strategies_belong_to_this(self):
-		"""Ensure linked strategies belong to this pricing's Proxy SKU"""
 		strategy_fields = ["fba_strategy", "sfp_strategy", "backorder_strategy", "default_strategy"]
 		for field in strategy_fields:
 			strategy = getattr(self, field)
@@ -54,12 +55,9 @@ class AmazonProductPricing(Document):
 					)
 
 	def select_active_strategy(self):
-		"""Select the active strategy based on stock/fulfillment conditions"""
-
 		self.active_strategy = select_strategy(self)
 
 	def update_current_prices(self):
-		"""Update current prices from active strategy, or use fixed price if enabled"""
 		if self.fixed_price:
 			self.current_min_price = flt(self.fixed_price_value)
 			self.current_max_price = flt(self.fixed_price_value)
@@ -75,23 +73,16 @@ class AmazonProductPricing(Document):
 
 	@frappe.whitelist()
 	def submit_to_amazon(self):
-		"""Submit pricing to Amazon SP-API"""
-		from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_submitter import submit_pricing
-
 		if not self.is_active:
 			frappe.throw(_("Cannot submit pricing for inactive products"))
 
 		if not self.current_min_price or not self.current_max_price:
 			frappe.throw(_("Cannot submit pricing without calculated prices"))
 
-		result = submit_pricing([self.name])
-		return result
+		return submit_pricing([self.name])
 
 	@frappe.whitelist()
 	def sync_to_repricer(self):
-		"""Sync pricing to Repricer.com"""
-		from navgold_custom.navgold_custom.amazon_pricing.repricer_client import sync_to_repricer
-
 		settings = frappe.get_single("Navgold Settings")
 		if not settings.repricer_enabled:
 			frappe.throw(_("Repricer integration is not enabled"))
@@ -99,5 +90,4 @@ class AmazonProductPricing(Document):
 		if not self.is_active:
 			frappe.throw(_("Cannot sync pricing for inactive products"))
 
-		result = sync_to_repricer([self.name])
-		return result
+		return sync_to_repricer([self.name])

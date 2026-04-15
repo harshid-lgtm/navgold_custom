@@ -99,7 +99,6 @@ def get_data(filters: dict) -> list[dict]:
 
 		sales_7d, sales_30d = combined_sales_map.get(item_code, (0.0, 0.0))
 
-		# MAX_PACK_QTY: largest pack size within the same base SKU
 		max_pack_qty = flt(max_pack_by_base.get(base_sku, pack_size)) if base_sku else pack_size
 
 		min_val, max_val = calculate_min_max(
@@ -146,7 +145,6 @@ def calculate_min_max(
 	if sales_7d == 0:
 		prelim_min = 0
 
-	# Step 5: Calculate Max
 	max_val = prelim_min * max_multiplier
 
 	# slow movers that must still be stocked

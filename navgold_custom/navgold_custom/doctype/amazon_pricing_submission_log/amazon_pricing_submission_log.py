@@ -5,6 +5,11 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 
+from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_submitter import (
+	check_feed_status,
+	submit_pricing,
+)
+
 
 class AmazonPricingSubmissionLog(Document):
 	# begin: auto-generated types
@@ -30,9 +35,6 @@ class AmazonPricingSubmissionLog(Document):
 
 	@frappe.whitelist()
 	def check_status(self):
-		"""Check feed status from Amazon"""
-		from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_submitter import check_feed_status
-
 		if self.submission_type != "Amazon":
 			frappe.throw(_("Can only check status for Amazon submissions"))
 
@@ -42,9 +44,6 @@ class AmazonPricingSubmissionLog(Document):
 
 	@frappe.whitelist()
 	def retry_submission(self):
-		"""Retry a failed submission"""
-		from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_submitter import submit_pricing
-
 		if self.status != "Error":
 			frappe.throw(_("Can only retry failed submissions"))
 

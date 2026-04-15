@@ -136,4 +136,5 @@ def run_bulk_apply_template(template_name: str, pricing_names: list):
 	frappe.publish_realtime(
 		"bulk_template_complete",
 		{"success_count": success, "error_count": len(errors)},
+		user=frappe.session.user,
 	)

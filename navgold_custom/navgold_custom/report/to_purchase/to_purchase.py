@@ -163,17 +163,17 @@ def get_data(filters):
 	).run(as_dict=True)
 
 	items_needed = {}
-	for r in items_requests:
-		item = r.get("item_code")
-		if not item:
+	for row in items_requests:
+		item_code = row.get("item_code")
+		if not item_code:
 			continue
 
-		required = flt(r.get("required_qty") or 0)
-		ordered = flt(r.get("ordered_qty") or 0)
+		required = flt(row.get("required_qty") or 0)
+		ordered = flt(row.get("ordered_qty") or 0)
 		pending = max(0, required - ordered)
 
 		if pending > 0:
-			items_needed[item] = items_needed.get(item, 0) + pending
+			items_needed[item_code] = items_needed.get(item_code, 0) + pending
 	if not items_needed:
 		return []
 	supplier_list_query = (
@@ -215,41 +215,41 @@ def get_data(filters):
 
 	results = []
 
-	item_remaining = {item: qty for item, qty in items_needed.items()}
+	item_remaining = {item_code: qty for item_code, qty in items_needed.items()}
 
-	for s in supplier_list:
-		item_code = s["item"]
+	for supplier_item in supplier_list:
+		item_code = supplier_item["item"]
 
 		remaining = item_remaining.get(item_code, 0)
 		if remaining <= 0:
 			continue
 
 		total_required = items_needed[item_code]
-		available_stock = s["stock_qty"]
+		available_stock = supplier_item["stock_qty"]
 
 		allocated = min(available_stock, remaining)
 
 		item_remaining[item_code] = remaining - allocated
 
-		offers = offers_by_parent.get(s["name"], [])
+		offers = offers_by_parent.get(supplier_item["name"], [])
 
 		item_qty_data = free_qty_map.get(item_code, {})
 		row = {
 			"po_history": "",
 			"item_code": item_code,
-			"description": s["description"],
+			"description": supplier_item["description"],
 			"actual_qty": item_qty_data.get("actual_qty", 0),
 			"free_qty": item_qty_data.get("free_qty", 0),
 			"total_required_qty": total_required,
-			"supplier": s["supplier"],
-			"supplier_uom": s["uom"],
+			"supplier": supplier_item["supplier"],
+			"supplier_uom": supplier_item["uom"],
 			"available_stock": available_stock,
 			"allocated_qty": allocated,
 			"remaining_qty": remaining - allocated,
-			"unit_price": s["unit_price"],
-			"last_purchase_rate": last_purchase_rate_map.get((item_code, s["supplier"]), "NA"),
-			"ref_doc": s["name"],
-			"supplier_rank": s["rank"],
+			"unit_price": supplier_item["unit_price"],
+			"last_purchase_rate": last_purchase_rate_map.get((item_code, supplier_item["supplier"]), "NA"),
+			"ref_doc": supplier_item["name"],
+			"supplier_rank": supplier_item["rank"],
 			"offers": offers,
 		}
 		for i, offer in enumerate(offers):
@@ -293,9 +293,9 @@ def create_purchase_orders_from_report(selected_items: str | list[dict]):
 			if po:
 				created_pos.append(po.name)
 
-		except Exception as e:
-			frappe.log_error(f"Error creating PO for {supplier}: {e!s}")
-			frappe.throw(_("Error creating Purchase Order for {0}: {1}").format(supplier, str(e)))
+		except Exception as error:
+			frappe.log_error(f"Error creating PO for {supplier}: {error!s}")
+			frappe.throw(_("Error creating Purchase Order for {0}: {1}").format(supplier, str(error)))
 
 	return {
 		"success": True,
@@ -454,8 +454,8 @@ def get_last_purchase_rate_map(supplier_list):
 	po = DocType("Purchase Order")
 	po_item = DocType("Purchase Order Item")
 
-	items = list({s["item"] for s in supplier_list})
-	suppliers = list({s["supplier"] for s in supplier_list})
+	items = list({supplier_item["item"] for supplier_item in supplier_list})
+	suppliers = list({supplier_item["supplier"] for supplier_item in supplier_list})
 
 	results = (
 		frappe.qb.from_(po)
@@ -473,10 +473,10 @@ def get_last_purchase_rate_map(supplier_list):
 	).run(as_dict=True)
 
 	rate_map = {}
-	for r in results:
-		key = (r["item_code"], r["supplier"])
+	for row in results:
+		key = (row["item_code"], row["supplier"])
 		if key not in rate_map:
-			rate_map[key] = r["rate"]
+			rate_map[key] = row["rate"]
 
 	return rate_map
 
@@ -484,7 +484,7 @@ def get_last_purchase_rate_map(supplier_list):
 def get_offers_by_supplier(supplier_list):
 	supplier_offer = DocType("Supplier Offer")
 	offers_by_parent = {}
-	parent_names = [s["name"] for s in supplier_list]
+	parent_names = [supplier_item["name"] for supplier_item in supplier_list]
 	offers_data = (
 		frappe.qb.from_(supplier_offer)
 		.select(supplier_offer.parent, supplier_offer.offer, supplier_offer.idx)

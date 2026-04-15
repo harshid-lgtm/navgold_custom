@@ -4,6 +4,14 @@ from frappe.query_builder.functions import Sum
 from frappe.utils import flt
 from frappe.utils.caching import redis_cache
 
+BATCH_SIZE = 500
+
+
+def bulk_set_value(doctype: str, names: list, field: str, value, batch_size: int = BATCH_SIZE):
+	for i in range(0, len(names), batch_size):
+		batch = names[i : i + batch_size]
+		frappe.db.set_value(doctype, {"name": ["in", batch]}, field, value)
+
 
 def get_free_qty_map(item_codes: list[str]) -> dict[str, dict[str, float]]:
 	if not item_codes:
@@ -35,7 +43,10 @@ def get_free_qty_map(item_codes: list[str]) -> dict[str, dict[str, float]]:
 
 
 @redis_cache()
+@frappe.whitelist()
 def get_conversion_factor(item_code, uom):
+	if not uom or uom == "Nos":
+		return 1.0
 	conversion_factor = frappe.db.get_value(
 		"UOM Conversion Detail", {"parent": item_code, "uom": uom}, "conversion_factor"
 	)

@@ -25,7 +25,7 @@ async function load_items_and_boxes(frm) {
 	frm.clear_table('boxes');
 	frm.refresh_field('items');
 	frm.refresh_field('boxes');
-
+	// Each call can take upto 10 seconds so we run them simultaneously
 	const [items_response, boxes_response] = await Promise.all([
 		frappe.call({
 			method:

@@ -193,7 +193,6 @@ def add_scanned_po_item_to_pr(
 						item.get("qty", 0)
 					)
 
-	# Get all PO line items for this item, ordered by idx
 	po_items = frappe.db.get_all(
 		"Purchase Order Item",
 		filters={

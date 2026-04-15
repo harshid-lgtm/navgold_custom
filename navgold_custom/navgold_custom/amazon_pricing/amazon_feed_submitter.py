@@ -10,6 +10,7 @@ from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import (
 	validate_pricing_feed,
 )
 from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import Feeds
+from navgold_custom.navgold_custom.utils import bulk_set_value
 
 PRICING_FEED_TYPE = "JSON_LISTINGS_FEED"
 
@@ -72,12 +73,8 @@ def submit_pricing(pricing_names: list, test_mode: bool = False) -> dict:
 		log.submitted_at = now_datetime()
 		log.save()
 
-		for pricing_name in pricing_names:
-			frappe.db.set_value(
-				"Amazon Product Pricing",
-				pricing_name,
-				{"amazon_sync_status": "Submitted", "last_amazon_sync": now_datetime()},
-			)
+		bulk_set_value("Amazon Product Pricing", pricing_names, "amazon_sync_status", "Submitted")
+		bulk_set_value("Amazon Product Pricing", pricing_names, "last_amazon_sync", now_datetime())
 
 		return {
 			"success": True,
@@ -92,8 +89,7 @@ def submit_pricing(pricing_names: list, test_mode: bool = False) -> dict:
 		log.error_message = str(e)
 		log.save()
 
-		for pricing_name in pricing_names:
-			frappe.db.set_value("Amazon Product Pricing", pricing_name, "amazon_sync_status", "Error")
+		bulk_set_value("Amazon Product Pricing", pricing_names, "amazon_sync_status", "Error")
 
 		frappe.log_error(f"Amazon feed submission error: {e!s}", "Amazon Pricing Submission")
 
@@ -104,7 +100,7 @@ def check_feed_status(log_name: str) -> dict:
 	log = frappe.get_cached_doc("Amazon Pricing Submission Log", log_name)
 
 	if not log.feed_id:
-		return {"success": False, "error": "No feed ID found"}
+		frappe.throw(_("No feed ID found for log {0}").format(log_name))
 
 	feeds_client = get_feeds_client()
 
@@ -114,6 +110,8 @@ def check_feed_status(log_name: str) -> dict:
 		processing_status = feed_status.get("processingStatus")
 		log.amazon_status = processing_status
 		log.save()
+
+		pricing_names = [p.strip() for p in log.pricing_records.split("\n") if p.strip()]
 
 		if processing_status == "DONE":
 			log.status = "Completed"
@@ -125,28 +123,32 @@ def check_feed_status(log_name: str) -> dict:
 
 			log.save()
 
-			for pricing_name in log.pricing_records.split("\n"):
-				if pricing_name.strip():
-					frappe.db.set_value(
-						"Amazon Product Pricing", pricing_name.strip(), "amazon_sync_status", "Submitted"
-					)
+			if pricing_names:
+				frappe.db.set_value(
+					"Amazon Product Pricing",
+					{"name": ["in", pricing_names]},
+					"amazon_sync_status",
+					"Submitted",
+				)
 
 		elif processing_status in ["CANCELLED", "FATAL"]:
 			log.status = "Error"
 			log.error_message = f"Feed processing failed: {processing_status}"
 			log.save()
 
-			for pricing_name in log.pricing_records.split("\n"):
-				if pricing_name.strip():
-					frappe.db.set_value(
-						"Amazon Product Pricing", pricing_name.strip(), "amazon_sync_status", "Error"
-					)
+			if pricing_names:
+				frappe.db.set_value(
+					"Amazon Product Pricing",
+					{"name": ["in", pricing_names]},
+					"amazon_sync_status",
+					"Error",
+				)
 
-		return {"success": True, "status": processing_status, "feed_status": feed_status}
+		return {"status": processing_status, "feed_status": feed_status}
 
 	except Exception as e:
-		frappe.log_error(f"Feed status check error: {e!s}", "Amazon Pricing")
-		return {"success": False, "error": str(e)}
+		frappe.log_error(f"Feed status check error for {log_name}: {e!s}", "Amazon Pricing")
+		frappe.throw(_("Failed to check feed status: {0}").format(str(e)))
 
 
 @frappe.whitelist()

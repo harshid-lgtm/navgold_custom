@@ -11,6 +11,8 @@ from frappe import _
 from frappe.integrations.utils import make_get_request, make_post_request
 from frappe.utils import flt, now_datetime
 
+from navgold_custom.navgold_custom.utils import bulk_set_value
+
 REPRICER_API_BASE = "https://api.repricer.com/v1/repricers"
 
 
@@ -51,14 +53,12 @@ def sync_to_repricer(pricing_names: list) -> dict:
 
 	client = RepricerClient()
 
-	# Create submission log
 	log = frappe.new_doc("Amazon Pricing Submission Log")
 	log.submission_type = "Repricer"
 	log.status = "Pending"
 	log.pricing_records = "\n".join(pricing_names)
 	log.insert()
 
-	# Batch fetch all data upfront to avoid N+1 queries
 	pricing_records = {
 		row.name: row
 		for row in frappe.get_all(
@@ -92,7 +92,7 @@ def sync_to_repricer(pricing_names: list) -> dict:
 			fields=["name", "repricer_rule"],
 		)
 	}
-
+	# We could have used get_all with filters but we will loose the reason
 	products_to_update = []
 	errors = []
 	for pricing_name in pricing_names:
@@ -148,36 +148,30 @@ def sync_to_repricer(pricing_names: list) -> dict:
 		log.status = "Error"
 		log.error_message = "No valid products to sync\n" + "\n".join(errors)
 		log.save()
-		return {"success": False, "error": "No valid products to sync", "errors": errors}
+		frappe.throw(_("No valid products to sync"))
 
 	try:
-		# Bulk update to Repricer.com
 		csv_data = dict_list_to_csv(products_to_update)
 		response = client.post_repricer_data(csv_data)
-		log.status = "Completed"
-		log.completed_at = now_datetime()
-		log.feed_content = csv_data
-		log.response_content = frappe.as_json(response)
-		log.save()
-
-		# Update pricing records
-		errored_names = {e.split(":")[0] for e in errors}
-		for pricing_name in pricing_names:
-			if pricing_name not in errored_names:
-				frappe.db.set_value(
-					"Amazon Product Pricing", pricing_name, "last_repricer_sync", now_datetime()
-				)
-
-		return {"success": True, "synced": len(products_to_update), "errors": errors, "log_name": log.name}
-
 	except Exception as e:
 		log.status = "Error"
 		log.error_message = str(e)
 		log.save()
-
 		frappe.log_error(f"Repricer sync error: {e!s}", "Repricer Sync")
+		frappe.throw(_("Repricer sync failed: {0}").format(str(e)))
 
-		return {"success": False, "error": str(e), "errors": errors, "log_name": log.name}
+	log.status = "Completed"
+	log.completed_at = now_datetime()
+	log.feed_content = csv_data
+	log.response_content = frappe.as_json(response)
+	log.save()
+
+	errored_names = {e.split(":")[0] for e in errors}
+	synced_names = [name for name in pricing_names if name not in errored_names]
+	if synced_names:
+		bulk_set_value("Amazon Product Pricing", synced_names, "last_repricer_sync", now_datetime())
+
+	return {"synced": len(products_to_update), "errors": errors, "log_name": log.name}
 
 
 @frappe.whitelist()

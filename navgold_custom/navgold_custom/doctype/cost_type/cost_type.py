@@ -26,7 +26,6 @@ class CostType(Document):
 		self.validate_type_flags()
 
 	def validate_type_flags(self):
-		"""Ensure only one of is_absolute, is_relative, or is_vat is set"""
 		flags = [self.is_absolute, self.is_relative, self.is_vat]
 		if sum(flags) > 1:
 			frappe.throw(_("Only one of 'Is Absolute', 'Is Relative', or 'Is VAT' can be selected"))

@@ -9,7 +9,7 @@ from frappe.query_builder import DocType
 from frappe.query_builder.functions import Count
 from frappe.utils import add_days, getdate, today
 from frappe.utils.caching import redis_cache
-from frappe.utils.data import cint, flt, orjson_dumps
+from frappe.utils.data import cint, cstr, flt, orjson_dumps
 
 from navgold_custom.navgold_custom.amazon_pricing.strategy_selector import get_stock_info
 
@@ -144,7 +144,7 @@ def get_sku_inventory_data(
 	restock_date = None
 	if stock_info.get("has_restock_date", False):
 		po_date = stock_info.get("restock_date")
-		restock_date = str(po_date) if po_date else str(add_days(today(), lead_time_days))
+		restock_date = cstr(po_date) if po_date else cstr(add_days(today(), lead_time_days))
 
 	shipping_group = SHIPPING_GROUPS["sfp"] if is_sfp else SHIPPING_GROUPS["main_revised"]
 
@@ -175,11 +175,10 @@ def get_zero_stock_proxy_skus() -> set | None:
 	return None
 
 
-def build_inventory_patches(inv: dict, marketplace_id: str) -> list:
+def build_inventory_patches(inventory_data: dict, marketplace_id: str) -> list:
 	patches = []
 
-	if inv["is_fba"]:
-		# FBA: switch to AMAZON_EU channel
+	if inventory_data["is_fba"]:
 		patches.append(
 			{
 				"op": "add",
@@ -195,14 +194,13 @@ def build_inventory_patches(inv: dict, marketplace_id: str) -> list:
 			}
 		)
 	else:
-		# MFN: set stock quantity, optional restock date and lead time
 		fulfillment_value = {
-			"quantity": inv["quantity"],
+			"quantity": inventory_data["quantity"],
 			"fulfillment_channel_code": "DEFAULT",
-			"lead_time_to_ship_max_days": inv["lead_time_days"],
+			"lead_time_to_ship_max_days": inventory_data["lead_time_days"],
 		}
-		if inv.get("restock_date"):
-			fulfillment_value["restock_date"] = inv["restock_date"]
+		if inventory_data.get("restock_date"):
+			fulfillment_value["restock_date"] = inventory_data["restock_date"]
 
 		patches.append(
 			{
@@ -212,17 +210,15 @@ def build_inventory_patches(inv: dict, marketplace_id: str) -> list:
 			}
 		)
 
-		# Merchant shipping group
-		if inv.get("shipping_group"):
+		if inventory_data.get("shipping_group"):
 			patches.append(
 				{
 					"op": "replace",
 					"path": "/attributes/merchant_shipping_group",
-					"value": [{"value": inv["shipping_group"], "marketplace_id": marketplace_id}],
+					"value": [{"value": inventory_data["shipping_group"], "marketplace_id": marketplace_id}],
 				}
 			)
 
-		# Delete FBA channel for MFN items
 		patches.append(
 			{
 				"op": "delete",
@@ -283,15 +279,14 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 			},
 		]
 
-		# Get inventory data and build fulfillment patches
 		try:
-			inv = get_sku_inventory_data(pricing, zero_stock_proxy_skus, proxy_sku_info)
+			inventory_data = get_sku_inventory_data(pricing, zero_stock_proxy_skus, proxy_sku_info)
 		except Exception as e:
 			frappe.log_error(f"Skipping inventory patches for {pricing.name}: {e!s}", "Amazon Feed Builder")
-			inv = None
+			inventory_data = None
 
-		if inv:
-			patches.extend(build_inventory_patches(inv, marketplace_id))
+		if inventory_data:
+			patches.extend(build_inventory_patches(inventory_data, marketplace_id))
 
 		message = {
 			"messageId": message_id,
@@ -338,42 +333,42 @@ def validate_pricing_feed(json_content: str) -> dict:
 	if message_count == 0:
 		errors.append("No messages found in feed")
 
-	for i, message in enumerate(messages, start=1):
+	for message_index, message in enumerate(messages, start=1):
 		if not message.get("messageId"):
-			errors.append(f"Message {i}: Missing messageId")
+			errors.append(f"Message {message_index}: Missing messageId")
 
 		if not message.get("sku"):
-			errors.append(f"Message {i}: Missing sku")
+			errors.append(f"Message {message_index}: Missing sku")
 
 		if message.get("operationType") != "PATCH":
-			errors.append(f"Message {i}: operationType must be 'PATCH'")
+			errors.append(f"Message {message_index}: operationType must be 'PATCH'")
 
 		if not message.get("productType"):
-			errors.append(f"Message {i}: Missing productType")
+			errors.append(f"Message {message_index}: Missing productType")
 
 		patches = message.get("patches", [])
 		if not patches:
-			errors.append(f"Message {i}: No patches found")
+			errors.append(f"Message {message_index}: No patches found")
 
 		has_purchasable_offer = False
 		has_fulfillment_availability = False
-		for j, patch in enumerate(patches, start=1):
+		for patch_index, patch in enumerate(patches, start=1):
 			op = patch.get("op")
 			if not op:
-				errors.append(f"Message {i}, Patch {j}: Missing op")
+				errors.append(f"Message {message_index}, Patch {patch_index}: Missing op")
 			elif op not in ("replace", "add", "delete"):
-				errors.append(f"Message {i}, Patch {j}: Invalid op '{op}'")
+				errors.append(f"Message {message_index}, Patch {patch_index}: Invalid op '{op}'")
 
 			if not patch.get("path"):
-				errors.append(f"Message {i}, Patch {j}: Missing path")
+				errors.append(f"Message {message_index}, Patch {patch_index}: Missing path")
 			if "value" not in patch:
-				errors.append(f"Message {i}, Patch {j}: Missing value")
+				errors.append(f"Message {message_index}, Patch {patch_index}: Missing value")
 			else:
 				value = patch["value"]
 				if not isinstance(value, list):
-					errors.append(f"Message {i}, Patch {j}: value must be an array")
+					errors.append(f"Message {message_index}, Patch {patch_index}: value must be an array")
 				elif len(value) == 0:
-					errors.append(f"Message {i}, Patch {j}: value array is empty")
+					errors.append(f"Message {message_index}, Patch {patch_index}: value array is empty")
 
 			path = patch.get("path", "")
 
@@ -381,26 +376,26 @@ def validate_pricing_feed(json_content: str) -> dict:
 				has_purchasable_offer = True
 				offer = patch["value"][0] if isinstance(patch.get("value"), list) and patch["value"] else {}
 				if not offer.get("our_price"):
-					errors.append(f"Message {i}: Missing our_price in purchasable_offer")
+					errors.append(f"Message {message_index}: Missing our_price in purchasable_offer")
 
 			if path == "/attributes/fulfillment_availability" and op in ("add", "replace"):
 				has_fulfillment_availability = True
-				fa_value = (
+				fulfillment_availability_value = (
 					patch["value"][0] if isinstance(patch.get("value"), list) and patch["value"] else {}
 				)
-				if not fa_value.get("fulfillment_channel_code"):
+				if not fulfillment_availability_value.get("fulfillment_channel_code"):
 					errors.append(
-						f"Message {i}: Missing fulfillment_channel_code in fulfillment_availability"
+						f"Message {message_index}: Missing fulfillment_channel_code in fulfillment_availability"
 					)
-				if fa_value.get("fulfillment_channel_code") == "DEFAULT":
-					qty = fa_value.get("quantity")
+				if fulfillment_availability_value.get("fulfillment_channel_code") == "DEFAULT":
+					qty = fulfillment_availability_value.get("quantity")
 					if qty is not None and qty < 0:
-						errors.append(f"Message {i}: quantity must be non-negative for MFN items")
+						errors.append(f"Message {message_index}: quantity must be non-negative for MFN items")
 
 		if not has_purchasable_offer:
-			errors.append(f"Message {i}: Missing purchasable_offer patch")
+			errors.append(f"Message {message_index}: Missing purchasable_offer patch")
 
 		if not has_fulfillment_availability:
-			errors.append(f"Message {i}: Missing fulfillment_availability patch")
+			errors.append(f"Message {message_index}: Missing fulfillment_availability patch")
 
 	return {"valid": len(errors) == 0, "message_count": message_count, "errors": errors}

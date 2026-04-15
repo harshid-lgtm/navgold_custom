@@ -152,7 +152,6 @@ def get_data(filters):
 				"po_uom": po_row["po_uom"],
 			}
 
-	# Batch-fetch conversion factors for all unique (item, uom) pairs
 	uom_conversion_detail = DocType("UOM Conversion Detail")
 	all_item_uom_pairs = set()
 	for row in mr_rows:

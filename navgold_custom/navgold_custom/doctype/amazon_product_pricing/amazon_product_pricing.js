@@ -4,54 +4,45 @@
 frappe.ui.form.on('Amazon Product Pricing', {
 	refresh(frm) {
 		if (!frm.is_new()) {
-			// Add Submit to Amazon button
 			frm.add_custom_button(
 				__('Submit to Amazon'),
-				() => {
-					frappe.confirm(
+				async () => {
+					const confirmed = await navgold.confirm_dialog(
 						__('Are you sure you want to submit this pricing to Amazon?'),
-						() => {
-							frm.call({
-								method: 'submit_to_amazon',
-								doc: frm.doc,
-								freeze: true,
-								freeze_message: __('Submitting to Amazon...'),
-								callback: (r) => {
-									if (r.message) {
-										frappe.msgprint(
-											__('Pricing submitted to Amazon successfully'),
-										);
-										frm.reload_doc();
-									}
-								},
-							});
-						},
 					);
+					if (!confirmed) return;
+
+					const response = await frm.call({
+						method: 'submit_to_amazon',
+						doc: frm.doc,
+						freeze: true,
+						freeze_message: __('Submitting to Amazon...'),
+					});
+					if (response.message) {
+						frappe.msgprint(__('Pricing submitted to Amazon successfully'));
+						frm.reload_doc();
+					}
 				},
 				__('Actions'),
 			);
 
-			// Add Sync to Repricer button
 			frm.add_custom_button(
 				__('Sync to Repricer'),
-				() => {
-					frm.call({
+				async () => {
+					const response = await frm.call({
 						method: 'sync_to_repricer',
 						doc: frm.doc,
 						freeze: true,
 						freeze_message: __('Syncing to Repricer...'),
-						callback: (r) => {
-							if (r.message) {
-								frappe.msgprint(__('Pricing synced to Repricer successfully'));
-								frm.reload_doc();
-							}
-						},
 					});
+					if (response.message) {
+						frappe.msgprint(__('Pricing synced to Repricer successfully'));
+						frm.reload_doc();
+					}
 				},
 				__('Actions'),
 			);
 
-			// Add Create Strategy button
 			frm.add_custom_button(
 				__('Create Strategy'),
 				() => {
@@ -62,7 +53,6 @@ frappe.ui.form.on('Amazon Product Pricing', {
 				__('Actions'),
 			);
 
-			// Add Apply Template button
 			frm.add_custom_button(
 				__('Apply Strategy Template'),
 				() => {
@@ -77,8 +67,8 @@ frappe.ui.form.on('Amazon Product Pricing', {
 								'This will create all 4 strategies (FBA, SFP, Backorder, Default) from the template',
 							),
 						},
-						(values) => {
-							frappe.call({
+						async (values) => {
+							const response = await frappe.call({
 								method:
 									'navgold_custom.navgold_custom.amazon_pricing.template_applicator.apply_template_to_pricing',
 								args: {
@@ -87,19 +77,17 @@ frappe.ui.form.on('Amazon Product Pricing', {
 								},
 								freeze: true,
 								freeze_message: __('Creating strategies from template...'),
-								callback: (r) => {
-									if (r.message?.success) {
-										frappe.msgprint({
-											title: __('Template Applied'),
-											message: __('Created {0} strategies successfully', [
-												r.message.strategies_created,
-											]),
-											indicator: 'green',
-										});
-										frm.reload_doc();
-									}
-								},
 							});
+							if (response.message?.success) {
+								frappe.msgprint({
+									title: __('Template Applied'),
+									message: __('Created {0} strategies successfully', [
+										response.message.strategies_created,
+									]),
+									indicator: 'green',
+								});
+								frm.reload_doc();
+							}
 						},
 						__('Apply Strategy Template'),
 						__('Apply'),
@@ -109,7 +97,6 @@ frappe.ui.form.on('Amazon Product Pricing', {
 			);
 		}
 
-		// Set query filters for strategy fields - filter by proxy_sku
 		const strategy_fields = [
 			'fba_strategy',
 			'sfp_strategy',

@@ -30,7 +30,6 @@ class AmazonStrategyTemplate(Document):
 		self.validate_strategy_types()
 
 	def validate_single_default(self):
-		"""Ensure only one default template"""
 		if self.is_default:
 			existing = frappe.db.exists(
 				"Amazon Strategy Template", {"is_default": 1, "name": ("!=", self.name)}
@@ -44,20 +43,16 @@ class AmazonStrategyTemplate(Document):
 				)
 
 	def validate_strategy_types(self):
-		"""Validate that each strategy type appears at most once"""
-		strategy_types = [s.strategy_type for s in self.strategies]
+		strategy_types = [template_item.strategy_type for template_item in self.strategies]
 		if len(strategy_types) != len(set(strategy_types)):
 			frappe.throw(_("Each strategy type (FBA, SFP, Backorder, Default) can only appear once"))
 
 	@frappe.whitelist()
 	def apply_to_pricing(self, pricing_name: str):
-		"""Apply this template to an Amazon Product Pricing record"""
-		pricing = frappe.get_doc("Amazon Product Pricing", pricing_name)
+		pricing = frappe.get_cached_doc("Amazon Product Pricing", pricing_name)
 
-		# Create strategies for each template item
 		strategy_map = {}
 		for template_strategy in self.strategies:
-			# Create new strategy linked to the Proxy SKU
 			strategy = frappe.new_doc("Amazon Product Strategy")
 			strategy.strategy_name = template_strategy.strategy_name
 			strategy.proxy_sku = pricing.proxy_sku
@@ -66,20 +61,19 @@ class AmazonStrategyTemplate(Document):
 			strategy.repricer_rule = template_strategy.repricer_rule
 			strategy.is_active = 1
 
-			# Apply cost set template if specified
 			if template_strategy.cost_set_template:
-				cost_template = frappe.get_doc(
+				cost_template = frappe.get_cached_doc(
 					"Amazon Cost Set Template", template_strategy.cost_set_template
 				)
-				for cost in cost_template.costs:
+				for cost_item in cost_template.costs:
 					strategy.append(
 						"costs",
 						{
-							"cost_type": cost.cost_type,
-							"cost_sub_type": cost.cost_sub_type,
-							"value": cost.default_value,
-							"is_active": cost.is_active,
-							"rank": cost.rank,
+							"cost_type": cost_item.cost_type,
+							"cost_sub_type": cost_item.cost_sub_type,
+							"value": cost_item.default_value,
+							"is_active": cost_item.is_active,
+							"rank": cost_item.rank,
 							"source": "Manual",
 						},
 					)
@@ -87,7 +81,6 @@ class AmazonStrategyTemplate(Document):
 			strategy.insert()
 			strategy_map[template_strategy.strategy_type] = strategy.name
 
-		# Link strategies to pricing
 		if "FBA" in strategy_map:
 			pricing.fba_strategy = strategy_map["FBA"]
 		if "SFP" in strategy_map:
@@ -99,4 +92,4 @@ class AmazonStrategyTemplate(Document):
 
 		pricing.save()
 
-		return {"success": True, "pricing": pricing_name, "strategies_created": len(strategy_map)}
+		return {"pricing": pricing_name, "strategies_created": len(strategy_map)}

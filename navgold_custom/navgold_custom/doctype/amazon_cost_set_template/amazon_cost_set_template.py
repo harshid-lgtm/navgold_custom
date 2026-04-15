@@ -29,7 +29,6 @@ class AmazonCostSetTemplate(Document):
 		self.validate_single_default()
 
 	def validate_single_default(self):
-		"""Ensure only one default template"""
 		if self.is_default:
 			existing = frappe.db.exists(
 				"Amazon Cost Set Template", {"is_default": 1, "name": ("!=", self.name)}
@@ -44,13 +43,10 @@ class AmazonCostSetTemplate(Document):
 
 	@frappe.whitelist()
 	def apply_to_strategy(self, strategy_name: str):
-		"""Apply this template's costs to an Amazon Product Strategy"""
 		strategy = frappe.get_doc("Amazon Product Strategy", strategy_name)
 
-		# Clear existing costs
 		strategy.costs = []
 
-		# Add costs from template
 		for template_cost in self.costs:
 			strategy.append(
 				"costs",

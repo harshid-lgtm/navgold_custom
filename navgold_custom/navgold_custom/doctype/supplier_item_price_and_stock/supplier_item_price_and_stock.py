@@ -74,7 +74,6 @@ class SupplierItemPriceandStock(Document):
 		self.item_price = item_price.name
 
 	def validate(self):
-		# Item - Supplier combo should be unique
 		if getattr(self.flags, "single_entry", True):
 			if frappe.db.exists(
 				"Supplier Item Price And Stock",
@@ -122,9 +121,9 @@ def run_update_supplier_rank():
 	if not records:
 		return
 
-	supplier_ranks = {}
 	supplier_ranks = {
-		s.name: s.custom_rank or 0 for s in frappe.get_all("Supplier", fields=["name", "custom_rank"])
+		supplier.name: supplier.custom_rank or 0
+		for supplier in frappe.get_all("Supplier", fields=["name", "custom_rank"])
 	}
 
 	groups = defaultdict(list)
@@ -148,22 +147,11 @@ def run_update_supplier_rank():
 
 		for group_records in groups.values():
 			update_rank_by_unit_price(group_records)
-	except Exception as e:
-		frappe.log_error(title="Error updating supplier rank", message=e)
+	except Exception as error:
+		frappe.log_error(title="Error updating supplier rank", message=error)
 
 
 def update_rank_by_unit_price(group_records):
-	"""
-	Rank suppliers by price, using supplier's custom_rank as tiebreaker.
-
-	Sorting logic:
-	- Primary: price (ascending, lowest price = best rank)
-	- Secondary (tiebreaker): supplier_custom_rank (ascending, but 0 goes last)
-
-	For ties handling: if sorted prices are [10, 10, 20, 30, 30], ranks are [1, 1, 2, 3, 3]
-	With custom_rank tiebreaker, same-price items with different custom_ranks get sequential ranks.
-	"""
-
 	def sort_key(record):
 		price = record.price or 0
 		custom_rank = record.supplier_custom_rank or 0

@@ -12,7 +12,6 @@ from navgold_custom.navgold_custom.utils import get_free_qty_map
 
 def select_strategy(pricing_doc) -> str | None:
 	stock_info = get_stock_info(pricing_doc.proxy_sku)
-	# Get all set strategies
 	all_strategies = [
 		strategy
 		for strategy in [
@@ -34,7 +33,7 @@ def select_strategy(pricing_doc) -> str | None:
 			pluck="name",
 		)
 	)
-
+	# return pricing_doc.backorder_strategy
 	# Priority 1: FBA Strategy
 	if pricing_doc.fba_strategy in active_strategies and stock_info.get("fba_stock", 0) > 0:
 		return pricing_doc.fba_strategy
@@ -42,10 +41,10 @@ def select_strategy(pricing_doc) -> str | None:
 	# Priority 2: SFP Strategy (Seller Fulfilled Prime, when no restock date)
 	if pricing_doc.sfp_strategy in active_strategies and not stock_info.get("has_restock_date", False):
 		return pricing_doc.sfp_strategy
-
 	# Priority 3: Backorder Strategy (when has restock date)
 	if pricing_doc.backorder_strategy in active_strategies and stock_info.get("has_restock_date", False):
 		return pricing_doc.backorder_strategy
+
 	# Priority 4: Default Strategy (fallback)
 	if pricing_doc.default_strategy in active_strategies:
 		return pricing_doc.default_strategy
@@ -53,6 +52,7 @@ def select_strategy(pricing_doc) -> str | None:
 	return None
 
 
+# Don't account for material request
 def get_stock_info(proxy_sku: str) -> dict:
 	"""
 	This function checks:
@@ -67,7 +67,6 @@ def get_stock_info(proxy_sku: str) -> dict:
 	fba_stock = 0
 	mfn_stock = 0
 
-	# Calculate stock from Bin table
 	if sp_api_settings.afn_warehouse:
 		afn_qty = (
 			frappe.db.get_value(
@@ -77,11 +76,9 @@ def get_stock_info(proxy_sku: str) -> dict:
 		)
 		fba_stock += afn_qty
 
-	# MFN stock (All warehouse)
 	mfn_qty = get_free_qty_map([proxy.item]).get(proxy.item, {}).get("free_qty", 0)
 	mfn_stock += mfn_qty
 
-	# Check for restock
 	restock_info = check_pending_restock(proxy.item)
 
 	return {
@@ -102,21 +99,6 @@ def check_pending_restock(item: str) -> dict:
 	- Open Purchase Orders with expected delivery date
 	"""
 
-	material_request = DocType("Material Request")
-	material_request_item = DocType("Material Request Item")
-
-	mr_count = (
-		frappe.qb.from_(material_request)
-		.join(material_request_item)
-		.on(material_request.name == material_request_item.parent)
-		.select(Count("*"))
-		.where(
-			(material_request.docstatus == 1)
-			& (material_request.status.notin(["Stopped", "Cancelled"]))
-			& (material_request_item.item_code == item)
-		)
-	).run()[0][0]
-
 	purchase_order = DocType("Purchase Order")
 	purchase_order_item = DocType("Purchase Order Item")
 
@@ -135,7 +117,7 @@ def check_pending_restock(item: str) -> dict:
 	).run(as_dict=True)
 
 	restock_date = po_items[0].schedule_date if po_items else None
-	has_restock = bool(mr_count) or bool(restock_date)
+	has_restock = bool(restock_date)
 
 	return {"has_restock": has_restock, "restock_date": restock_date}
 

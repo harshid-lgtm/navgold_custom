@@ -172,7 +172,7 @@ def purchase_sfp_shipping_label(
 	if not label_content:
 		frappe.throw(_("Label document not found in purchase response for shipment {0}.").format(shipment_id))
 
-	file_extension = "pdf" if label_format == "PDF" else label_format.lower()
+	file_extension = label_format.lower()
 	file_name = f"SFP-{packing_slip_doc.name}-{shipment_id}.{file_extension}"
 	file_doc = frappe.get_doc(
 		{
@@ -230,6 +230,7 @@ def build_required_vas(rate: dict) -> list:
 
 
 # Use of base64 instead of Download URL because label is encoded directly in the response
+# We return 3 None because so the tuple doesn't blow up without label
 def extract_label_from_purchase(purchase_payload: dict) -> tuple:
 	package_details = (purchase_payload or {}).get("packageDocumentDetails") or []
 	for package in package_details:

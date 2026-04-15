@@ -140,18 +140,3 @@ def get_already_packed_qty(stock_entry: str):
 		packed_map[key] = flt(packed_map.get(key, 0)) + flt(item.qty)
 
 	return packed_map
-
-
-@frappe.whitelist()
-@redis_cache(ttl=300)
-def get_singles_conversion_factor(item_code: str, uom: str = "Nos"):
-	if not uom or uom == "Nos":
-		return 1.0
-
-	conversion_factor = frappe.db.get_value(
-		"UOM Conversion Detail",
-		{"parent": item_code, "parenttype": "Item", "uom": uom},
-		"conversion_factor",
-	)
-
-	return flt(conversion_factor) or 1.0

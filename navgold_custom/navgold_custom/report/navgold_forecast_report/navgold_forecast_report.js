@@ -89,7 +89,7 @@ frappe.query_reports['Navgold Forecast Report'] = {
 			const items_with_qty =
 				forecast_report_state.get_items_with_edited_quantities(selected_rows);
 			const valid_items = items_with_qty.filter(
-				(r) => parseFloat(r.quantity_to_transfer) > 0,
+				(row) => parseFloat(row.quantity_to_transfer) > 0,
 			);
 			if (valid_items.length === 0) {
 				frappe.msgprint(
@@ -101,76 +101,6 @@ frappe.query_reports['Navgold Forecast Report'] = {
 			}
 			return valid_items;
 		};
-
-		// report.page.add_inner_button(__('Create Material Request'), () => {
-		// 	const valid_items = get_valid_items();
-		// 	if (!valid_items) return;
-
-		// 	frappe.confirm(
-		// 		__('Create Material Request for {0} items?', [valid_items.length]),
-		// 		async () => {
-		// 			try {
-		// 				const response = await frappe.call({
-		// 					method: 'navgold_custom.navgold_custom.report.navgold_forecast_report.navgold_forecast_report.create_material_requests_from_forecast_report',
-		// 					args: { selected_items: valid_items },
-		// 					freeze: true,
-		// 					freeze_message: __('Creating Material Request...'),
-		// 				});
-
-		// 				if (response.message?.success) {
-		// 					const mr_name = response.message.material_request;
-		// 					frappe.msgprint({
-		// 						title: __('Material Request Created'),
-		// 						message: __('Created: <a href="/app/material-request/{0}" target="_blank">{0}</a>', [mr_name]),
-		// 						indicator: 'green',
-		// 					});
-		// 					forecast_report_state.edited_quantities = {};
-		// 					report.refresh();
-		// 				}
-		// 			} catch (error) {
-		// 				frappe.msgprint({ title: __('Error'), message: __('Failed to create Material Request. Check error log.'), indicator: 'red' });
-		// 			}
-		// 		},
-		// 	);
-		// });
-
-		// report.page.add_inner_button(__('Create Purchase Order'), () => {
-		// 	const valid_items = get_valid_items();
-		// 	if (!valid_items) return;
-
-		// 	const items_without_supplier = valid_items.filter((r) => !r.top_supplier);
-		// 	if (items_without_supplier.length > 0) {
-		// 		frappe.msgprint(__('Some selected items have no top supplier. They will be skipped.'));
-		// 	}
-
-		// 	frappe.confirm(
-		// 		__('Create Purchase Order(s) for {0} items?', [valid_items.length]),
-		// 		async () => {
-		// 			try {
-		// 				const response = await frappe.call({
-		// 					method: 'navgold_custom.navgold_custom.report.navgold_forecast_report.navgold_forecast_report.create_purchase_orders_from_forecast_report',
-		// 					args: { selected_items: valid_items },
-		// 					freeze: true,
-		// 					freeze_message: __('Creating Purchase Order(s)...'),
-		// 				});
-
-		// 				if (response.message?.success) {
-		// 					const po_names = response.message.purchase_orders;
-		// 					const links = po_names.map((name) => `<a href="/app/purchase-order/${name}" target="_blank">${name}</a>`).join(', ');
-		// 					frappe.msgprint({
-		// 						title: __('Purchase Order(s) Created'),
-		// 						message: __('Created: {0}', [links]),
-		// 						indicator: 'green',
-		// 					});
-		// 					forecast_report_state.edited_quantities = {};
-		// 					report.refresh();
-		// 				}
-		// 			} catch (error) {
-		// 				frappe.msgprint({ title: __('Error'), message: __('Failed to create Purchase Order. Check error log.'), indicator: 'red' });
-		// 			}
-		// 		},
-		// 	);
-		// });
 
 		report.page.add_inner_button(__('Create PO + Material Request'), () => {
 			const valid_items = get_valid_items();
@@ -340,7 +270,6 @@ window.edit_forecast_quantity = (button) => {
 
 			forecast_report_state.set_quantity(sku, new_qty);
 
-			// Update display in-place
 			const wrapper = button.closest('div');
 			if (wrapper) {
 				const span = wrapper.querySelector('span:first-child');
@@ -348,7 +277,6 @@ window.edit_forecast_quantity = (button) => {
 				button.setAttribute('data-qty', new_qty);
 			}
 
-			// Auto-check the row
 			const row_el = button.closest('.dt-row');
 			if (row_el) {
 				const checkbox = row_el.querySelector(

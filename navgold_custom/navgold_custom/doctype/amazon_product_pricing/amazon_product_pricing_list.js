@@ -24,60 +24,49 @@ frappe.listview_settings['Amazon Product Pricing'] = {
 	},
 
 	onload: (listview) => {
-		// Bulk Submit to Amazon action
-		listview.page.add_action_item(__('Submit to Amazon'), () => {
+		listview.page.add_action_item(__('Submit to Amazon'), async () => {
 			const selected = listview.get_checked_items();
 			if (selected.length === 0) {
 				frappe.msgprint(__('Please select at least one record'));
 				return;
 			}
 
-			const pricing_names = selected.map((d) => d.name);
+			const pricing_names = selected.map((doc) => doc.name);
 
-			frappe.confirm(
+			const confirmed = await navgold.confirm_dialog(
 				__('Submit {0} pricing record(s) to Amazon?', [pricing_names.length]),
-				() => {
-					frappe.call({
-						method:
-							'navgold_custom.navgold_custom.amazon_pricing.amazon_feed_submitter.bulk_submit_pricing',
-						args: {
-							pricing_names: JSON.stringify(pricing_names),
-						},
-						freeze: true,
-						freeze_message: __('Submitting to Amazon...'),
-						callback: (r) => {
-							if (r.message) {
-								if (r.message.success) {
-									frappe.msgprint(
-										__('Successfully submitted {0} products. Feed ID: {1}', [
-											r.message.message_count,
-											r.message.feed_id || 'N/A',
-										]),
-									);
-								} else {
-									frappe.msgprint(
-										__('Submission failed: {0}', [r.message.error]),
-									);
-								}
-								listview.refresh();
-							}
-						},
-					});
-				},
 			);
+			if (!confirmed) return;
+
+			const response = await frappe.call({
+				method:
+					'navgold_custom.navgold_custom.amazon_pricing.amazon_feed_submitter.bulk_submit_pricing',
+				args: {
+					pricing_names: JSON.stringify(pricing_names),
+				},
+				freeze: true,
+				freeze_message: __('Submitting to Amazon...'),
+			});
+
+			frappe.msgprint(
+				__('Successfully submitted {0} products. Feed ID: {1}', [
+					response.message.message_count,
+					response.message.feed_id || 'N/A',
+				]),
+			);
+			listview.refresh();
 		});
 
-		// Bulk Sync to Repricer action
-		listview.page.add_action_item(__('Sync to Repricer'), () => {
+		listview.page.add_action_item(__('Sync to Repricer'), async () => {
 			const selected = listview.get_checked_items();
 			if (selected.length === 0) {
 				frappe.msgprint(__('Please select at least one record'));
 				return;
 			}
 
-			const pricing_names = selected.map((d) => d.name);
+			const pricing_names = selected.map((doc) => doc.name);
 
-			frappe.call({
+			const response = await frappe.call({
 				method:
 					'navgold_custom.navgold_custom.amazon_pricing.repricer_client.bulk_sync_to_repricer',
 				args: {
@@ -85,42 +74,35 @@ frappe.listview_settings['Amazon Product Pricing'] = {
 				},
 				freeze: true,
 				freeze_message: __('Syncing to Repricer...'),
-				callback: (r) => {
-					if (r.message) {
-						if (r.message.success) {
-							frappe.msgprint(
-								__('Successfully synced {0} products to Repricer', [
-									r.message.synced,
-								]),
-							);
-						} else {
-							frappe.msgprint(__('Sync failed: {0}', [r.message.error]));
-						}
-						listview.refresh();
-					}
-				},
 			});
+
+			if (response.message) {
+				frappe.msgprint(
+					__('Successfully synced {0} products to Repricer', [
+						response.message.synced,
+					]),
+				);
+				listview.refresh();
+			}
 		});
 
-		// Bulk Refresh Strategies action
-		listview.page.add_action_item(__('Refresh Strategies'), () => {
-			frappe.call({
+		listview.page.add_action_item(__('Refresh Strategies'), async () => {
+			const response = await frappe.call({
 				method:
 					'navgold_custom.navgold_custom.amazon_pricing.strategy_selector.bulk_refresh_strategies',
 				freeze: true,
 				freeze_message: __('Refreshing strategies...'),
-				callback: (r) => {
-					if (r.message) {
-						frappe.msgprint(
-							__('Refreshed {0} records, {1} updated', [
-								r.message.total,
-								r.message.updated,
-							]),
-						);
-						listview.refresh();
-					}
-				},
 			});
+
+			if (response.message) {
+				frappe.msgprint(
+					__('Refreshed {0} records, {1} updated', [
+						response.message.total,
+						response.message.updated,
+					]),
+				);
+				listview.refresh();
+			}
 		});
 	},
 

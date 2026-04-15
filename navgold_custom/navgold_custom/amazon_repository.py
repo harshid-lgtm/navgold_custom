@@ -417,7 +417,7 @@ class AmazonRepository:
 
 
 @frappe.whitelist()
-def get_orders(last_updated_after, sync_selected_date_only=0):
+def get_orders(last_updated_after: str, sync_selected_date_only: int = 0):
 	repository = AmazonRepository()
 	result = repository.get_orders(last_updated_after, sync_selected_date_only)
 
@@ -427,6 +427,6 @@ def get_orders(last_updated_after, sync_selected_date_only=0):
 
 
 @frappe.whitelist()
-def get_order(amazon_order_ids):
+def get_order(amazon_order_ids: str):
 	repository = AmazonRepository()
 	return repository.get_order(amazon_order_ids)
