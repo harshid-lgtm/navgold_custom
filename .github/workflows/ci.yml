@@ -6,7 +6,6 @@ on:
     branches:
       - develop
       - main
-      - fix/amazon_unmapped_sku
   pull_request:
 
 concurrency:
