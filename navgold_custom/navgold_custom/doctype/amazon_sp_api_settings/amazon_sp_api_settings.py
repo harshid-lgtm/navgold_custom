@@ -12,6 +12,7 @@ import frappe
 from frappe import _
 from frappe.model.document import Document
 from frappe.utils import add_days, get_date_str, get_datetime, now_datetime, today
+from frappe.utils.background_jobs import is_job_enqueued
 
 from navgold_custom.navgold_custom.amazon_repository import (
 	get_orders,
@@ -109,14 +110,13 @@ class AmazonSPAPISettings(Document):
 			get_orders(last_updated_after=self.after_date)
 			return
 
-		job_name = "Get Amazon Orders"
-
-		if frappe.db.get_all("RQ Job", {"job_name": job_name, "status": ["in", ["queued", "started"]]}):
+		if is_job_enqueued("navgold.amazon_manual_order_sync"):
 			frappe.msgprint(_("The order details are currently being fetched in the background."))
 			return
 
 		frappe.enqueue(
-			job_name=job_name,
+			job_id="navgold.amazon_manual_order_sync",
+			deduplicate=True,
 			method=get_orders,
 			last_updated_after=self.after_date,
 			sync_selected_date_only=self.sync_selected_date_only,
@@ -140,17 +140,16 @@ def schedule_get_order_details():
 	if not amz_setting.enable_sync:
 		return
 
-	job_name = "Scheduled Amazon Order Sync"
-	if frappe.db.get_all("RQ Job", {"job_name": job_name, "status": ["in", ["queued", "started"]]}):
-		return
-
 	if amz_setting.last_synced_at:
-		fetch_after = get_datetime(amz_setting.last_synced_at) - timedelta(minutes=10)
+		fetch_after = (get_datetime(amz_setting.last_synced_at) - timedelta(minutes=10)).strftime(
+			"%Y-%m-%dT%H:%M:%SZ"
+		)
 	else:
 		fetch_after = today()
 
 	frappe.enqueue(
-		job_name=job_name,
+		job_id="navgold.amazon_scheduled_order_sync",
+		deduplicate=True,
 		method=get_orders,
 		last_updated_after=fetch_after,
 		timeout=6000,

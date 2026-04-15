@@ -360,6 +360,9 @@ class AmazonRepository:
 
 		orders_payload = self.call_sp_api_method(sp_api_method=orders.get_orders, **kwargs)
 
+		if orders_payload is None:
+			return None
+
 		sales_orders = []
 		order_count = 0
 
@@ -421,7 +424,8 @@ def get_orders(last_updated_after: str, sync_selected_date_only: int = 0):
 	repository = AmazonRepository()
 	result = repository.get_orders(last_updated_after, sync_selected_date_only)
 
-	frappe.db.set_single_value("Amazon SP API Settings", "last_synced_at", frappe.utils.now_datetime())
+	if result is not None:
+		frappe.db.set_single_value("Amazon SP API Settings", "last_synced_at", frappe.utils.now_datetime())
 
 	return result
 
