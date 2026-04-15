@@ -11,8 +11,14 @@
 		"column_break_fojg",
 		"uom",
 		"is_active",
+		"merchant_shipping_group",
 		"section_break_yaut",
-		"naming_series"
+		"naming_series",
+		"fba_tab",
+		"is_fba",
+		"fnsku",
+		"column_break_ndae",
+		"last_transfer_rate"
 	],
 	"fields": [
 		{
@@ -51,12 +57,44 @@
 			"fieldname": "is_active",
 			"fieldtype": "Check",
 			"label": "Is Active?"
+		},
+		{
+			"fieldname": "fba_tab",
+			"fieldtype": "Tab Break",
+			"label": "FBA"
+		},
+		{
+			"default": "0",
+			"fieldname": "is_fba",
+			"fieldtype": "Check",
+			"label": "Is FBA?"
+		},
+		{
+			"depends_on": "eval:doc.is_fba",
+			"fieldname": "fnsku",
+			"fieldtype": "Data",
+			"label": "FNSKU"
+		},
+		{
+			"fieldname": "merchant_shipping_group",
+			"fieldtype": "Data",
+			"label": "Merchant Shipping Group"
+		},
+		{
+			"fieldname": "column_break_ndae",
+			"fieldtype": "Column Break"
+		},
+		{
+			"depends_on": "eval:doc.is_fba",
+			"fieldname": "last_transfer_rate",
+			"fieldtype": "Currency",
+			"label": "Last Transfer Rate"
 		}
 	],
 	"grid_page_length": 50,
 	"index_web_pages_for_search": 1,
 	"links": [],
-	"modified": "2025-12-10 08:46:37.684345",
+	"modified": "2026-03-07 10:10:53.118447",
 	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Proxy SKU",

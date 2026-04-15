@@ -1,0 +1,69 @@
+{
+	"actions": [],
+	"allow_rename": 1,
+	"autoname": "field:rule_name",
+	"creation": "2026-01-20 10:00:00.000000",
+	"doctype": "DocType",
+	"engine": "InnoDB",
+	"field_order": [
+		"rule_name",
+		"repricer_rule_id",
+		"column_break_rule",
+		"description"
+	],
+	"fields": [
+		{
+			"fieldname": "rule_name",
+			"fieldtype": "Data",
+			"in_list_view": 1,
+			"in_standard_filter": 1,
+			"label": "Rule Name",
+			"reqd": 1,
+			"unique": 1
+		},
+		{
+			"description": "Rule ID from Repricer.com",
+			"fieldname": "repricer_rule_id",
+			"fieldtype": "Data",
+			"in_list_view": 1,
+			"label": "Repricer Rule ID"
+		},
+		{
+			"fieldname": "column_break_rule",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "description",
+			"fieldtype": "Small Text",
+			"label": "Description"
+		}
+	],
+	"grid_page_length": 50,
+	"index_web_pages_for_search": 1,
+	"links": [],
+	"modified": "2026-01-20 10:00:00.000000",
+	"modified_by": "Administrator",
+	"module": "Navgold Custom",
+	"name": "Amazon Repricer Rule",
+	"naming_rule": "By fieldname",
+	"owner": "Administrator",
+	"permissions": [
+		{
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "System Manager",
+			"share": 1,
+			"write": 1
+		}
+	],
+	"row_format": "Dynamic",
+	"rows_threshold_for_grid_search": 20,
+	"sort_field": "creation",
+	"sort_order": "ASC",
+	"states": []
+}

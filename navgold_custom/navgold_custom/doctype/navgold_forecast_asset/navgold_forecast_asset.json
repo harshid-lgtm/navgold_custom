@@ -1,0 +1,123 @@
+{
+	"actions": [],
+	"allow_rename": 1,
+	"creation": "2026-02-27 00:00:00.000000",
+	"doctype": "DocType",
+	"engine": "InnoDB",
+	"field_order": [
+		"amazon_data_section",
+		"fba_inventory_csv",
+		"keepa_xlsx",
+		"column_break_amazon",
+		"your_price_xlsx",
+		"sales_data_section",
+		"sales_3d_csv",
+		"sales_7d_csv",
+		"column_break_sales",
+		"sales_14d_csv",
+		"sales_30d_csv",
+		"previous_report_section",
+		"previous_report_xlsx",
+		"info_section",
+		"last_updated"
+	],
+	"fields": [
+		{
+			"fieldname": "amazon_data_section",
+			"fieldtype": "Section Break",
+			"label": "Amazon Data"
+		},
+		{
+			"fieldname": "fba_inventory_csv",
+			"fieldtype": "Attach",
+			"label": "FBA Inventory CSV"
+		},
+		{
+			"fieldname": "keepa_xlsx",
+			"fieldtype": "Attach",
+			"label": "Keepa XLSX"
+		},
+		{
+			"fieldname": "column_break_amazon",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "your_price_xlsx",
+			"fieldtype": "Attach",
+			"label": "Your Price XLSX"
+		},
+		{
+			"fieldname": "sales_data_section",
+			"fieldtype": "Section Break",
+			"label": "Sales Data"
+		},
+		{
+			"fieldname": "sales_3d_csv",
+			"fieldtype": "Attach",
+			"label": "Sales 3D CSV"
+		},
+		{
+			"fieldname": "sales_7d_csv",
+			"fieldtype": "Attach",
+			"label": "Sales 7D CSV"
+		},
+		{
+			"fieldname": "column_break_sales",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "sales_14d_csv",
+			"fieldtype": "Attach",
+			"label": "Sales 14D CSV"
+		},
+		{
+			"fieldname": "sales_30d_csv",
+			"fieldtype": "Attach",
+			"label": "Sales 30D CSV"
+		},
+		{
+			"fieldname": "previous_report_section",
+			"fieldtype": "Section Break",
+			"label": "Previous Report"
+		},
+		{
+			"fieldname": "previous_report_xlsx",
+			"fieldtype": "Attach",
+			"label": "Previous Report XLSX"
+		},
+		{
+			"fieldname": "info_section",
+			"fieldtype": "Section Break",
+			"label": "Info"
+		},
+		{
+			"fieldname": "last_updated",
+			"fieldtype": "Datetime",
+			"label": "Last Updated",
+			"read_only": 1
+		}
+	],
+	"index_web_pages_for_search": 1,
+	"issingle": 1,
+	"links": [],
+	"modified": "2026-02-27 00:00:00.000000",
+	"modified_by": "Administrator",
+	"module": "Navgold Custom",
+	"name": "Navgold Forecast Asset",
+	"owner": "Administrator",
+	"permissions": [
+		{
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"print": 1,
+			"read": 1,
+			"role": "System Manager",
+			"share": 1,
+			"write": 1
+		}
+	],
+	"sort_field": "creation",
+	"sort_order": "DESC",
+	"states": []
+}

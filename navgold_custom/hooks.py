@@ -26,7 +26,7 @@ app_license = "mit"
 
 # include js, css files in header of desk.html
 # app_include_css = "/assets/navgold_custom/css/navgold_custom.css"
-# app_include_js = "/assets/navgold_custom/js/navgold_custom.js"
+app_include_js = ["/assets/navgold_custom/js/utils.js", "/assets/navgold_custom/js/packing_utils.js"]
 
 # include js, css files in header of web template
 # web_include_css = "/assets/navgold_custom/css/navgold_custom.css"
@@ -129,9 +129,9 @@ app_license = "mit"
 # ---------------
 # Override standard doctype classes
 
-# override_doctype_class = {
-# 	"ToDo": "custom_app.overrides.CustomToDo"
-# }
+fixtures = [
+	{"dt": "Stock Entry Type", "filters": [["name", "=", "FBA Transfer"]]},
+]
 
 # Document Events
 # ---------------
@@ -184,6 +184,11 @@ app_license = "mit"
 # override_doctype_dashboards = {
 # 	"Task": "navgold_custom.task.get_dashboard_data"
 # }
+
+override_doctype_dashboards = {
+	"Item": "navgold_custom.navgold_custom.custom_script.item.item_dashboard.get_data",
+	"Supplier": "navgold_custom.navgold_custom.custom_script.supplier.supplier_dashboard.get_data",
+}
 
 # exempt linked doctypes from being automatically cancelled
 #
@@ -243,32 +248,36 @@ export_python_type_annotations = True
 # }
 
 doctype_js = {
-	"Sales Order": "navgold_custom/custom_script/sales_order/sales_order.js",
-	"Purchase Receipt": [
-		"navgold_custom/custom_script/purchase_receipt/purchase_receipt.js",
-	],
+	"Sales Order": ["navgold_custom/custom_script/sales_order/sales_order.js"],
+	"Purchase Receipt": ["navgold_custom/custom_script/purchase_receipt/purchase_receipt.js"],
 	"Pick List": ["navgold_custom/custom_script/pick_list/pick_list.js"],
+	"Packing Slip": ["navgold_custom/custom_script/packing_slip/packing_slip.js"],
+	"Supplier": ["navgold_custom/custom_script/supplier/supplier.js"],
 }
 
 doc_events = {
-	"Stock Entry": {
-		# "before_validate": "navgold_custom.navgold_custom.custom_script.purchase_receipt.purchase_receipt.create_barcodes",
-		# "before_submit": "navgold_custom.navgold_custom.custom_script.stock_entry.stock_entry.transfer_barcodes",
-		# "before_insert": "navgold_custom.navgold_custom.custom_script.stock_entry.stock_entry.before_insert_custom",
+	"Purchase Order": {
+		"before_validate": "navgold_custom.navgold_custom.custom_script.purchase_order.purchase_order.set_supplier_part_no",
+	},
+	"Supplier": {
+		"validate": "navgold_custom.navgold_custom.custom_script.supplier.supplier.validate_lead_time",
 	},
 	"Sales Order": {
-		"validate": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.sales_order_validate",
-		"on_update": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.sales_order_on_update",
-		"after_insert": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.sales_order_after_insert",
-		"after_delete": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.sales_order_after_delete",
-		# "before_submit": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.sales_order_before_submit",
 		"on_submit": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.sales_order_on_submit",
 	},
 	"Item": {
 		"validate": "navgold_custom.navgold_custom.custom_script.item.item.set_default_uom_conversion_factor"
 	},
+	"Packing Slip": {
+		"before_validate": "navgold_custom.navgold_custom.custom_script.packing_slip.packing_slip.before_validate",
+		"on_submit": "navgold_custom.navgold_custom.custom_script.packing_slip.packing_slip.on_submit",
+	},
 	"Pick List": {
-		"validate": "navgold_custom.navgold_custom.custom_script.pick_list.pick_list.sort_item_locations_by_walk_route"
+		"validate": "navgold_custom.navgold_custom.custom_script.pick_list.pick_list.sort_item_locations_by_walk_route",
+		"on_submit": [
+			"navgold_custom.navgold_custom.custom_script.pick_list.pick_list.auto_reserve_stock",
+			"navgold_custom.navgold_custom.custom_script.pick_list.pick_list.auto_create_delivery_notes",
+		],
 	},
 }
 
@@ -277,7 +286,12 @@ after_migrate = "navgold_custom.setup.after_migrate"
 before_uninstall = "navgold_custom.setup.before_uninstall"
 
 scheduler_events = {
+	"cron": {
+		"*/30 * * * *": [
+			"navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api_settings.schedule_get_order_details",
+		],
+	},
 	"daily": [
-		"navgold_custom.navgold_custom.doctype.supplier_item_price_and_stock.supplier_item_price_and_stock._update_supplier_rank"
+		"navgold_custom.navgold_custom.doctype.supplier_item_price_and_stock.supplier_item_price_and_stock.run_update_supplier_rank",
 	],
 }

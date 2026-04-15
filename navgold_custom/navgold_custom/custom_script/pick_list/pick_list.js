@@ -1,10 +1,36 @@
-// Copyright (c) 2025
-// Navgold - MIT License
+// Copyright (c) 2025, developers@buildwithhussain.com and contributors
+// For license information, please see license.txt
 frappe.ui.form.on('Pick List', {
 	refresh(frm) {
 		frm.add_custom_button(__('Get Items by Weight'), () => {
 			frm.events.open_weight_based_selection_dialog(frm);
 		});
+
+		add_scan_buttons(frm);
+
+		if (
+			frm.doc.docstatus === 1 &&
+			frm.doc.purpose === 'Material Transfer' &&
+			frm.doc.status !== 'Completed'
+		) {
+			frm.remove_custom_button(__('Stock Entry'), __('Create'));
+			frm.add_custom_button(
+				__('Stock Entry'),
+				async () => {
+					const response = await frappe.call({
+						method:
+							'navgold_custom.navgold_custom.custom_script.pick_list.pick_list_api.create_fba_transfer_stock_entry',
+						args: { pick_list_name: frm.doc.name },
+						freeze: true,
+						freeze_message: __('Creating FBA Transfer Stock Entry...'),
+					});
+					const stock_entry = response.message;
+					frappe.model.sync(stock_entry);
+					frappe.set_route('Form', 'Stock Entry', stock_entry.name);
+				},
+				__('Create'),
+			);
+		}
 	},
 
 	async open_weight_based_selection_dialog(frm) {
@@ -21,16 +47,16 @@ frappe.ui.form.on('Pick List', {
 
 	async fetch_and_show_sales_orders(frm) {
 		try {
-			const r = await frappe.call({
+			const response = await frappe.call({
 				method:
-					'navgold_custom.navgold_custom.custom_script.pick_list.pick_list.get_open_sales_orders_for_delivery',
+					'navgold_custom.navgold_custom.custom_script.pick_list.pick_list_api.get_open_sales_orders_for_delivery',
 				args: {
 					customer: frm.doc.customer || null,
 					company: frm.doc.company,
 				},
 			});
 
-			if (!r.message || r.message.length === 0) {
+			if (!response.message || response.message.length === 0) {
 				frappe.msgprint(__('No open Sales Orders with pending items found'));
 				return;
 			}
@@ -40,7 +66,11 @@ frappe.ui.form.on('Pick List', {
 				'tote_weight_limit',
 			);
 
-			frm.events.show_sales_order_selection_popup(frm, r.message, weight_limit);
+			frm.events.show_sales_order_selection_popup(
+				frm,
+				response.message,
+				weight_limit,
+			);
 		} catch (err) {
 			frappe.msgprint(__('Error fetching Sales Orders'));
 		}
@@ -92,7 +122,7 @@ frappe.ui.form.on('Pick List', {
 				if (selected_weight > weight_limit) {
 					frappe.confirm(
 						__(
-							'Selected weight ({0} kg) exceeds the limit ({1} kg). Do you want to proceed?',
+							'Selected weight ({0} g) exceeds the limit ({1} g). Do you want to proceed?',
 							[selected_weight.toFixed(2), weight_limit],
 						),
 						() => {
@@ -180,9 +210,9 @@ frappe.ui.form.on('Pick List', {
 
 	async map_selected_orders_to_picklist(frm, selected_orders, dialog) {
 		try {
-			const r = await frappe.call({
+			const response = await frappe.call({
 				method:
-					'navgold_custom.navgold_custom.custom_script.pick_list.pick_list.map_sales_orders_to_pick_list',
+					'navgold_custom.navgold_custom.custom_script.pick_list.pick_list_api.map_sales_orders_to_pick_list',
 				args: {
 					sales_order_names: JSON.stringify(selected_orders),
 					target_pr_doc_json: JSON.stringify(frm.doc),
@@ -191,8 +221,8 @@ frappe.ui.form.on('Pick List', {
 				freeze_message: __('Adding items from Sales Orders...'),
 			});
 
-			if (r.message) {
-				frappe.model.sync(r.message);
+			if (response.message) {
+				frappe.model.sync(response.message);
 				frm.refresh_field('locations');
 
 				dialog.hide();
@@ -209,3 +239,216 @@ frappe.ui.form.on('Pick List', {
 		}
 	},
 });
+
+function add_scan_buttons(frm) {
+	if (frm.doc.docstatus !== 0) return;
+	if (!(frm.doc.locations || []).length) return;
+
+	if (!frm.doc.custom_tote) {
+		frm.add_custom_button(__('Scan Tote'), () =>
+			navgold.packing.open_scan_tote_dialog(frm, 'custom_tote'),
+		);
+	}
+
+	if (frm.doc.custom_tote) {
+		frm.add_custom_button(__('Scan Item'), () =>
+			navgold.packing.open_scan_item_dialog(frm, process_pick_scan),
+		);
+	}
+}
+
+async function process_pick_scan(frm, barcode) {
+	try {
+		const scan_result = await navgold.packing.resolve_barcode(barcode);
+
+		if (scan_result?.error) {
+			frappe.show_alert({ message: scan_result.error, indicator: 'red' }, 5);
+			return;
+		}
+
+		const item_code = scan_result.item_code;
+		const matching_rows = (frm.doc.locations || []).filter(
+			(row) =>
+				row.item_code === item_code && flt(row.picked_qty) < flt(row.stock_qty),
+		);
+
+		if (!matching_rows.length) {
+			frappe.show_alert(
+				{
+					message: __('Item {0} not found or already fully picked', [
+						item_code,
+					]),
+					indicator: 'red',
+				},
+				5,
+			);
+			return;
+		}
+
+		if (matching_rows.length === 1) {
+			show_pick_qty_dialog(frm, matching_rows[0]);
+		} else {
+			show_row_selection_dialog(frm, matching_rows);
+		}
+	} catch {
+		frappe.show_alert(
+			{ message: __('Error scanning barcode'), indicator: 'red' },
+			5,
+		);
+	}
+}
+
+function show_row_selection_dialog(frm, rows) {
+	const options = rows.map((row) => {
+		const warehouse = row.warehouse || __('No Warehouse');
+		const sales_order = row.sales_order || __('No SO');
+		const remaining = flt(row.stock_qty) - flt(row.picked_qty);
+		return `${warehouse} | ${sales_order} (${__('Remaining')}: ${remaining} ${
+			row.stock_uom
+		})`;
+	});
+
+	const label_to_row = new Map();
+	for (const [index, label] of options.entries()) {
+		label_to_row.set(label, rows[index]);
+	}
+
+	const dialog = new frappe.ui.Dialog({
+		title: __('Select Row to Pick'),
+		fields: [
+			{
+				fieldname: 'selected_row',
+				fieldtype: 'Select',
+				label: __('Warehouse | Sales Order'),
+				options: options.join('\n'),
+				reqd: 1,
+				default: options[0],
+			},
+		],
+		primary_action_label: __('Select'),
+		primary_action({ selected_row }) {
+			dialog.hide();
+			const row = label_to_row.get(selected_row);
+			show_pick_qty_dialog(frm, row);
+		},
+	});
+	dialog.show();
+}
+
+function show_pick_qty_dialog(frm, row) {
+	const current_picked = flt(row.picked_qty);
+	const required_qty = flt(row.stock_qty);
+	const remaining = required_qty - current_picked;
+
+	const dialog = new frappe.ui.Dialog({
+		title: __('Pick Qty'),
+		fields: [
+			{
+				fieldname: 'item_code',
+				fieldtype: 'Data',
+				label: __('Item Code'),
+				read_only: 1,
+				default: row.item_code,
+			},
+			{
+				fieldname: 'description',
+				fieldtype: 'Small Text',
+				label: __('Description'),
+				read_only: 1,
+				default: row.description,
+			},
+			{
+				fieldname: 'uom',
+				fieldtype: 'Data',
+				label: __('UOM'),
+				read_only: 1,
+				default: row.uom,
+			},
+			{
+				fieldname: 'warehouse',
+				fieldtype: 'Data',
+				label: __('Warehouse'),
+				read_only: 1,
+				default: row.warehouse,
+			},
+			{
+				fieldname: 'column_break_1',
+				fieldtype: 'Column Break',
+			},
+			{
+				fieldname: 'required_qty',
+				fieldtype: 'Data',
+				label: __('Required Qty ({0})', [row.stock_uom]),
+				read_only: 1,
+				default: cstr(required_qty),
+			},
+			{
+				fieldname: 'already_picked',
+				fieldtype: 'Data',
+				label: __('Already Picked ({0})', [row.stock_uom]),
+				read_only: 1,
+				default: cstr(current_picked),
+			},
+			{
+				fieldname: 'qty',
+				fieldtype: 'Float',
+				label: __('Qty to Pick ({0})', [row.stock_uom]),
+				default: remaining > 0 ? remaining : 1,
+				reqd: 1,
+			},
+		],
+		primary_action_label: __('Confirm'),
+		primary_action({ qty }) {
+			const new_picked = current_picked + flt(qty);
+
+			if (new_picked > required_qty) {
+				frappe.show_alert(
+					{
+						message: __('Picked qty ({0}) exceeds required qty ({1}) {2}', [
+							new_picked,
+							required_qty,
+							row.stock_uom,
+						]),
+						indicator: 'orange',
+					},
+					5,
+				);
+			}
+
+			frappe.model.set_value(row.doctype, row.name, 'picked_qty', new_picked);
+			frm.refresh_field('locations');
+			frm.dirty();
+
+			frappe.show_alert({
+				message: __('Picked {0}: {1}/{2} {3}', [
+					row.item_code,
+					new_picked,
+					required_qty,
+					row.stock_uom,
+				]),
+				indicator: 'green',
+			});
+
+			dialog.hide();
+			check_all_items_picked(frm);
+		},
+	});
+	dialog.show();
+	setTimeout(() => dialog.fields_dict.qty.$input.select(), 150);
+}
+
+function check_all_items_picked(frm) {
+	const all_picked = (frm.doc.locations || []).every(
+		(row) => flt(row.picked_qty) >= flt(row.stock_qty),
+	);
+
+	if (all_picked) {
+		frappe.show_alert(
+			{
+				message: __('All items have been picked!'),
+				indicator: 'green',
+			},
+			7,
+		);
+	}
+}

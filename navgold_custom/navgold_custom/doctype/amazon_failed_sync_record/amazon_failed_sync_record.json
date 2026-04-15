@@ -6,7 +6,7 @@
 	"engine": "InnoDB",
 	"field_order": [
 		"amazon_order_id",
-		"replaced_order_id",
+		"status",
 		"amazon_order_amount",
 		"grand_total",
 		"column_break_bmhr",
@@ -14,11 +14,7 @@
 		"posting_date",
 		"remarks",
 		"section_break_vjkz",
-		"payload",
-		"references_section",
-		"replaced_so",
-		"column_break_jcoe",
-		"replaced_jv"
+		"payload"
 	],
 	"fields": [
 		{
@@ -30,10 +26,13 @@
 			"reqd": 1
 		},
 		{
-			"fieldname": "replaced_order_id",
-			"fieldtype": "Data",
-			"label": "Replaced Order ID",
-			"read_only": 1
+			"default": "Failed",
+			"fieldname": "status",
+			"fieldtype": "Select",
+			"in_list_view": 1,
+			"in_standard_filter": 1,
+			"label": "Status",
+			"options": "Failed\nResolved"
 		},
 		{
 			"fieldname": "amazon_order_amount",
@@ -75,27 +74,6 @@
 			"fieldname": "payload",
 			"fieldtype": "JSON",
 			"label": "Payload"
-		},
-		{
-			"fieldname": "references_section",
-			"fieldtype": "Section Break",
-			"label": "References"
-		},
-		{
-			"fieldname": "replaced_so",
-			"fieldtype": "Link",
-			"label": "Replaced SO",
-			"options": "Sales Order"
-		},
-		{
-			"fieldname": "column_break_jcoe",
-			"fieldtype": "Column Break"
-		},
-		{
-			"fieldname": "replaced_jv",
-			"fieldtype": "Link",
-			"label": "Replaced JV",
-			"options": "Journal Entry"
 		}
 	],
 	"in_create": 1,

@@ -5,13 +5,94 @@
 	"doctype": "DocType",
 	"engine": "InnoDB",
 	"field_order": [
+		"general_tab",
 		"buying_price_list",
 		"column_break_zziq",
 		"tote_weight_limit",
 		"proxy_skus_section",
-		"generate_proxy_skus"
+		"generate_proxy_skus",
+		"column_break_zqvs",
+		"multiple_active_item_uom",
+		"batch_section",
+		"min_shelf_expiry_in_days",
+		"section_break_oarw",
+		"subscribe_and_save_warehouse",
+		"stock_allocation_section",
+		"default_stock_allocation_warehouse",
+		"amazon_pricing_section",
+		"amazon_pricing_enabled",
+		"auto_sync_cogs",
+		"commission_threshold",
+		"high_price_commission_adjustment",
+		"column_break_pricing",
+		"default_strategy_template",
+		"default_cost_set_template",
+		"cogs_supplier",
+		"repricer_section",
+		"repricer_enabled",
+		"column_break_repricer",
+		"repricer_api_username",
+		"repricer_api_password",
+		"fba_inbound_tab",
+		"fba_inbound_enabled",
+		"fba_source_address",
+		"column_break_fba_defaults",
+		"default_prep_owner",
+		"default_label_owner",
+		"pricing_tab",
+		"strategy_mapping_section",
+		"strategy_name_mapping",
+		"group_strategies_section",
+		"group_strategies_into_pricing",
+		"stock_tab",
+		"stock_publishing_mode",
+		"zero_stock_items"
 	],
 	"fields": [
+		{
+			"fieldname": "general_tab",
+			"fieldtype": "Tab Break",
+			"label": "General"
+		},
+		{
+			"fieldname": "fba_inbound_tab",
+			"fieldtype": "Tab Break",
+			"label": "FBA Inbound"
+		},
+		{
+			"default": "0",
+			"fieldname": "fba_inbound_enabled",
+			"fieldtype": "Check",
+			"label": "FBA Inbound Enabled"
+		},
+		{
+			"depends_on": "eval:doc.fba_inbound_enabled",
+			"fieldname": "fba_source_address",
+			"fieldtype": "Link",
+			"label": "Source Address",
+			"link_filters": "[[\"Address\",\"address_type\",\"=\",\"Warehouse\"]]",
+			"options": "Address"
+		},
+		{
+			"fieldname": "column_break_fba_defaults",
+			"fieldtype": "Column Break"
+		},
+		{
+			"default": "SELLER",
+			"depends_on": "eval:doc.fba_inbound_enabled",
+			"fieldname": "default_prep_owner",
+			"fieldtype": "Select",
+			"label": "Default Prep Owner",
+			"options": "AMAZON\nSELLER\nNONE"
+		},
+		{
+			"default": "SELLER",
+			"depends_on": "eval:doc.fba_inbound_enabled",
+			"fieldname": "default_label_owner",
+			"fieldtype": "Select",
+			"label": "Default Label Owner",
+			"options": "AMAZON\nSELLER\nNONE"
+		},
 		{
 			"fieldname": "buying_price_list",
 			"fieldtype": "Link",
@@ -39,13 +120,198 @@
 			"fieldname": "proxy_skus_section",
 			"fieldtype": "Section Break",
 			"label": "Proxy SKUs"
+		},
+		{
+			"fieldname": "column_break_zqvs",
+			"fieldtype": "Column Break"
+		},
+		{
+			"default": "1",
+			"description": "Multiple Active Proxy SKU per Item UOM",
+			"fieldname": "multiple_active_item_uom",
+			"fieldtype": "Check",
+			"label": "Multiple Active Item UOM"
+		},
+		{
+			"fieldname": "batch_section",
+			"fieldtype": "Section Break",
+			"label": "Batch"
+		},
+		{
+			"default": "1",
+			"fieldname": "min_shelf_expiry_in_days",
+			"fieldtype": "Int",
+			"label": "Min Shelf Expiry (In Days)",
+			"non_negative": 1,
+			"reqd": 1
+		},
+		{
+			"fieldname": "section_break_oarw",
+			"fieldtype": "Section Break"
+		},
+		{
+			"fieldname": "subscribe_and_save_warehouse",
+			"fieldtype": "Link",
+			"label": "Subscribe and Save Warehouse",
+			"options": "Warehouse",
+			"reqd": 1
+		},
+		{
+			"fieldname": "stock_allocation_section",
+			"fieldtype": "Section Break",
+			"label": "Stock Allocation"
+		},
+		{
+			"description": "Fallback warehouse when stock is insufficient across all warehouses during Sales Order submission",
+			"fieldname": "default_stock_allocation_warehouse",
+			"fieldtype": "Link",
+			"label": "Default Stock Allocation Warehouse",
+			"options": "Warehouse"
+		},
+		{
+			"fieldname": "amazon_pricing_section",
+			"fieldtype": "Section Break",
+			"label": "Amazon Pricing"
+		},
+		{
+			"default": "0",
+			"description": "Enable Amazon Pricing Management features",
+			"fieldname": "amazon_pricing_enabled",
+			"fieldtype": "Check",
+			"label": "Amazon Pricing Enabled"
+		},
+		{
+			"default": "0",
+			"depends_on": "eval:doc.amazon_pricing_enabled",
+			"description": "Automatically sync COGS from Supplier Item Price and Stock",
+			"fieldname": "auto_sync_cogs",
+			"fieldtype": "Check",
+			"label": "Auto Sync COGS"
+		},
+		{
+			"fieldname": "column_break_pricing",
+			"fieldtype": "Column Break"
+		},
+		{
+			"depends_on": "eval:doc.amazon_pricing_enabled",
+			"description": "Default template for pricing strategies",
+			"fieldname": "default_strategy_template",
+			"fieldtype": "Link",
+			"label": "Default Strategy Template",
+			"options": "Amazon Strategy Template"
+		},
+		{
+			"depends_on": "eval:doc.amazon_pricing_enabled",
+			"description": "Default template for cost sets",
+			"fieldname": "default_cost_set_template",
+			"fieldtype": "Link",
+			"label": "Default Cost Set Template",
+			"options": "Amazon Cost Set Template"
+		},
+		{
+			"depends_on": "eval:doc.auto_sync_cogs",
+			"description": "Supplier for COGS auto-sync",
+			"fieldname": "cogs_supplier",
+			"fieldtype": "Link",
+			"label": "COGS Supplier",
+			"options": "Supplier"
+		},
+		{
+			"depends_on": "eval:doc.amazon_pricing_enabled",
+			"fieldname": "repricer_section",
+			"fieldtype": "Section Break",
+			"label": "Repricer.com Integration"
+		},
+		{
+			"default": "0",
+			"description": "Enable Repricer.com integration",
+			"fieldname": "repricer_enabled",
+			"fieldtype": "Check",
+			"label": "Repricer Enabled"
+		},
+		{
+			"fieldname": "column_break_repricer",
+			"fieldtype": "Column Break"
+		},
+		{
+			"depends_on": "eval:doc.repricer_enabled",
+			"fieldname": "repricer_api_username",
+			"fieldtype": "Data",
+			"label": "Repricer API Username"
+		},
+		{
+			"depends_on": "eval:doc.repricer_enabled",
+			"fieldname": "repricer_api_password",
+			"fieldtype": "Password",
+			"label": "Repricer API Password"
+		},
+		{
+			"default": "10",
+			"depends_on": "eval:doc.amazon_pricing_enabled",
+			"description": "Amazon UK commission threshold - prices above this have higher commission",
+			"fieldname": "commission_threshold",
+			"fieldtype": "Float",
+			"label": "Commission Threshold"
+		},
+		{
+			"default": "0.07",
+			"depends_on": "eval:doc.amazon_pricing_enabled",
+			"description": "Additional commission rate for prices > Commission Threshold",
+			"fieldname": "high_price_commission_adjustment",
+			"fieldtype": "Float",
+			"label": "High Price Commission Adjustment"
+		},
+		{
+			"fieldname": "pricing_tab",
+			"fieldtype": "Tab Break",
+			"label": "Pricing"
+		},
+		{
+			"fieldname": "strategy_mapping_section",
+			"fieldtype": "Section Break",
+			"label": "Strategy Name Mapping",
+			"description": "Map strategy names to pricing fields. These mappings are used when grouping strategies into Amazon Product Pricing records."
+		},
+		{
+			"fieldname": "strategy_name_mapping",
+			"fieldtype": "Table",
+			"label": "Strategy Name Mapping",
+			"options": "Strategy Name Mapping"
+		},
+		{
+			"fieldname": "group_strategies_section",
+			"fieldtype": "Section Break"
+		},
+		{
+			"fieldname": "group_strategies_into_pricing",
+			"fieldtype": "Button",
+			"label": "Group Strategies into Pricing"
+		},
+		{
+			"fieldname": "stock_tab",
+			"fieldtype": "Tab Break",
+			"label": "Stock"
+		},
+		{
+			"default": "Publish Actual Stock",
+			"fieldname": "stock_publishing_mode",
+			"fieldtype": "Select",
+			"label": "Stock Publishing Mode",
+			"options": "Publish Actual Stock\nPublish Zero Stock for All Items\nPublish Zero Stock for Selected Items"
+		},
+		{
+			"depends_on": "eval:doc.stock_publishing_mode === 'Publish Zero Stock for Selected Items'",
+			"fieldname": "zero_stock_items",
+			"fieldtype": "Table",
+			"label": "Zero Stock Items",
+			"options": "Navgold Zero Stock Item"
 		}
 	],
 	"grid_page_length": 50,
 	"index_web_pages_for_search": 1,
 	"issingle": 1,
 	"links": [],
-	"modified": "2025-12-10 11:42:54.577818",
+	"modified": "2026-03-09 12:16:29.267908",
 	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Navgold Settings",

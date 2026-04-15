@@ -1,34 +1,54 @@
 # Copyright (c) 2025, developers@buildwithhussain.com and contributors
 # For license information, please see license.txt
-# MR: Material Request
-# PO: Purchase Order
-import math
-
 import frappe
 from frappe import _
-from frappe.query_builder import DocType
-from frappe.utils import flt
-from frappe.utils.caching import redis_cache
+from frappe.query_builder import DocType, Order
+from frappe.query_builder.functions import Sum
+from frappe.utils import ceil, flt
+
+from navgold_custom.navgold_custom.utils import get_conversion_factor, get_free_qty_map
 
 material_request_status_list = ["Pending", "Partially Ordered", "Partially Received"]
 
 
 def execute(filters: dict | None = None):
-	"""Return columns and data for the report."""
 	data = get_data(filters)
 	columns = get_columns(data)
 	return columns, data
 
 
 def get_columns(data: list[dict]) -> list[dict]:
-	"""Return columns for the report."""
 	columns = [
+		{
+			"label": _("History"),
+			"fieldname": "po_history",
+			"fieldtype": "Data",
+			"width": 40,
+		},
 		{
 			"label": _("Item Code"),
 			"fieldname": "item_code",
 			"fieldtype": "Link",
 			"options": "Item",
 			"width": 150,
+		},
+		{
+			"label": _("Description"),
+			"fieldname": "description",
+			"fieldtype": "Data",
+			"width": 150,
+		},
+		{
+			"label": _("Actual Qty"),
+			"fieldname": "actual_qty",
+			"fieldtype": "Float",
+			"width": 120,
+		},
+		{
+			"label": _("Free Qty"),
+			"fieldname": "free_qty",
+			"fieldtype": "Float",
+			"width": 120,
 		},
 		{
 			"label": _("Total Required Qty"),
@@ -57,14 +77,8 @@ def get_columns(data: list[dict]) -> list[dict]:
 			"width": 150,
 		},
 		{
-			"label": _("Available Stock (UOM)"),
-			"fieldname": "available_stock_uom",
-			"fieldtype": "Float",
-			"width": 150,
-		},
-		{
-			"label": _("Available Stock (Normalized)"),
-			"fieldname": "available_stock_normalized",
+			"label": _("Supplier Stock"),
+			"fieldname": "available_stock",
 			"fieldtype": "Float",
 			"width": 150,
 		},
@@ -87,10 +101,10 @@ def get_columns(data: list[dict]) -> list[dict]:
 			"width": 150,
 		},
 		{
-			"label": _("UOM Price"),
-			"fieldname": "uom_price",
-			"fieldtype": "Currency",
-			"width": 150,
+			"label": _("Last Purchase Rate"),
+			"fieldname": "last_purchase_rate",
+			"fieldtype": "Data",
+			"width": 160,
 		},
 		{
 			"label": _("Reference"),
@@ -131,6 +145,7 @@ def get_data(filters):
 	material_request = DocType("Material Request")
 	material_request_item = DocType("Material Request Item")
 	supplier_item_price_and_stock = DocType("Supplier Item Price and Stock")
+	item_doc = DocType("Item")
 	items_requests = (
 		frappe.qb.from_(material_request)
 		.left_join(material_request_item)
@@ -143,31 +158,34 @@ def get_data(filters):
 		.where(
 			(material_request.material_request_type == "Purchase")
 			& (material_request.status.isin(material_request_status_list))
+			& (material_request.custom_is_amazon_pending == frappe.cint(filters.get("is_amazon_pending", 0)))
 		)
 	).run(as_dict=True)
 
 	items_needed = {}
-	for r in items_requests:
-		item = r.get("item_code")
-		if not item:
+	for row in items_requests:
+		item_code = row.get("item_code")
+		if not item_code:
 			continue
 
-		required = flt(r.get("required_qty") or 0)
-		ordered = flt(r.get("ordered_qty") or 0)
+		required = flt(row.get("required_qty") or 0)
+		ordered = flt(row.get("ordered_qty") or 0)
 		pending = max(0, required - ordered)
 
 		if pending > 0:
-			items_needed[item] = items_needed.get(item, 0) + pending
-
+			items_needed[item_code] = items_needed.get(item_code, 0) + pending
+	if not items_needed:
+		return []
 	supplier_list_query = (
 		frappe.qb.from_(supplier_item_price_and_stock)
+		.left_join(item_doc)
+		.on(supplier_item_price_and_stock.item == item_doc.name)
 		.select(
 			supplier_item_price_and_stock.item,
+			item_doc.description,
 			supplier_item_price_and_stock.supplier,
-			supplier_item_price_and_stock.unit_price,
-			supplier_item_price_and_stock.price,
+			supplier_item_price_and_stock.price.as_("unit_price"),
 			supplier_item_price_and_stock.stock_qty,
-			supplier_item_price_and_stock.normalized_qty,
 			supplier_item_price_and_stock.uom,
 			supplier_item_price_and_stock.name,
 			supplier_item_price_and_stock.rank,
@@ -191,39 +209,47 @@ def get_data(filters):
 	if supplier_list:
 		offers_by_parent = get_offers_by_supplier(supplier_list)
 
+	last_purchase_rate_map = get_last_purchase_rate_map(supplier_list) if supplier_list else {}
+
+	free_qty_map = get_free_qty_map(list(items_needed.keys()))
+
 	results = []
 
-	item_remaining = {item: qty for item, qty in items_needed.items()}
+	item_remaining = {item_code: qty for item_code, qty in items_needed.items()}
 
-	for s in supplier_list:
-		item_code = s["item"]
+	for supplier_item in supplier_list:
+		item_code = supplier_item["item"]
 
 		remaining = item_remaining.get(item_code, 0)
 		if remaining <= 0:
 			continue
 
 		total_required = items_needed[item_code]
-		available_normalized = s["normalized_qty"]
+		available_stock = supplier_item["stock_qty"]
 
-		allocated = min(available_normalized, remaining)
+		allocated = min(available_stock, remaining)
 
 		item_remaining[item_code] = remaining - allocated
 
-		offers = offers_by_parent.get(s["name"], [])
+		offers = offers_by_parent.get(supplier_item["name"], [])
 
+		item_qty_data = free_qty_map.get(item_code, {})
 		row = {
+			"po_history": "",
 			"item_code": item_code,
+			"description": supplier_item["description"],
+			"actual_qty": item_qty_data.get("actual_qty", 0),
+			"free_qty": item_qty_data.get("free_qty", 0),
 			"total_required_qty": total_required,
-			"supplier": s["supplier"],
-			"supplier_uom": s["uom"],
-			"available_stock_uom": s["stock_qty"],
-			"available_stock_normalized": available_normalized,
+			"supplier": supplier_item["supplier"],
+			"supplier_uom": supplier_item["uom"],
+			"available_stock": available_stock,
 			"allocated_qty": allocated,
 			"remaining_qty": remaining - allocated,
-			"unit_price": s["unit_price"],
-			"uom_price": s["price"],
-			"ref_doc": s["name"],
-			"supplier_rank": s["rank"],
+			"unit_price": supplier_item["unit_price"],
+			"last_purchase_rate": last_purchase_rate_map.get((item_code, supplier_item["supplier"]), "NA"),
+			"ref_doc": supplier_item["name"],
+			"supplier_rank": supplier_item["rank"],
 			"offers": offers,
 		}
 		for i, offer in enumerate(offers):
@@ -241,15 +267,13 @@ def get_data(filters):
 
 
 @frappe.whitelist()
-def create_purchase_orders_from_report(selected_items):
-	"""Create Purchase Orders from selected report rows."""
+def create_purchase_orders_from_report(selected_items: str | list[dict]):
 	if isinstance(selected_items, str):
 		selected_items = frappe.parse_json(selected_items)
 
 	if not selected_items:
 		frappe.throw(_("No items selected"))
 
-	# Group items by supplier
 	supplier_groups = {}
 	for item in selected_items:
 		supplier = item.get("supplier")
@@ -269,9 +293,9 @@ def create_purchase_orders_from_report(selected_items):
 			if po:
 				created_pos.append(po.name)
 
-		except Exception as e:
-			frappe.log_error(f"Error creating PO for {supplier}: {e!s}")
-			frappe.throw(_("Error creating Purchase Order for {0}: {1}").format(supplier, str(e)))
+		except Exception as error:
+			frappe.log_error(f"Error creating PO for {supplier}: {error!s}")
+			frappe.throw(_("Error creating Purchase Order for {0}: {1}").format(supplier, str(error)))
 
 	return {
 		"success": True,
@@ -281,8 +305,6 @@ def create_purchase_orders_from_report(selected_items):
 
 
 def create_purchase_order_with_mr_allocation(supplier, data):
-	"""Create PO and intelligently allocate to Material Requests."""
-
 	items_to_order = [item.get("item_code") for item in data["items"]]
 
 	material_request = DocType("Material Request")
@@ -308,12 +330,11 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 		.orderby(material_request_item.schedule_date)
 	).run(as_dict=True)
 
-	amz_setting = frappe.get_last_doc("Amazon SP API Settings", {"is_active": 1})
+	amz_setting = frappe.get_single("Amazon SP API Settings")
 	warehouse = amz_setting.warehouse
 	mr_by_item = {}
 	company = amz_setting.company
 
-	# Based on items get the MR
 	for mr in mr_items:
 		item = mr["item_code"]
 		pending = max(0, flt(mr["required_qty"]) - flt(mr["ordered_qty"]))
@@ -344,10 +365,10 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 	# Based on each item and MR create a line item though n^2 but not many
 	for item_data in data["items"]:
 		item_code = item_data.get("item_code")
-		available_stock_uom = flt(item_data.get("available_stock_uom", 0))
+		available_stock = flt(item_data.get("available_stock", 0))
 		allocated_qty = flt(item_data.get("allocated_qty", 0))
 		supplier_uom = item_data.get("supplier_uom")
-		uom_price = flt(item_data.get("uom_price", 0))
+		unit_price = flt(item_data.get("unit_price", 0))
 
 		conversion_factor = get_conversion_factor(item_code, supplier_uom)
 
@@ -356,7 +377,7 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 			continue
 
 		allocated_qty_in_supplier_uom = (
-			math.ceil(allocated_qty / conversion_factor) if conversion_factor > 0 else allocated_qty
+			ceil(allocated_qty / conversion_factor) if conversion_factor > 0 else allocated_qty
 		)
 
 		supplier_uom_remaining = allocated_qty_in_supplier_uom
@@ -365,12 +386,15 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 			if supplier_uom_remaining <= 0:
 				break
 
-			qty_to_order = min(allocated_qty_in_supplier_uom, supplier_uom_remaining)
+			mr_pending_in_supplier_uom = (
+				ceil(mr["pending_qty"] / conversion_factor) if conversion_factor > 0 else mr["pending_qty"]
+			)
+
+			qty_to_order = min(mr_pending_in_supplier_uom, supplier_uom_remaining)
 
 			if qty_to_order <= 0:
 				continue
 
-			# Ensure schedule_date is always a string for consistent comparison
 			schedule_date = mr["schedule_date"] or frappe.utils.today()
 			if not isinstance(schedule_date, str):
 				schedule_date = str(schedule_date)
@@ -391,7 +415,7 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 					"uom": supplier_uom,
 					"stock_uom": supplier_uom,
 					"conversion_factor": conversion_factor,
-					"rate": uom_price,
+					"rate": unit_price,
 					"schedule_date": schedule_date,
 					"warehouse": warehouse,
 					"material_request": mr["material_request"],
@@ -399,28 +423,19 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 				},
 			)
 			supplier_uom_remaining -= qty_to_order
-		# Todo: check this logic
-		# Calculate new stock: original stock minus what we actually ordered
+
 		total_ordered = allocated_qty_in_supplier_uom - supplier_uom_remaining
-		new_stock = max(0, available_stock_uom - total_ordered)
+		new_stock = max(0, available_stock - total_ordered)
 		update_supplier_stock_after_po(supplier, supplier_uom, item_code, new_stock)
 
 	po.schedule_date = earliest_date or frappe.utils.today()
 
-	if len(po.items) > 0:
+	if po.items:
 		po.insert(ignore_permissions=True)
+		po.submit()
 		return po
 
 	return None
-
-
-@redis_cache()
-def get_conversion_factor(item, supplier_uom):
-	"""Fetch conversion factor from Item UOM table."""
-	conv = frappe.db.get_value(
-		"UOM Conversion Detail", {"parent": item, "uom": supplier_uom}, "conversion_factor"
-	)
-	return conv or 1
 
 
 # Cannot use set_value doc_events 👀
@@ -432,10 +447,44 @@ def update_supplier_stock_after_po(supplier, supplier_uom, item_code, remaining_
 	supplier_item_price_and_stock.save()
 
 
+def get_last_purchase_rate_map(supplier_list):
+	if not supplier_list:
+		return {}
+
+	po = DocType("Purchase Order")
+	po_item = DocType("Purchase Order Item")
+
+	items = list({supplier_item["item"] for supplier_item in supplier_list})
+	suppliers = list({supplier_item["supplier"] for supplier_item in supplier_list})
+
+	results = (
+		frappe.qb.from_(po)
+		.left_join(po_item)
+		.on(po_item.parent == po.name)
+		.select(
+			po_item.item_code,
+			po.supplier,
+			po_item.rate,
+			po.transaction_date,
+		)
+		.where((po.docstatus == 1) & (po_item.item_code.isin(items)) & (po.supplier.isin(suppliers)))
+		.orderby(po.transaction_date, order=Order.desc)
+		.orderby(po.creation, order=Order.desc)
+	).run(as_dict=True)
+
+	rate_map = {}
+	for row in results:
+		key = (row["item_code"], row["supplier"])
+		if key not in rate_map:
+			rate_map[key] = row["rate"]
+
+	return rate_map
+
+
 def get_offers_by_supplier(supplier_list):
 	supplier_offer = DocType("Supplier Offer")
 	offers_by_parent = {}
-	parent_names = [s["name"] for s in supplier_list]
+	parent_names = [supplier_item["name"] for supplier_item in supplier_list]
 	offers_data = (
 		frappe.qb.from_(supplier_offer)
 		.select(supplier_offer.parent, supplier_offer.offer, supplier_offer.idx)
@@ -443,10 +492,39 @@ def get_offers_by_supplier(supplier_list):
 		.orderby(supplier_offer.parent, supplier_offer.idx)
 	).run(as_dict=True)
 
-	# Group offers by parent
 	for offer in offers_data:
 		parent = offer["parent"]
 		if parent not in offers_by_parent:
 			offers_by_parent[parent] = []
 		offers_by_parent[parent].append(offer["offer"])
 	return offers_by_parent
+
+
+@frappe.whitelist()
+def get_po_history_for_item(item_code: str) -> list[dict]:
+	if not item_code:
+		return []
+
+	po = DocType("Purchase Order")
+	po_item = DocType("Purchase Order Item")
+
+	result = (
+		frappe.qb.from_(po)
+		.left_join(po_item)
+		.on(po_item.parent == po.name)
+		.select(
+			po.transaction_date,
+			po.name.as_("purchase_order"),
+			po.supplier,
+			po_item.item_code,
+			po.status,
+			Sum(po_item.qty).as_("qty"),
+			Sum(po_item.qty * po_item.rate).as_("amount"),
+		)
+		.where((po_item.item_code == item_code) & (po.docstatus == 1))
+		.groupby(po.name, po_item.item_code)
+		.orderby(po.transaction_date, order=Order.desc)
+		.limit(50)
+	).run(as_dict=True)
+
+	return result

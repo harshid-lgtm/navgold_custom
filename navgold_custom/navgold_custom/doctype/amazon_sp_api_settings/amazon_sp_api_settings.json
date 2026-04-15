@@ -4,18 +4,18 @@
 	"doctype": "DocType",
 	"editable_grid": 1,
 	"engine": "InnoDB",
+	"issingle": 1,
 	"field_order": [
 		"is_active",
 		"section_break_4",
 		"client_id",
+		"merchant_id",
 		"client_secret",
 		"country",
 		"column_break_1",
 		"refresh_token",
 		"section_break_2",
 		"company",
-		"temporary_stock_transfer_required",
-		"temporary_order_warehouse",
 		"warehouse",
 		"afn_warehouse",
 		"parent_item_group",
@@ -24,21 +24,15 @@
 		"customer_group",
 		"territory",
 		"customer_type",
-		"market_place_account_group",
-		"mfn_postage_fee_account_head",
 		"section_break_3",
 		"after_date",
-		"taxes_charges",
 		"sync_selected_date_only",
 		"sync_orders",
 		"column_break_4",
 		"enable_sync",
+		"last_synced_at",
 		"max_retry_limit",
-		"create_item_if_not_exists",
-		"is_old_data_migrated",
-		"map_state_data",
-		"adjust_stock_for_returns",
-		"return_invoice_stock_adjustment_before"
+		"is_old_data_migrated"
 	],
 	"fields": [
 		{
@@ -61,8 +55,7 @@
 			"fieldtype": "Data",
 			"in_list_view": 1,
 			"label": "Client ID",
-			"reqd": 1,
-			"unique": 1
+			"reqd": 1
 		},
 		{
 			"fieldname": "client_secret",
@@ -99,20 +92,6 @@
 			"label": "Company",
 			"options": "Company",
 			"reqd": 1
-		},
-		{
-			"default": "0",
-			"fieldname": "temporary_stock_transfer_required",
-			"fieldtype": "Check",
-			"label": "Temporary Stock Transfer Required?"
-		},
-		{
-			"depends_on": "eval: doc.temporary_stock_transfer_required",
-			"fieldname": "temporary_order_warehouse",
-			"fieldtype": "Link",
-			"label": "Temporary Order Warehouse",
-			"mandatory_depends_on": "temporary_stock_transfer_required",
-			"options": "Warehouse"
 		},
 		{
 			"fieldname": "warehouse",
@@ -168,20 +147,6 @@
 			"reqd": 1
 		},
 		{
-			"fieldname": "market_place_account_group",
-			"fieldtype": "Link",
-			"label": "Market Place Account Group",
-			"options": "Account",
-			"reqd": 1
-		},
-		{
-			"fieldname": "mfn_postage_fee_account_head",
-			"fieldtype": "Link",
-			"label": "MFN Postage Fee Account Head",
-			"options": "Account",
-			"reqd": 1
-		},
-		{
 			"fieldname": "section_break_3",
 			"fieldtype": "Section Break",
 			"label": "Syncing"
@@ -192,13 +157,6 @@
 			"fieldtype": "Date",
 			"label": "After Date",
 			"reqd": 1
-		},
-		{
-			"default": "0",
-			"description": "Get financial breakup of Taxes and charges data by Amazon ",
-			"fieldname": "taxes_charges",
-			"fieldtype": "Check",
-			"label": "Sync Taxes and Charges"
 		},
 		{
 			"default": "0",
@@ -227,17 +185,17 @@
 			"label": "Enable Scheduled Sync"
 		},
 		{
+			"fieldname": "last_synced_at",
+			"fieldtype": "Datetime",
+			"label": "Last Synced At",
+			"read_only": 1
+		},
+		{
 			"default": "3",
 			"fieldname": "max_retry_limit",
 			"fieldtype": "Int",
 			"label": "Max Retry Limit",
 			"non_negative": 1
-		},
-		{
-			"default": "1",
-			"fieldname": "create_item_if_not_exists",
-			"fieldtype": "Check",
-			"label": "Create Item If Not Exists"
 		},
 		{
 			"default": "0",
@@ -250,29 +208,15 @@
 			"report_hide": 1
 		},
 		{
-			"default": "0",
-			"fieldname": "map_state_data",
-			"fieldtype": "Check",
-			"label": "Map State Data"
-		},
-		{
-			"default": "0",
-			"description": "Use to Add stock for an item that was purchased before any stock was added into the system",
-			"fieldname": "adjust_stock_for_returns",
-			"fieldtype": "Check",
-			"label": "Adjust Stock for Returns?"
-		},
-		{
-			"depends_on": "eval: doc.adjust_stock_for_returns",
-			"fieldname": "return_invoice_stock_adjustment_before",
-			"fieldtype": "Date",
-			"label": "Return Invoice Stock Adjustment Before",
-			"mandatory_depends_on": "eval: doc.adjust_stock_for_returns"
+			"fieldname": "merchant_id",
+			"fieldtype": "Data",
+			"label": "Merchant ID",
+			"reqd": 1
 		}
 	],
 	"links": [],
-	"modified": "2025-11-08 11:25:49.215351",
-	"modified_by": "Administrator",
+	"modified": "2026-02-02 10:42:26.728127",
+	"modified_by": "rahul@buildwithhussain.com",
 	"module": "Navgold Custom",
 	"name": "Amazon SP API Settings",
 	"owner": "Administrator",

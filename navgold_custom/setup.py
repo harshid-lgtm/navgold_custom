@@ -19,12 +19,6 @@ def after_install():
 	create_custom_fields(get_purchase_receipt_custom_fields(), ignore_validate=True)
 	create_custom_fields(get_stock_entry_custom_fields(), ignore_validate=True)
 
-	# Creating Property setters
-	create_property_setters(get_purchase_receipt_item_property_setters())
-	create_property_setters(get_stock_entry_detail_property_setters())
-	create_property_setters(get_stock_entry_property_setters())
-	create_property_setters(get_item_property_setters())
-
 
 def after_migrate():
 	after_install()
@@ -77,18 +71,10 @@ def get_sales_order_custom_fields():
 				"no_copy": 1,
 			},
 			{
-				"fieldname": "amazon_transaction_type",
-				"fieldtype": "Data",
-				"label": "Amazon Transaction Type",
-				"insert_after": "amazon_order_id",
-				"read_only": 1,
-				"no_copy": 1,
-			},
-			{
 				"fieldname": "amazon_order_status",
 				"fieldtype": "Select",
 				"label": "Amazon Order Status",
-				"insert_after": "amazon_transaction_type",
+				"insert_after": "amazon_order_id",
 				"options": "\nShipped\nInvoiceUnconfirmed\nCanceled\nUnfulfillable\nPending\nUnshipped\nShipped - Picked Up",
 				"read_only": 1,
 				"no_copy": 1,
@@ -112,61 +98,21 @@ def get_sales_order_custom_fields():
 			},
 			{"fieldname": "cb_1", "fieldtype": "Column Break", "insert_after": "amazon_customer_type"},
 			{
-				"fieldname": "transaction_time",
-				"fieldtype": "Time",
-				"label": "Transaction Time",
-				"insert_after": "cb_1",
-				"no_copy": 1,
-			},
-			{
-				"fieldname": "replaced_order_id",
-				"fieldtype": "Data",
-				"label": "Replaced Order ID",
-				"insert_after": "transaction_time",
-				"read_only": 1,
-				"no_copy": 1,
-			},
-			{
 				"fieldname": "fulfillment_channel",
 				"fieldtype": "Select",
 				"label": "Fulfillment Channel",
-				"insert_after": "replaced_order_id",
+				"insert_after": "cb_1",
 				"read_only": 1,
 				"no_copy": 1,
 				"options": "\nAFN\nMFN",
 			},
 			{
-				"fieldname": "temporary_stock_tranfer_id",
-				"fieldtype": "Link",
-				"label": "Temporary Stock Transfer ID",
-				"insert_after": "transaction_time",
-				"read_only": 1,
-				"no_copy": 1,
-				"options": "Stock Entry",
-				"depends_on": "eval:frappe.session.user=='Administrator'",
-			},
-			{
 				"fieldname": "amazon_order_amount",
 				"fieldtype": "Currency",
 				"label": "Amazon Order Amount",
-				"insert_after": "temporary_stock_tranfer_id",
+				"insert_after": "fulfillment_channel",
 				"read_only": 1,
 				"no_copy": 1,
-			},
-			{
-				"fieldname": "custom_cancelled_items",
-				"fieldtype": "Section Break",
-				"label": "Cancelled Items",
-				"insert_after": "amazon_order_amount",
-			},
-			{
-				"fieldname": "cancelled_items",
-				"fieldtype": "Table",
-				"label": "Cancelled Items",
-				"insert_after": "custom_cancelled_items",
-				"read_only": 1,
-				"no_copy": 1,
-				"options": "Cancelled Order Items",
 			},
 		],
 		"Sales Order Item": [
@@ -199,18 +145,10 @@ def get_sales_invoice_custom_fields():
 				"no_copy": 1,
 			},
 			{
-				"fieldname": "amazon_transaction_type",
-				"fieldtype": "Data",
-				"label": "Amazon Transaction Type",
-				"insert_after": "amazon_order_id",
-				"read_only": 1,
-				"no_copy": 1,
-			},
-			{
 				"fieldname": "amazon_order_status",
 				"fieldtype": "Select",
 				"label": "Amazon Order Status",
-				"insert_after": "amazon_transaction_type",
+				"insert_after": "amazon_order_id",
 				"options": "\nShipped\nInvoiceUnconfirmed\nCanceled\nUnfulfillable\nPending\nUnshipped\nShipped - Picked Up",
 				"read_only": 1,
 				"no_copy": 1,
@@ -232,14 +170,6 @@ def get_sales_invoice_custom_fields():
 				"read_only": 1,
 				"no_copy": 1,
 				"options": "\nAFN\nMFN",
-			},
-			{
-				"fieldname": "replaced_order_id",
-				"fieldtype": "Data",
-				"label": "Replaced Order ID",
-				"insert_after": "is_return",
-				"read_only": 1,
-				"no_copy": 1,
 			},
 			{
 				"fieldname": "amazon_order_amount",
@@ -504,108 +434,3 @@ def get_stock_entry_custom_fields():
 			},
 		],
 	}
-
-
-def create_property_setters(property_setter_datas):
-	"""
-	Method to create custom property setters
-	args:
-		property_setter_datas : list of dict of property setter obj
-	"""
-	for property_setter_data in property_setter_datas:
-		if frappe.db.exists("Property Setter", property_setter_data):
-			continue
-		property_setter = frappe.new_doc("Property Setter")
-		property_setter.update(property_setter_data)
-		property_setter.flags.ignore_permissions = True
-		property_setter.insert()
-
-
-def get_purchase_receipt_item_property_setters():
-	return [
-		{
-			"doctype_or_field": "DocField",
-			"doc_type": "Purchase Receipt Item",
-			"field_name": "section_break_45",
-			"property": "hidden",
-			"value": 1,
-		},
-		{
-			"doctype_or_field": "DocField",
-			"doc_type": "Purchase Receipt Item",
-			"field_name": "section_break_3vxt",
-			"property": "hidden",
-			"value": 1,
-		},
-	]
-
-
-def get_stock_entry_detail_property_setters():
-	return [
-		{
-			"doctype_or_field": "DocField",
-			"doc_type": "Stock Entry Detail",
-			"field_name": "serial_no_batch",
-			"property": "hidden",
-			"value": 1,
-		},
-		{
-			"doctype_or_field": "DocField",
-			"doc_type": "Stock Entry Detail",
-			"field_name": "section_break_rdtg",
-			"property": "hidden",
-			"value": 1,
-		},
-	]
-
-
-def get_stock_entry_property_setters():
-	return [
-		{
-			"doctype_or_field": "DocField",
-			"doc_type": "Stock Entry",
-			"field_name": "sales_invoice_no",
-			"property": "depends_on",
-			"value": "from_return_invoice",
-		},
-		{
-			"doctype_or_field": "DocField",
-			"doc_type": "Stock Entry",
-			"field_name": "sales_invoice_no",
-			"property": "read_only",
-			"value": 1,
-		},
-		{
-			"doctype_or_field": "DocField",
-			"doc_type": "Stock Entry",
-			"field_name": "sales_invoice_no",
-			"property": "allow_on_submit",
-			"value": 1,
-		},
-	]
-
-
-def get_item_property_setters():
-	return [
-		{
-			"doctype_or_field": "DocField",
-			"doc_type": "Item",
-			"field_name": "is_stock_item",
-			"property": "default",
-			"value": 1,
-		},
-		{
-			"doctype_or_field": "DocField",
-			"doc_type": "Item",
-			"field_name": "is_sales_item",
-			"property": "default",
-			"value": 1,
-		},
-		{
-			"doctype_or_field": "DocField",
-			"doc_type": "Item",
-			"field_name": "is_purchase_item",
-			"property": "default",
-			"value": 1,
-		},
-	]

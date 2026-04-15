@@ -1,5 +1,5 @@
-// Copyright (c) 2025
-// Navgold - MIT License
+// Copyright (c) 2025, developers@buildwithhussain.com and contributors
+// For license information, please see license.txt
 
 frappe.ui.form.on('Purchase Receipt', {
 	refresh(frm) {
@@ -179,6 +179,7 @@ frappe.ui.form.on('Purchase Receipt', {
 				args: {
 					supplier: frm.doc.supplier,
 					item_code,
+					current_pr_items: frm.doc.items || [],
 				},
 			});
 
@@ -250,6 +251,18 @@ frappe.ui.form.on('Purchase Receipt', {
 						options: po_options,
 						reqd: 1,
 					},
+					{
+						label: __('Batch No'),
+						fieldname: 'batch_no',
+						fieldtype: 'Data',
+						reqd: 1,
+					},
+					{
+						label: __('Expiry Date'),
+						fieldname: 'expiry_date',
+						fieldtype: 'Date',
+						reqd: 1,
+					},
 					{ fieldtype: 'Section Break' },
 					{
 						label: __('Quantity'),
@@ -295,18 +308,50 @@ frappe.ui.form.on('Purchase Receipt', {
 						frappe.msgprint(__('Quantity exceeds pending qty'));
 						return;
 					}
-
-					await frm.events.map_po_item_to_pr(
-						frm,
-						po_data.po_name,
-						po_data.po_item_name,
-						values.qty_input,
-						values.warehouse,
-						d,
-						scan_dialog,
+					const min_expiry_in_days = await frappe.db.get_single_value(
+						'Navgold Settings',
+						'min_shelf_expiry_in_days',
 					);
-
-					resolve();
+					const current_expiry_in_days = frappe.datetime.get_diff(
+						values.expiry_date,
+						frappe.datetime.get_today(),
+					);
+					if (current_expiry_in_days < min_expiry_in_days) {
+						frappe.confirm(
+							__(
+								'Selected date {0} is less than minimum shelf expiry ({1} days). Do you want to proceed?',
+								[values.expiry_date, min_expiry_in_days],
+							),
+							async () => {
+								await frm.events.map_po_item_to_pr(
+									frm,
+									po_data.po_name,
+									item_code,
+									values.qty_input,
+									values.warehouse,
+									values.batch_no,
+									values.expiry_date,
+									d,
+									scan_dialog,
+								);
+								resolve();
+							},
+							() => resolve(),
+						);
+					} else {
+						await frm.events.map_po_item_to_pr(
+							frm,
+							po_data.po_name,
+							item_code,
+							values.qty_input,
+							values.warehouse,
+							values.batch_no,
+							values.expiry_date,
+							d,
+							scan_dialog,
+						);
+						resolve();
+					}
 				},
 			});
 
@@ -317,9 +362,11 @@ frappe.ui.form.on('Purchase Receipt', {
 	async map_po_item_to_pr(
 		frm,
 		po_name,
-		po_item_name,
+		item_code,
 		qty,
 		warehouse,
+		batch_no,
+		expiry_date,
 		po_dialog,
 		scan_dialog,
 	) {
@@ -329,9 +376,11 @@ frappe.ui.form.on('Purchase Receipt', {
 					'navgold_custom.navgold_custom.custom_script.purchase_receipt.purchase_receipt.add_scanned_po_item_to_pr',
 				args: {
 					po_name,
-					po_item_name,
+					item_code,
 					qty,
 					warehouse,
+					batch_no,
+					expiry_date,
 					target_pr_doc: JSON.stringify(frm.doc),
 				},
 				freeze: true,

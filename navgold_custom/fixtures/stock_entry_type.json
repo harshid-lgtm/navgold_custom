@@ -1,0 +1,11 @@
+[
+	{
+		"add_to_transit": 0,
+		"docstatus": 0,
+		"doctype": "Stock Entry Type",
+		"is_standard": 0,
+		"modified": "2026-03-01 09:06:22.420910",
+		"name": "FBA Transfer",
+		"purpose": "Material Transfer"
+	}
+]

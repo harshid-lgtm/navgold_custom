@@ -21,11 +21,10 @@ frappe.ui.form.on('Amazon SP API Settings', {
 			};
 		});
 
-		frm.set_query('market_place_account_group', () => {
+		frm.set_query('customer_group', () => {
 			return {
 				filters: {
-					is_group: 1,
-					company: frm.doc.company,
+					is_group: 0,
 				},
 			};
 		});
@@ -38,15 +37,6 @@ function handle_retry_btn(frm) {
 			title: __('Sync by Order ID'),
 			fields: [
 				{
-					label: __('Amazon SP API Settings'),
-					fieldname: 'sp_api_settings',
-					fieldtype: 'Link',
-					options: 'Amazon SP API Settings',
-					reqd: 1,
-					default: frm.doc.name,
-					hidden: 1,
-				},
-				{
 					label: __('Amazon Order ID'),
 					fieldname: 'amazon_order_id',
 					fieldtype: 'Data',
@@ -57,10 +47,8 @@ function handle_retry_btn(frm) {
 			primary_action(values) {
 				d.hide();
 				frappe.call({
-					method:
-						'navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_repository.get_order',
+					method: 'navgold_custom.navgold_custom.amazon_repository.get_order',
 					args: {
-						amz_setting_name: values.sp_api_settings,
 						amazon_order_ids: values.amazon_order_id,
 					},
 					freeze: true,
@@ -84,17 +72,8 @@ function handle_retry_btn(frm) {
 
 	frm.add_custom_button(__('Get Orders'), () => {
 		const d = new frappe.ui.Dialog({
-			title: 'Sync by Order ID',
+			title: __('Sync by Order IDs'),
 			fields: [
-				{
-					label: __('Amazon SP API Settings'),
-					fieldname: 'sp_api_settings',
-					fieldtype: 'Link',
-					options: 'Amazon SP API Settings',
-					reqd: 1,
-					default: frm.doc.name,
-					hidden: 1,
-				},
 				{
 					label: __('Amazon Order IDs'),
 					fieldname: 'amazon_order_ids',
@@ -108,10 +87,8 @@ function handle_retry_btn(frm) {
 				const amazon_order_ids = values.amazon_order_ids.split('\n');
 				for (let i = 0; i < amazon_order_ids.length; i++) {
 					frappe.call({
-						method:
-							'navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_repository.get_order',
+						method: 'navgold_custom.navgold_custom.amazon_repository.get_order',
 						args: {
-							amz_setting_name: values.sp_api_settings,
 							amazon_order_ids: amazon_order_ids[i],
 						},
 						freeze: true,

@@ -6,6 +6,7 @@ from collections import defaultdict
 import frappe
 from frappe import DoesNotExistError, _
 from frappe.model.document import Document
+from frappe.utils.data import flt
 
 
 class SupplierItemPriceandStock(Document):
@@ -19,10 +20,10 @@ class SupplierItemPriceandStock(Document):
 
 		from navgold_custom.navgold_custom.doctype.supplier_offer.supplier_offer import SupplierOffer
 
+		barcode: DF.Data | None
 		currency: DF.Link
 		item: DF.Link
 		item_price: DF.Link | None
-		normalized_qty: DF.Int
 		offers: DF.Table[SupplierOffer]
 		price: DF.Currency
 		purchase_blocked: DF.Check
@@ -30,24 +31,15 @@ class SupplierItemPriceandStock(Document):
 		stock_qty: DF.Int
 		supplier: DF.Link
 		supplier_part_number: DF.Data | None
-		unit_price: DF.Currency
 		uom: DF.Link
 	# end: auto-generated types
 
 	def before_insert(self):
+		if not frappe.db.exists(
+			"UOM Conversion Detail", {"parenttype": "Item", "parent": self.item, "uom": self.uom}
+		):
+			self.create_item_uom()
 		self.populate_item_price()
-
-	def calculate_unit_price(self):
-		uom_conversion_factor = frappe.db.get_value(
-			"UOM Conversion Detail", {"parent": self.item, "uom": self.uom}, "conversion_factor"
-		)
-		self.unit_price = self.price / uom_conversion_factor
-
-	def calculate_normalized_qty(self):
-		uom_conversion_factor = frappe.db.get_value(
-			"UOM Conversion Detail", {"parent": self.item, "uom": self.uom}, "conversion_factor"
-		)
-		self.normalized_qty = self.stock_qty * uom_conversion_factor
 
 	def populate_item_price(self):
 		price_list = frappe.db.get_single_value("Navgold Settings", "buying_price_list")
@@ -67,7 +59,7 @@ class SupplierItemPriceandStock(Document):
 			item_price.save()
 		except DoesNotExistError:
 			if not frappe.db.exists("Supplier", self.supplier):
-				frappe.throw(_(f"Supplier not found {self.supplier}"))
+				frappe.throw(_("Supplier not found {0}").format(self.supplier))
 			item_price = frappe.get_doc(
 				{
 					"doctype": "Item Price",
@@ -82,58 +74,57 @@ class SupplierItemPriceandStock(Document):
 		self.item_price = item_price.name
 
 	def validate(self):
-		# Item - Supplier combo should be unique
-		if frappe.db.exists(
-			"Supplier Item Price And Stock",
-			{"item": self.item, "supplier": self.supplier, "name": ["!=", self.name]},
-		):
-			frappe.throw(_(f"Entry with {self.supplier} and {self.item} already exists"))
+		if getattr(self.flags, "single_entry", True):
+			if frappe.db.exists(
+				"Supplier Item Price And Stock",
+				{"item": self.item, "supplier": self.supplier, "name": ["!=", self.name]},
+			):
+				frappe.throw(_("Entry with {0} and {1} already exists").format(self.supplier, self.item))
 		if not self.item_price:
 			self.populate_item_price()
 		if self.get_value_before_save("price") != self.price:
-			price_list = frappe.db.get_single_value("Navgold Settings", "buying_price_list")
+			frappe.db.set_value("Item Price", self.item_price, "price_list_rate", self.price)
 
-			item_price = frappe.get_last_doc(
-				"Item Price",
-				{
-					"item_code": self.item,
-					"uom": self.uom,
-					"buying": 1,
-					"supplier": self.supplier,
-					"price_list": price_list,
-				},
-				order_by="creation",
-			)
-			item_price.price_list_rate = self.price
-			item_price.save()
-			self.calculate_unit_price()
-		if self.get_value_before_save("stock_qty") != self.stock_qty:
-			self.calculate_normalized_qty()
+	def create_item_uom(self):
+		item = frappe.get_cached_doc("Item", self.item)
+		item.append(
+			"uoms",
+			{
+				"uom": self.uom,
+				"conversion_factor": frappe.db.get_value("UOM", self.uom, "custom_default_conversion_factor"),
+			},
+		).save()
 
 	def on_update(self):
-		if (
-			self.get_value_before_save("price") != self.price
-			or self.get_value_before_save("purchase_blocked") != self.purchase_blocked
-		):
-			update_supplier_rank()
+		if not getattr(self.flags, "bulk_entry", False):
+			if (
+				self.get_value_before_save("price") != self.price
+				or self.get_value_before_save("purchase_blocked") != self.purchase_blocked
+			):
+				update_supplier_rank()
 
 
 @frappe.whitelist()
 def update_supplier_rank():
 	frappe.enqueue(
-		"navgold_custom.navgold_custom.doctype.supplier_item_price_and_stock.supplier_item_price_and_stock._update_supplier_rank",
+		"navgold_custom.navgold_custom.doctype.supplier_item_price_and_stock.supplier_item_price_and_stock.run_update_supplier_rank",
 		now=True,
 	)
 
 
-def _update_supplier_rank():
+def run_update_supplier_rank():
 	records = frappe.db.get_all(
 		"Supplier Item Price and Stock",
-		fields=["name", "item", "uom", "unit_price", "purchase_blocked"],
+		fields=["name", "item", "uom", "price", "purchase_blocked", "supplier"],
 	)
 
 	if not records:
 		return
+
+	supplier_ranks = {
+		supplier.name: supplier.custom_rank or 0
+		for supplier in frappe.get_all("Supplier", fields=["name", "custom_rank"])
+	}
 
 	groups = defaultdict(list)
 	blocked = []
@@ -142,7 +133,8 @@ def _update_supplier_rank():
 		if record.purchase_blocked:
 			blocked.append(record.name)
 		else:
-			groups[(record.item, record.uom)].append(record)
+			record.supplier_custom_rank = supplier_ranks.get(record.supplier, 0)
+			groups[(record.item)].append(record)
 
 	try:
 		if blocked:
@@ -155,26 +147,30 @@ def _update_supplier_rank():
 
 		for group_records in groups.values():
 			update_rank_by_unit_price(group_records)
-	except Exception as e:
-		frappe.log_error(title="Error updating supplier rank", message=e)
+	except Exception as error:
+		frappe.log_error(title="Error updating supplier rank", message=error)
 
 
 def update_rank_by_unit_price(group_records):
-	"""After sorting we use for loop to handle ties, if the sorted list is [10, 10, 20, 30, 30], ranks should be [1, 1, 2, 3, 3] instead of [1, 2, 3, 4, 5]"""
+	def sort_key(record):
+		price = record.price or 0
+		custom_rank = record.supplier_custom_rank or 0
+		custom_rank_sort = flt("inf") if custom_rank == 0 else custom_rank
+		return (price, custom_rank_sort)
 
-	group_records.sort(key=lambda x: x.unit_price or 0)
+	group_records.sort(key=sort_key)
 	doc_updates = {}
 	rank = 1
-	prev_price = None
+	prev_sort_key = None
 
 	for i, record in enumerate(group_records):
-		price = record.unit_price or 0
+		current_sort_key = sort_key(record)
 
-		if prev_price is not None and price > prev_price:
+		if prev_sort_key is not None and current_sort_key > prev_sort_key:
 			rank = i + 1
 
 		doc_updates[record.name] = {"rank": rank}
-		prev_price = price
+		prev_sort_key = current_sort_key
 
 	frappe.db.bulk_update(
 		"Supplier Item Price and Stock",
