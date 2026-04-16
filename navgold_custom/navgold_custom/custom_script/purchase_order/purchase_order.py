@@ -1,4 +1,5 @@
 import frappe
+from frappe.utils.xlsxutils import make_xlsx
 
 
 def set_supplier_part_no(doc, method):
@@ -21,3 +22,46 @@ def set_supplier_part_no(doc, method):
 	for item in doc.items:
 		if item.item_code and part_nos.get(item.item_code):
 			item.supplier_part_no = part_nos[item.item_code]
+
+
+@frappe.whitelist()
+def export_po_items_summary(purchase_order: str):
+	doc = frappe.get_doc("Purchase Order", purchase_order)
+	doc.check_permission("read")
+
+	summary = {}
+	for item in doc.items:
+		key = item.item_code
+		if key not in summary:
+			summary[key] = {
+				"item_code": item.item_code,
+				"description": item.item_name,
+				"qty": 0,
+				"uom": item.uom,
+				"supplier_part_no": item.supplier_part_no or "",
+				"rate": item.rate,
+			}
+		summary[key]["qty"] += item.qty
+
+	headers = ["Item Code", "Description", "Quantity", "UOM", "Supplier Part Number", "Rate (GBP)"]
+	data = [headers]
+	for row in summary.values():
+		data.append(
+			[
+				row["item_code"],
+				row["description"],
+				row["qty"],
+				row["uom"],
+				row["supplier_part_no"],
+				row["rate"],
+			]
+		)
+
+	xlsx_file = make_xlsx(data, "PO Items Summary")
+
+	supplier_name = doc.supplier_name or doc.supplier or purchase_order
+	filename = f"{supplier_name}.xlsx"
+
+	frappe.response["filename"] = filename
+	frappe.response["filecontent"] = xlsx_file.getvalue()
+	frappe.response["type"] = "binary"
