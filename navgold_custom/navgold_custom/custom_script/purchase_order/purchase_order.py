@@ -31,35 +31,35 @@ def export_po_items_summary(purchase_order: str):
 
 	summary = {}
 	for item in doc.items:
-		key = item.item_code
-		if key not in summary:
-			summary[key] = {
-				"item_code": item.item_code,
-				"description": item.item_name,
-				"qty": 0,
-				"uom": item.uom,
-				"supplier_part_no": item.supplier_part_no or "",
-				"rate": item.rate,
-			}
-		summary[key]["qty"] += item.qty
+		if item.item_code not in summary:
+			row = item.as_dict()
+			row["qty"] = 0
+			summary[item.item_code] = row
+		summary[item.item_code]["qty"] += item.qty
 
-	headers = ["Item Code", "Description", "Quantity", "UOM", "Supplier Part Number", "Rate (GBP)"]
-	data = [headers]
-	for row in summary.values():
-		data.append(
-			[
-				row["item_code"],
-				row["description"],
-				row["qty"],
-				row["uom"],
-				row["supplier_part_no"],
-				row["rate"],
-			]
-		)
+	template_name = frappe.db.get_value("Supplier", doc.supplier, "custom_csv_export_template")
+	if template_name:
+		template = frappe.get_doc("PO CSV Export Template", template_name)
+		data = build_data_from_template(template, summary)
+	else:
+		data = build_default_data(summary)
 
 	supplier_name = doc.supplier_name or doc.supplier or purchase_order
-	filename = f"{supplier_name}.csv"
-
-	frappe.response["filename"] = filename
+	frappe.response["filename"] = f"{supplier_name}.csv"
 	frappe.response["filecontent"] = to_csv(data)
 	frappe.response["type"] = "binary"
+
+
+def build_default_data(summary):
+	headers = ["Item Code", "Description", "Quantity", "UOM", "Supplier Part Number", "Rate (GBP)"]
+	fields = ["item_code", "item_name", "qty", "uom", "supplier_part_no", "rate"]
+	rows = [[row.get(f) for f in fields] for row in summary.values()]
+	return [headers, *rows]
+
+
+def build_data_from_template(template, summary):
+	resolved = template.get_resolved_headers()
+	headers = [h for h, _ in resolved]
+	fields = [df.fieldname if df else None for _, df in resolved]
+	rows = [[row.get(f) if f else "" for f in fields] for row in summary.values()]
+	return [headers, *rows]
