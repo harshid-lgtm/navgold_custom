@@ -1,5 +1,5 @@
 import frappe
-from frappe.utils.xlsxutils import make_xlsx
+from frappe.utils.csvutils import to_csv
 
 
 def set_supplier_part_no(doc, method):
@@ -57,11 +57,9 @@ def export_po_items_summary(purchase_order: str):
 			]
 		)
 
-	xlsx_file = make_xlsx(data, "PO Items Summary")
-
 	supplier_name = doc.supplier_name or doc.supplier or purchase_order
-	filename = f"{supplier_name}.xlsx"
+	filename = f"{supplier_name}.csv"
 
 	frappe.response["filename"] = filename
-	frappe.response["filecontent"] = xlsx_file.getvalue()
+	frappe.response["filecontent"] = to_csv(data)
 	frappe.response["type"] = "binary"
