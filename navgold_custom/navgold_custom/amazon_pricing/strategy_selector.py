@@ -38,11 +38,17 @@ def select_strategy(pricing_doc) -> str | None:
 	if pricing_doc.fba_strategy in active_strategies and stock_info.get("fba_stock", 0) > 0:
 		return pricing_doc.fba_strategy
 
-	# Priority 2: SFP Strategy (Seller Fulfilled Prime, when no restock date)
-	if pricing_doc.sfp_strategy in active_strategies and not stock_info.get("has_restock_date", False):
+	# Priority 2: SFP Strategy (Seller Fulfilled Prime, when no restock date AND has some stock)
+	if (
+		pricing_doc.sfp_strategy in active_strategies
+		and not stock_info.get("has_restock_date", False)
+		and stock_info.get("total_stock", 0) > 0
+	):
 		return pricing_doc.sfp_strategy
-	# Priority 3: Backorder Strategy (when has restock date)
-	if pricing_doc.backorder_strategy in active_strategies and stock_info.get("has_restock_date", False):
+	# Priority 3: Backorder Strategy (when has restock date OR no stock at all)
+	if pricing_doc.backorder_strategy in active_strategies and (
+		stock_info.get("has_restock_date", False) or stock_info.get("total_stock", 0) == 0
+	):
 		return pricing_doc.backorder_strategy
 
 	# Priority 4: Default Strategy (fallback)
