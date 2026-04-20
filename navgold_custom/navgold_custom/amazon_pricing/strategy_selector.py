@@ -47,7 +47,7 @@ def select_strategy(pricing_doc) -> str | None:
 		return pricing_doc.sfp_strategy
 	# Priority 3: Backorder Strategy (when has restock date OR no stock at all)
 	if pricing_doc.backorder_strategy in active_strategies and (
-		stock_info.get("has_restock_date", False) or stock_info.get("total_stock", 0) == 0
+		stock_info.get("has_restock_date", False) or stock_info.get("total_stock", 0) <= 0
 	):
 		return pricing_doc.backorder_strategy
 
