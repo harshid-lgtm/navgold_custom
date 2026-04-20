@@ -249,6 +249,7 @@ export_python_type_annotations = True
 
 doctype_js = {
 	"Sales Order": ["navgold_custom/custom_script/sales_order/sales_order.js"],
+	"Purchase Order": ["navgold_custom/custom_script/purchase_order/purchase_order.js"],
 	"Purchase Receipt": ["navgold_custom/custom_script/purchase_receipt/purchase_receipt.js"],
 	"Pick List": ["navgold_custom/custom_script/pick_list/pick_list.js"],
 	"Packing Slip": ["navgold_custom/custom_script/packing_slip/packing_slip.js"],
