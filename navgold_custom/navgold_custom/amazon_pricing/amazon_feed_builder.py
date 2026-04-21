@@ -99,6 +99,7 @@ def get_sku_inventory_data(
 	active = pricing.active_strategy
 	is_fba = active and active == pricing.fba_strategy
 	is_sfp = active and active == pricing.sfp_strategy
+	is_backorder = active and active == pricing.backorder_strategy
 
 	if is_fba and stock_info.get("fba_stock", 0) > 0:
 		return {
@@ -131,15 +132,19 @@ def get_sku_inventory_data(
 		)
 
 	raw_qty = flt(stock_info.get("mfn_stock", 0))
-	quantity = calculate_adjusted_qty(raw_qty, pool_size, pack_size)
-
-	if zero_stock_proxy_skus is not None and pricing.proxy_sku in zero_stock_proxy_skus:
-		quantity = 0
+	warehouse_qty = calculate_adjusted_qty(raw_qty, pool_size, pack_size)
 
 	top_supplier = get_top_supplier_for_item(item_code) if item_code else None
 	lead_time_days = (
 		get_supplier_lead_time(top_supplier.supplier, getdate(today()).strftime("%A")) if top_supplier else 1
 	)
+	top_supplier_stock = top_supplier.get("stock_qty", 0) if top_supplier else 0
+	top_supplier_qty = calculate_adjusted_qty(top_supplier_stock, pool_size, pack_size)
+
+	quantity = top_supplier_qty if is_backorder else warehouse_qty
+
+	if zero_stock_proxy_skus is not None and pricing.proxy_sku in zero_stock_proxy_skus:
+		quantity = 0
 
 	restock_date = None
 	if stock_info.get("has_restock_date", False):
@@ -153,6 +158,7 @@ def get_sku_inventory_data(
 		"fulfillment_channel": "DEFAULT",
 		"restock_date": restock_date,
 		"lead_time_days": lead_time_days,
+		"send_lead_time": not is_sfp,
 		"shipping_group": shipping_group,
 		"is_fba": False,
 	}
@@ -181,30 +187,24 @@ def build_inventory_patches(inventory_data: dict, marketplace_id: str) -> list:
 	if inventory_data["is_fba"]:
 		patches.append(
 			{
-				"op": "add",
+				"op": "replace",
 				"path": "/attributes/fulfillment_availability",
 				"value": [{"fulfillment_channel_code": "AMAZON_EU"}],
-			}
-		)
-		patches.append(
-			{
-				"op": "delete",
-				"path": "/attributes/fulfillment_availability",
-				"value": [{"fulfillment_channel_code": "DEFAULT"}],
 			}
 		)
 	else:
 		fulfillment_value = {
 			"quantity": inventory_data["quantity"],
 			"fulfillment_channel_code": "DEFAULT",
-			"lead_time_to_ship_max_days": inventory_data["lead_time_days"],
 		}
+		if inventory_data.get("send_lead_time"):
+			fulfillment_value["lead_time_to_ship_max_days"] = inventory_data["lead_time_days"]
 		if inventory_data.get("restock_date"):
 			fulfillment_value["restock_date"] = inventory_data["restock_date"]
 
 		patches.append(
 			{
-				"op": "add",
+				"op": "replace",
 				"path": "/attributes/fulfillment_availability",
 				"value": [fulfillment_value],
 			}
@@ -218,14 +218,6 @@ def build_inventory_patches(inventory_data: dict, marketplace_id: str) -> list:
 					"value": [{"value": inventory_data["shipping_group"], "marketplace_id": marketplace_id}],
 				}
 			)
-
-		patches.append(
-			{
-				"op": "delete",
-				"path": "/attributes/fulfillment_availability",
-				"value": [{"fulfillment_channel_code": "AMAZON_EU"}],
-			}
-		)
 
 	return patches
 
@@ -245,6 +237,7 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 			"active_strategy",
 			"fba_strategy",
 			"sfp_strategy",
+			"backorder_strategy",
 		],
 	)
 
