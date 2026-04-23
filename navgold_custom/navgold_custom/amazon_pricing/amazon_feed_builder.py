@@ -30,7 +30,6 @@ def get_top_supplier_for_item(item_code: str) -> dict | None:
 	return suppliers[0] if suppliers else None
 
 
-@redis_cache(ttl=3600 * 12)
 def get_supplier_lead_time(supplier_name: str, day: str) -> int:
 	lead_time = frappe.db.get_value(
 		"Supplier Lead Time",
