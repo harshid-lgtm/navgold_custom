@@ -14,7 +14,8 @@ frappe.ui.form.on('Supplier', {
 			for (const day of DAYS_OF_WEEK) {
 				frm.add_child('custom_lead_time', {
 					day: day,
-					lead_time: 1,
+					lead_time_before_12: 1,
+					lead_time_after_12: 1,
 				});
 			}
 			frm.refresh_field('custom_lead_time');

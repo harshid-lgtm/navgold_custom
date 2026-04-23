@@ -15,7 +15,8 @@ class SupplierLeadTime(Document):
 		from frappe.types import DF
 
 		day: DF.Literal["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
-		lead_time: DF.Int
+		lead_time_after_12: DF.Int
+		lead_time_before_12: DF.Int
 		parent: DF.Data
 		parentfield: DF.Data
 		parenttype: DF.Data

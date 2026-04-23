@@ -7,7 +7,7 @@ import math
 import frappe
 from frappe.query_builder import DocType
 from frappe.query_builder.functions import Count
-from frappe.utils import add_days, getdate, today
+from frappe.utils import add_days, getdate, now_datetime, today
 from frappe.utils.caching import redis_cache
 from frappe.utils.data import cint, cstr, flt, orjson_dumps
 
@@ -30,12 +30,19 @@ def get_top_supplier_for_item(item_code: str) -> dict | None:
 	return suppliers[0] if suppliers else None
 
 
-def get_supplier_lead_time(supplier_name: str, day: str) -> int:
-	lead_time = frappe.db.get_value(
+def get_supplier_lead_time(supplier_name: str) -> int:
+	current_datetime = now_datetime()
+	day = current_datetime.strftime("%A")
+	row = frappe.db.get_value(
 		"Supplier Lead Time",
 		{"parent": supplier_name, "parenttype": "Supplier", "day": day},
-		"lead_time",
+		["lead_time_before_12", "lead_time_after_12"],
+		as_dict=True,
 	)
+	if not row:
+		return 1
+
+	lead_time = row.lead_time_before_12 if current_datetime.hour < 12 else row.lead_time_after_12
 	return cint(lead_time) or 1
 
 
@@ -134,9 +141,7 @@ def get_sku_inventory_data(
 	warehouse_qty = calculate_adjusted_qty(raw_qty, pool_size, pack_size)
 
 	top_supplier = get_top_supplier_for_item(item_code) if item_code else None
-	lead_time_days = (
-		get_supplier_lead_time(top_supplier.supplier, getdate(today()).strftime("%A")) if top_supplier else 1
-	)
+	lead_time_days = get_supplier_lead_time(top_supplier.supplier) if top_supplier else 1
 	top_supplier_stock = top_supplier.get("stock_qty", 0) if top_supplier else 0
 	top_supplier_qty = calculate_adjusted_qty(top_supplier_stock, pool_size, pack_size)
 
