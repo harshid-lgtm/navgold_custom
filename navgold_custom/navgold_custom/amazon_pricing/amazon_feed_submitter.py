@@ -59,7 +59,6 @@ def submit_pricing(pricing_names: list, test_mode: bool = False) -> dict:
 	if swap_records:
 		log.supplier_swap_notes = format_supplier_swap_notes(swap_records)
 	log.insert()
-	return
 	try:
 		feeds_client = get_feeds_client(settings)
 
