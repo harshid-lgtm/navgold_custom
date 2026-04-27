@@ -11,6 +11,11 @@ from frappe import _
 from frappe.integrations.utils import make_get_request, make_post_request
 from frappe.utils import flt, now_datetime
 
+from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import (
+	format_supplier_swap_notes,
+	get_allowed_pricing_proxy_skus,
+	get_swapped_backorder_prices,
+)
 from navgold_custom.navgold_custom.utils import bulk_set_value
 
 REPRICER_API_BASE = "https://api.repricer.com/v1/repricers"
@@ -71,6 +76,7 @@ def sync_to_repricer(pricing_names: list) -> dict:
 				"current_min_price",
 				"current_max_price",
 				"active_strategy",
+				"backorder_strategy",
 			],
 		)
 	}
@@ -95,6 +101,7 @@ def sync_to_repricer(pricing_names: list) -> dict:
 	# We could have used get_all with filters but we will loose the reason
 	products_to_update = []
 	errors = []
+	swap_records = []
 	for pricing_name in pricing_names:
 		try:
 			pricing = pricing_records.get(pricing_name)
@@ -117,12 +124,20 @@ def sync_to_repricer(pricing_names: list) -> dict:
 			is_fba = fba_map.get(pricing.proxy_sku)
 			repricer_rule = strategy_map.get(pricing.active_strategy) or ""
 
+			final_min = flt(pricing.current_min_price)
+			final_max = flt(pricing.current_max_price)
+			swap_result = get_swapped_backorder_prices(pricing)
+			if swap_result:
+				final_min = swap_result["final_min_price"]
+				final_max = swap_result["final_max_price"]
+				swap_records.append(swap_result["swap_record"])
+
 			product_update = {
 				"sku": pricing.proxy_sku,
 				"marketplace": "AUK",
 				"merchant_id": amazon_settings.merchant_id,
-				"price_min": flt(pricing.current_min_price),
-				"price_max": flt(pricing.current_max_price),
+				"price_min": final_min,
+				"price_max": final_max,
 				"unit_cost": 0.0,
 				"unit_currency": "GBP",
 				"shipping_cost": 0.0,
@@ -164,6 +179,8 @@ def sync_to_repricer(pricing_names: list) -> dict:
 	log.completed_at = now_datetime()
 	log.feed_content = csv_data
 	log.response_content = frappe.as_json(response)
+	if swap_records:
+		log.supplier_swap_notes = format_supplier_swap_notes(swap_records)
 	log.save()
 
 	errored_names = {e.split(":")[0] for e in errors}
@@ -172,6 +189,27 @@ def sync_to_repricer(pricing_names: list) -> dict:
 		bulk_set_value("Amazon Product Pricing", synced_names, "last_repricer_sync", now_datetime())
 
 	return {"synced": len(products_to_update), "errors": errors, "log_name": log.name}
+
+
+def submit_active_repricer() -> dict:
+	pricing_rows = frappe.get_all(
+		"Amazon Product Pricing",
+		filters={"is_active": 1},
+		fields=["name", "proxy_sku"],
+	)
+
+	allowed_pricing_proxy_skus = get_allowed_pricing_proxy_skus()
+	if allowed_pricing_proxy_skus is not None:
+		pricing_rows = [row for row in pricing_rows if row.proxy_sku in allowed_pricing_proxy_skus]
+
+	pricing_names = [row.name for row in pricing_rows]
+
+	if not pricing_names:
+		return {"success": True, "message": "No eligible pricing records to sync", "synced_count": 0}
+
+	result = sync_to_repricer(pricing_names)
+	result["synced_count"] = len(pricing_names)
+	return result
 
 
 @frappe.whitelist()

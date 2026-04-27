@@ -290,9 +290,13 @@ scheduler_events = {
 	"cron": {
 		"*/30 * * * *": [
 			"navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api_settings.schedule_get_order_details",
+			"navgold_custom.navgold_custom.doctype.navgold_settings.navgold_settings.schedule_bulk_refresh_strategies",
+			"navgold_custom.navgold_custom.doctype.navgold_settings.navgold_settings.schedule_submit_active_pricing",
+			"navgold_custom.navgold_custom.doctype.navgold_settings.navgold_settings.schedule_submit_active_repricer",
 		],
 	},
 	"daily": [
 		"navgold_custom.navgold_custom.doctype.supplier_item_price_and_stock.supplier_item_price_and_stock.run_update_supplier_rank",
+		"navgold_custom.navgold_custom.doctype.amazon_product_strategy.amazon_product_strategy.refresh_all_strategy_costs",
 	],
 }

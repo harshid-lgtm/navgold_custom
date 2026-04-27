@@ -7,6 +7,8 @@ from frappe.utils import now_datetime
 
 from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import (
 	build_pricing_feed,
+	format_supplier_swap_notes,
+	get_allowed_pricing_proxy_skus,
 	validate_pricing_feed,
 )
 from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import Feeds
@@ -32,7 +34,9 @@ def submit_pricing(pricing_names: list, test_mode: bool = False) -> dict:
 
 	seller_id = settings.merchant_id
 
-	json_content = build_pricing_feed(pricing_names, seller_id, settings.get_marketplace_id())
+	feed_result = build_pricing_feed(pricing_names, seller_id, settings.get_marketplace_id())
+	json_content = feed_result["feed_content"]
+	swap_records = feed_result["swap_records"]
 
 	validation = validate_pricing_feed(json_content)
 	if not validation["valid"]:
@@ -44,6 +48,7 @@ def submit_pricing(pricing_names: list, test_mode: bool = False) -> dict:
 			"test_mode": True,
 			"message_count": validation["message_count"],
 			"json_preview": json_content[:2000],
+			"supplier_swaps": swap_records,
 		}
 
 	log = frappe.new_doc("Amazon Pricing Submission Log")
@@ -51,8 +56,9 @@ def submit_pricing(pricing_names: list, test_mode: bool = False) -> dict:
 	log.status = "Pending"
 	log.pricing_records = "\n".join(pricing_names)
 	log.feed_content = json_content
+	if swap_records:
+		log.supplier_swap_notes = format_supplier_swap_notes(swap_records)
 	log.insert()
-
 	try:
 		feeds_client = get_feeds_client(settings)
 
@@ -163,3 +169,32 @@ def bulk_submit_pricing(pricing_names: str, test_mode: bool = False) -> dict:
 		frappe.throw(_("No pricing records provided"))
 
 	return submit_pricing(pricing_names, test_mode=test_mode)
+
+
+def submit_active_pricing() -> dict:
+	pricing_rows = frappe.get_all(
+		"Amazon Product Pricing",
+		filters={"is_active": 1},
+		fields=["name", "proxy_sku"],
+	)
+
+	allowed_pricing_proxy_skus = get_allowed_pricing_proxy_skus()
+	if allowed_pricing_proxy_skus is not None:
+		pricing_rows = [row for row in pricing_rows if row.proxy_sku in allowed_pricing_proxy_skus]
+
+	pricing_names = [row.name for row in pricing_rows]
+
+	if not pricing_names:
+		return {"success": True, "message": "No eligible pricing records to submit", "submitted_count": 0}
+
+	result = submit_pricing(pricing_names) or {}
+
+	frappe.db.set_single_value(
+		"Navgold Settings",
+		"last_pricing_synced_at",
+		now_datetime(),
+		update_modified=False,
+	)
+
+	result["submitted_count"] = len(pricing_names)
+	return result

@@ -18,6 +18,7 @@
 		"result_document_id",
 		"records_section",
 		"pricing_records",
+		"supplier_swap_notes",
 		"feed_content_section",
 		"feed_content",
 		"response_content",
@@ -99,6 +100,13 @@
 			"fieldname": "pricing_records",
 			"fieldtype": "Long Text",
 			"label": "Pricing Records"
+		},
+		{
+			"description": "Per-SKU notes when a backorder rank-1 supplier was out of stock and we fell back to the next best supplier (with recomputed price).",
+			"fieldname": "supplier_swap_notes",
+			"fieldtype": "Long Text",
+			"label": "Supplier Swap Notes",
+			"read_only": 1
 		},
 		{
 			"collapsible": 1,
