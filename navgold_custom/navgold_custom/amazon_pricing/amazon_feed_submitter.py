@@ -189,8 +189,7 @@ def submit_active_pricing() -> dict:
 
 	result = submit_pricing(pricing_names) or {}
 
-	frappe.db.set_value(
-		"Navgold Settings",
+	frappe.db.set_single_value(
 		"Navgold Settings",
 		"last_pricing_synced_at",
 		now_datetime(),
