@@ -112,7 +112,7 @@ class AmazonProductStrategy(Document):
 			supplier_price = frappe.db.get_value(
 				"Supplier Item Price and Stock",
 				{"item": item_code, "purchase_blocked": 0, "stock_qty": [">", 0]},
-				order_by="rank",
+				order_by="rank asc",
 				fieldname="price",
 			)
 
@@ -150,3 +150,45 @@ class AmazonProductStrategy(Document):
 				cost.value = flt(last_transfer_rate)
 			elif cost.source == "Auto-Sync":
 				cost.value = flt(sub_type_defaults.get(cost.cost_sub_type))
+
+
+STRATEGY_REFRESH_CHUNK_SIZE = 5000
+
+
+def refresh_all_strategy_costs():
+	strategy_names = frappe.get_all(
+		"Amazon Product Strategy",
+		filters={"is_active": 1},
+		pluck="name",
+	)
+
+	chunks = [
+		strategy_names[index : index + STRATEGY_REFRESH_CHUNK_SIZE]
+		for index in range(0, len(strategy_names), STRATEGY_REFRESH_CHUNK_SIZE)
+	]
+
+	for chunk in chunks:
+		frappe.enqueue(
+			"navgold_custom.navgold_custom.doctype.amazon_product_strategy.amazon_product_strategy.refresh_strategy_costs_chunk",
+			queue="long",
+			timeout=6000,
+			strategy_names=chunk,
+		)
+
+	return {"total": len(strategy_names), "chunks_enqueued": len(chunks)}
+
+
+def refresh_strategy_costs_chunk(strategy_names: list):
+	refreshed = 0
+	for strategy_name in strategy_names:
+		try:
+			strategy = frappe.get_doc("Amazon Product Strategy", strategy_name)
+			strategy.save(ignore_permissions=True)
+			refreshed += 1
+		except Exception as exception:
+			frappe.log_error(
+				f"Daily strategy cost refresh failed for {strategy_name}: {exception!s}",
+				"Amazon Product Strategy Refresh",
+			)
+
+	return {"total": len(strategy_names), "refreshed": refreshed}

@@ -4,6 +4,7 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
+from frappe.utils.background_jobs import is_job_enqueued
 
 BATCH_SIZE = 5000
 
@@ -17,8 +18,14 @@ class NavgoldSettings(Document):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
+		from navgold_custom.navgold_custom.doctype.navgold_published_pricing_item.navgold_published_pricing_item import (
+			NavgoldPublishedPricingItem,
+		)
 		from navgold_custom.navgold_custom.doctype.navgold_zero_stock_item.navgold_zero_stock_item import (
 			NavgoldZeroStockItem,
+		)
+		from navgold_custom.navgold_custom.doctype.strategy_name_mapping.strategy_name_mapping import (
+			StrategyNameMapping,
 		)
 
 		amazon_pricing_enabled: DF.Check
@@ -31,11 +38,15 @@ class NavgoldSettings(Document):
 		default_prep_owner: DF.Literal["AMAZON", "SELLER", "NONE"]
 		default_stock_allocation_warehouse: DF.Link | None
 		default_strategy_template: DF.Link | None
+		enable_pricing_sync: DF.Check
 		fba_inbound_enabled: DF.Check
 		fba_source_address: DF.Link | None
 		high_price_commission_adjustment: DF.Float
+		last_pricing_synced_at: DF.Datetime | None
 		min_shelf_expiry_in_days: DF.Int
 		multiple_active_item_uom: DF.Check
+		pricing_publishing_mode: DF.Literal["Publish All Prices", "Publish Selected Prices Only"]
+		published_pricing_items: DF.Table[NavgoldPublishedPricingItem]
 		repricer_api_password: DF.Password | None
 		repricer_api_username: DF.Data | None
 		repricer_enabled: DF.Check
@@ -44,6 +55,7 @@ class NavgoldSettings(Document):
 			"Publish Zero Stock for All Items",
 			"Publish Zero Stock for Selected Items",
 		]
+		strategy_name_mapping: DF.Table[StrategyNameMapping]
 		subscribe_and_save_warehouse: DF.Link
 		tote_weight_limit: DF.Int
 		zero_stock_items: DF.Table[NavgoldZeroStockItem]
@@ -132,6 +144,63 @@ class NavgoldSettings(Document):
 	@frappe.whitelist()
 	def generate_amazon_pricing_for_all(self):
 		return generate_amazon_pricing_for_proxy_skus()
+
+	@frappe.whitelist()
+	def submit_active_pricing_now(self):
+		if is_job_enqueued("navgold.amazon_manual_pricing_sync"):
+			frappe.msgprint(_("A pricing feed submission is already in progress."))
+			return
+
+		frappe.enqueue(
+			job_id="navgold.amazon_manual_pricing_sync",
+			deduplicate=True,
+			method="navgold_custom.navgold_custom.amazon_pricing.amazon_feed_submitter.submit_active_pricing",
+			timeout=6000,
+			now=frappe.flags.in_test,
+		)
+
+		frappe.msgprint(_("Pricing feed submission has been queued."))
+
+
+def schedule_submit_active_pricing():
+	settings = frappe.get_cached_doc("Navgold Settings")
+	if not settings.enable_pricing_sync:
+		return
+
+	if not settings.amazon_pricing_enabled:
+		return
+
+	frappe.enqueue(
+		job_id="navgold.amazon_scheduled_pricing_sync",
+		deduplicate=True,
+		method="navgold_custom.navgold_custom.amazon_pricing.amazon_feed_submitter.submit_active_pricing",
+		timeout=6000,
+	)
+
+
+def schedule_submit_active_repricer():
+	settings = frappe.get_cached_doc("Navgold Settings")
+	if not settings.enable_pricing_sync:
+		return
+
+	if not settings.repricer_enabled:
+		return
+
+	frappe.enqueue(
+		job_id="navgold.repricer_scheduled_sync",
+		deduplicate=True,
+		method="navgold_custom.navgold_custom.amazon_pricing.repricer_client.submit_active_repricer",
+		timeout=6000,
+	)
+
+
+def schedule_bulk_refresh_strategies():
+	frappe.enqueue(
+		job_id="navgold.scheduled_bulk_refresh_strategies",
+		deduplicate=True,
+		method="navgold_custom.navgold_custom.amazon_pricing.strategy_selector.bulk_refresh_strategies",
+		timeout=6000,
+	)
 
 
 def generate_proxy_skus_batch(start, batch):
