@@ -281,7 +281,7 @@ def export_errored_rows(docname: str):
 	errored_data = frappe.parse_json(doc.errored_rows)
 
 	errored_data.insert(0, [*TEMPLATE_COLUMNS, "Error"])
-	build_csv_response(errored_data, f"Errored Rows - {docname}.csv")
+	build_csv_response(errored_data, f"Errored Rows - {docname}")
 
 
 def run_import(docname):
