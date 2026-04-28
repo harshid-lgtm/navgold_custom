@@ -329,7 +329,7 @@
 			"read_only_depends_on": "eval:frappe.session.user != \"Administrator\""
 		},
 		{
-			"description": "Submit a pricing feed now for all active Amazon Product Pricing records.",
+			"description": "Submit a pricing feed to Amazon and sync prices to Repricer (if enabled) for all active Amazon Product Pricing records. Honors the Pricing Publishing Mode selection above.",
 			"fieldname": "sync_pricing_now",
 			"fieldtype": "Button",
 			"label": "Sync Pricing Now",
