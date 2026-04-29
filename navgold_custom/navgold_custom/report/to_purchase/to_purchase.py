@@ -12,13 +12,25 @@ material_request_status_list = ["Pending", "Partially Ordered", "Partially Recei
 
 
 def execute(filters: dict | None = None):
-	data = get_data(filters)
-	columns = get_columns(data)
-	return columns, data
+	rows, max_supplier_offers, reference_suppliers = get_data(filters)
+	columns = get_columns(max_supplier_offers, reference_suppliers)
+	return columns, rows
 
 
-def get_columns(data: list[dict]) -> list[dict]:
-	columns = [
+def get_columns(max_supplier_offers: int, reference_suppliers: list[dict]) -> list[dict]:
+	columns = get_static_columns()
+	columns += build_offer_columns(max_supplier_offers, fieldname_prefix="offer")
+	for reference_supplier in reference_suppliers:
+		columns += build_offer_columns(
+			reference_supplier["max_offers"],
+			fieldname_prefix=f"{reference_supplier['field_prefix']}_offer",
+			label_prefix=reference_supplier["display_name"],
+		)
+	return columns
+
+
+def get_static_columns() -> list[dict]:
+	return [
 		{
 			"label": _("History"),
 			"fieldname": "po_history",
@@ -114,38 +126,98 @@ def get_columns(data: list[dict]) -> list[dict]:
 			"width": 150,
 		},
 	]
-	# Dynamically add offer columns (Child table rows)
-	max_offers = 0
-	for row in data:
-		if row.get("offers"):
-			max_offers = max(max_offers, len(row["offers"]))
 
-	for i in range(max_offers):
-		if i == 0:
-			month_label = "This Month"
-		elif i == 1:
-			month_label = "Next Month"
-		else:
-			month_label = f"In {i} Months"
 
+def build_offer_columns(count: int, fieldname_prefix: str, label_prefix: str = "") -> list[dict]:
+	columns = []
+	for i in range(count):
+		month_label = _(get_month_label(i))
+		label = f"{label_prefix}: {month_label}" if label_prefix else month_label
 		columns.append(
 			{
-				"label": _(month_label),
-				"fieldname": f"offer_{i}",
+				"label": label,
+				"fieldname": f"{fieldname_prefix}_{i}",
 				"fieldtype": "Data",
-				"width": 150,
+				"width": 180 if label_prefix else 150,
 			}
 		)
-
 	return columns
 
 
-# Adds supplier to list until the required qty is satified
+def get_month_label(index: int) -> str:
+	if index == 0:
+		return "This Month"
+	if index == 1:
+		return "Next Month"
+	return f"In {index} Months"
+
+
+# Adds supplier to list in price-rank order until each item's required qty is satisfied
 def get_data(filters):
+	items_needed = get_items_needed(frappe.cint(filters.get("is_amazon_pending", 0)))
+	if not items_needed:
+		return [], 0, []
+
+	item_codes = list(items_needed.keys())
+	supplier_list = get_supplier_list(item_codes, filters.get("supplier"))
+
+	offers_by_parent = get_offers_by_supplier(supplier_list)
+	last_purchase_rate_map = get_last_purchase_rate_map(supplier_list)
+	reference_suppliers = get_reference_supplier_offers(item_codes)
+	free_qty_map = get_free_qty_map(item_codes)
+
+	results = []
+	max_supplier_offers = 0
+	item_remaining = dict(items_needed)
+
+	for supplier_item in supplier_list:
+		item_code = supplier_item["item"]
+		remaining = item_remaining.get(item_code, 0)
+		if remaining <= 0:
+			continue
+
+		available_stock = supplier_item["stock_qty"]
+		allocated = min(available_stock, remaining)
+		item_remaining[item_code] = remaining - allocated
+
+		offers = offers_by_parent.get(supplier_item["name"], [])
+		if len(offers) > max_supplier_offers:
+			max_supplier_offers = len(offers)
+
+		item_qty_data = free_qty_map.get(item_code, {})
+		row = {
+			"po_history": "",
+			"item_code": item_code,
+			"description": supplier_item["description"],
+			"actual_qty": item_qty_data.get("actual_qty", 0),
+			"free_qty": item_qty_data.get("free_qty", 0),
+			"total_required_qty": items_needed[item_code],
+			"supplier": supplier_item["supplier"],
+			"supplier_uom": supplier_item["uom"],
+			"available_stock": available_stock,
+			"allocated_qty": allocated,
+			"remaining_qty": remaining - allocated,
+			"unit_price": supplier_item["unit_price"],
+			"last_purchase_rate": last_purchase_rate_map.get((item_code, supplier_item["supplier"]), "NA"),
+			"ref_doc": supplier_item["name"],
+			"supplier_rank": supplier_item["rank"],
+		}
+		for i, offer in enumerate(offers):
+			row[f"offer_{i}"] = offer
+		# Nesting is fine as we will only have 1 reference supplier with 3 offer rows at max - it's almost O(n)
+		for reference_supplier in reference_suppliers:
+			for i, offer in enumerate(reference_supplier["offers_by_item"].get(item_code, [])):
+				row[f"{reference_supplier['field_prefix']}_offer_{i}"] = offer
+
+		results.append(row)
+
+	return results, max_supplier_offers, reference_suppliers
+
+
+def get_items_needed(is_amazon_pending: int) -> dict:
 	material_request = DocType("Material Request")
 	material_request_item = DocType("Material Request Item")
-	supplier_item_price_and_stock = DocType("Supplier Item Price and Stock")
-	item_doc = DocType("Item")
+
 	items_requests = (
 		frappe.qb.from_(material_request)
 		.left_join(material_request_item)
@@ -158,7 +230,7 @@ def get_data(filters):
 		.where(
 			(material_request.material_request_type == "Purchase")
 			& (material_request.status.isin(material_request_status_list))
-			& (material_request.custom_is_amazon_pending == frappe.cint(filters.get("is_amazon_pending", 0)))
+			& (material_request.custom_is_amazon_pending == is_amazon_pending)
 		)
 	).run(as_dict=True)
 
@@ -174,12 +246,21 @@ def get_data(filters):
 
 		if pending > 0:
 			items_needed[item_code] = items_needed.get(item_code, 0) + pending
-	if not items_needed:
-		return []
-	supplier_list_query = (
+
+	return items_needed
+
+
+def get_supplier_list(item_codes: list[str], supplier_filter: str | None) -> list[dict]:
+	supplier_doc = DocType("Supplier")
+	supplier_item_price_and_stock = DocType("Supplier Item Price and Stock")
+	item_doc = DocType("Item")
+
+	query = (
 		frappe.qb.from_(supplier_item_price_and_stock)
 		.left_join(item_doc)
 		.on(supplier_item_price_and_stock.item == item_doc.name)
+		.left_join(supplier_doc)
+		.on(supplier_item_price_and_stock.supplier == supplier_doc.name)
 		.select(
 			supplier_item_price_and_stock.item,
 			item_doc.description,
@@ -193,71 +274,17 @@ def get_data(filters):
 		.where(
 			(supplier_item_price_and_stock.purchase_blocked != 1)
 			& (supplier_item_price_and_stock.stock_qty > 0)
-			& (supplier_item_price_and_stock.item.isin(list(items_needed)))
+			& (supplier_item_price_and_stock.item.isin(item_codes))
+			& (supplier_doc.custom_is_reference_only != 1)
 		)
 	)
 
-	if filters.get("supplier"):
-		supplier_list_query = supplier_list_query.where(
-			supplier_item_price_and_stock.supplier == filters.get("supplier")
-		)
+	if supplier_filter:
+		query = query.where(supplier_item_price_and_stock.supplier == supplier_filter)
 
-	supplier_list = supplier_list_query.orderby(
-		supplier_item_price_and_stock.item, supplier_item_price_and_stock.unit_price
-	).run(as_dict=True)
-
-	if supplier_list:
-		offers_by_parent = get_offers_by_supplier(supplier_list)
-
-	last_purchase_rate_map = get_last_purchase_rate_map(supplier_list) if supplier_list else {}
-
-	free_qty_map = get_free_qty_map(list(items_needed.keys()))
-
-	results = []
-
-	item_remaining = {item_code: qty for item_code, qty in items_needed.items()}
-
-	for supplier_item in supplier_list:
-		item_code = supplier_item["item"]
-
-		remaining = item_remaining.get(item_code, 0)
-		if remaining <= 0:
-			continue
-
-		total_required = items_needed[item_code]
-		available_stock = supplier_item["stock_qty"]
-
-		allocated = min(available_stock, remaining)
-
-		item_remaining[item_code] = remaining - allocated
-
-		offers = offers_by_parent.get(supplier_item["name"], [])
-
-		item_qty_data = free_qty_map.get(item_code, {})
-		row = {
-			"po_history": "",
-			"item_code": item_code,
-			"description": supplier_item["description"],
-			"actual_qty": item_qty_data.get("actual_qty", 0),
-			"free_qty": item_qty_data.get("free_qty", 0),
-			"total_required_qty": total_required,
-			"supplier": supplier_item["supplier"],
-			"supplier_uom": supplier_item["uom"],
-			"available_stock": available_stock,
-			"allocated_qty": allocated,
-			"remaining_qty": remaining - allocated,
-			"unit_price": supplier_item["unit_price"],
-			"last_purchase_rate": last_purchase_rate_map.get((item_code, supplier_item["supplier"]), "NA"),
-			"ref_doc": supplier_item["name"],
-			"supplier_rank": supplier_item["rank"],
-			"offers": offers,
-		}
-		for i, offer in enumerate(offers):
-			row[f"offer_{i}"] = offer
-
-		results.append(row)
-
-	return results
+	return query.orderby(supplier_item_price_and_stock.item, supplier_item_price_and_stock.unit_price).run(
+		as_dict=True
+	)
 
 
 # This is a 3 step process
@@ -482,8 +509,10 @@ def get_last_purchase_rate_map(supplier_list):
 
 
 def get_offers_by_supplier(supplier_list):
+	if not supplier_list:
+		return {}
+
 	supplier_offer = DocType("Supplier Offer")
-	offers_by_parent = {}
 	parent_names = [supplier_item["name"] for supplier_item in supplier_list]
 	offers_data = (
 		frappe.qb.from_(supplier_offer)
@@ -492,12 +521,86 @@ def get_offers_by_supplier(supplier_list):
 		.orderby(supplier_offer.parent, supplier_offer.idx)
 	).run(as_dict=True)
 
+	offers_by_parent = {}
 	for offer in offers_data:
 		parent = offer["parent"]
 		if parent not in offers_by_parent:
 			offers_by_parent[parent] = []
 		offers_by_parent[parent].append(offer["offer"])
 	return offers_by_parent
+
+
+def get_reference_supplier_offers(item_codes):
+	if not item_codes:
+		return []
+
+	supplier_doc = DocType("Supplier")
+	supplier_item_price_and_stock = DocType("Supplier Item Price and Stock")
+	supplier_offer = DocType("Supplier Offer")
+
+	reference_records = (
+		frappe.qb.from_(supplier_item_price_and_stock)
+		.left_join(supplier_doc)
+		.on(supplier_item_price_and_stock.supplier == supplier_doc.name)
+		.select(
+			supplier_item_price_and_stock.name,
+			supplier_item_price_and_stock.item,
+			supplier_item_price_and_stock.supplier,
+			supplier_doc.supplier_name,
+		)
+		.where(
+			(supplier_item_price_and_stock.item.isin(item_codes))
+			& (supplier_doc.custom_is_reference_only == 1)
+		)
+	).run(as_dict=True)
+
+	if not reference_records:
+		return []
+
+	parent_meta = {
+		row["name"]: {
+			"supplier": row["supplier"],
+			"item": row["item"],
+			"display_name": row["supplier_name"] or row["supplier"],
+		}
+		for row in reference_records
+	}
+
+	offers_data = (
+		frappe.qb.from_(supplier_offer)
+		.select(supplier_offer.parent, supplier_offer.offer, supplier_offer.idx)
+		.where(supplier_offer.parent.isin(list(parent_meta.keys())))
+		.orderby(supplier_offer.parent, supplier_offer.idx)
+	).run(as_dict=True)
+
+	by_supplier = {}
+	for _parent_name, meta in parent_meta.items():
+		supplier = meta["supplier"]
+		if supplier not in by_supplier:
+			by_supplier[supplier] = {
+				"supplier": supplier,
+				"display_name": meta["display_name"],
+				"offers_by_item": {},
+				"max_offers": 0,
+			}
+
+	for offer in offers_data:
+		meta = parent_meta.get(offer["parent"])
+		if not meta:
+			continue
+		bucket = by_supplier[meta["supplier"]]
+		item_offers = bucket["offers_by_item"].setdefault(meta["item"], [])
+		item_offers.append(offer["offer"])
+		if len(item_offers) > bucket["max_offers"]:
+			bucket["max_offers"] = len(item_offers)
+
+	reference_suppliers = [bucket for bucket in by_supplier.values() if bucket["max_offers"] > 0]
+	reference_suppliers.sort(key=lambda bucket: bucket["display_name"])
+
+	for index, bucket in enumerate(reference_suppliers):
+		bucket["field_prefix"] = f"ref{index}"
+
+	return reference_suppliers
 
 
 @frappe.whitelist()
