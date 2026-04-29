@@ -147,19 +147,35 @@ class NavgoldSettings(Document):
 
 	@frappe.whitelist()
 	def submit_active_pricing_now(self):
+		queued = []
+
 		if is_job_enqueued("navgold.amazon_manual_pricing_sync"):
 			frappe.msgprint(_("A pricing feed submission is already in progress."))
-			return
+		else:
+			frappe.enqueue(
+				job_id="navgold.amazon_manual_pricing_sync",
+				deduplicate=True,
+				method="navgold_custom.navgold_custom.amazon_pricing.amazon_feed_submitter.submit_active_pricing",
+				timeout=6000,
+				now=frappe.flags.in_test,
+			)
+			queued.append(_("Amazon pricing feed"))
 
-		frappe.enqueue(
-			job_id="navgold.amazon_manual_pricing_sync",
-			deduplicate=True,
-			method="navgold_custom.navgold_custom.amazon_pricing.amazon_feed_submitter.submit_active_pricing",
-			timeout=6000,
-			now=frappe.flags.in_test,
-		)
+		if self.repricer_enabled:
+			if is_job_enqueued("navgold.repricer_manual_sync"):
+				frappe.msgprint(_("A Repricer sync is already in progress."))
+			else:
+				frappe.enqueue(
+					job_id="navgold.repricer_manual_sync",
+					deduplicate=True,
+					method="navgold_custom.navgold_custom.amazon_pricing.repricer_client.submit_active_repricer",
+					timeout=6000,
+					now=frappe.flags.in_test,
+				)
+				queued.append(_("Repricer sync"))
 
-		frappe.msgprint(_("Pricing feed submission has been queued."))
+		if queued:
+			frappe.msgprint(_("Queued: {0}").format(", ".join(queued)))
 
 
 def schedule_submit_active_pricing():
