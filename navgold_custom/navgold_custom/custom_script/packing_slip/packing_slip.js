@@ -20,7 +20,7 @@ function add_scan_buttons(frm) {
 
 	if (!frm.doc.custom_tote) {
 		frm.add_custom_button(__('Scan Tote'), () =>
-			navgold.packing.open_scan_tote_dialog(frm, 'custom_tote'),
+			navgold.packing.open_scan_tote_dialog(frm, 'custom_tote', false),
 		);
 	}
 
