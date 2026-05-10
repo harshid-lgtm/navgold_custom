@@ -27,7 +27,7 @@ def get_draft_delivery_note_items(tote: str | None = None):
 
 	pick_list_names = frappe.get_all(
 		"Pick List",
-		filters={"custom_tote": tote, "docstatus": 1, "status": "Open"},
+		filters={"custom_tote": tote, "docstatus": 1, "status": ["in", ["Open", "Partly Delivered"]]},
 		pluck="name",
 	)
 
