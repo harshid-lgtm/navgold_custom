@@ -7,6 +7,7 @@ frappe.ui.form.on('Packing Slip', {
 		add_scan_buttons(frm);
 		add_sfp_label_button(frm);
 		add_sfp_cancel_button(frm);
+		add_pack_remaining_button(frm);
 	},
 });
 
@@ -88,6 +89,23 @@ function add_sfp_cancel_button(frm) {
 				5,
 			);
 		}
+	});
+}
+
+async function add_pack_remaining_button(frm) {
+	if (frm.doc.docstatus !== 1 || !frm.doc.custom_tote) return;
+
+	const response = await frappe.call({
+		method:
+			'navgold_custom.navgold_custom.custom_script.packing_slip.packing_slip_api.get_draft_delivery_note_items',
+		args: { tote: frm.doc.custom_tote },
+	});
+
+	const remaining_items = response.message || [];
+	if (!remaining_items.length) return;
+
+	frm.add_custom_button(__('Pack Remaining Items'), () => {
+		frappe.new_doc('Packing Slip', { custom_tote: frm.doc.custom_tote });
 	});
 }
 
@@ -272,7 +290,8 @@ async function set_delivery_note_and_load_items(
 ) {
 	frm.selected_delivery_note = source_name;
 
-	await frm.set_value('delivery_note', source_name);
+	frm.doc.delivery_note = source_name;
+	frm.refresh_field('delivery_note');
 	frm.toggle_enable('delivery_note', false);
 
 	const response = await frappe.call({
