@@ -17,6 +17,7 @@ navgold.packing.resolve_barcode = async function resolve_barcode(barcode) {
 navgold.packing.open_scan_tote_dialog = function open_scan_tote_dialog(
 	frm,
 	tote_fieldname,
+	show_scanner = true,
 ) {
 	const dialog = new frappe.ui.Dialog({
 		title: __('Scan Tote'),
@@ -43,19 +44,22 @@ navgold.packing.open_scan_tote_dialog = function open_scan_tote_dialog(
 	dialog.show();
 	setTimeout(() => {
 		dialog.fields_dict.tote_barcode.$input.focus();
-		new frappe.ui.Scanner({
-			dialog: true,
-			on_scan: (data) => {
-				dialog.fields_dict.tote_barcode.$input.val(data.decodedText);
-				dialog.fields_dict.tote_barcode.$input.trigger('change');
-			},
-		});
+		if (show_scanner) {
+			new frappe.ui.Scanner({
+				dialog: true,
+				on_scan: (data) => {
+					dialog.fields_dict.tote_barcode.$input.val(data.decodedText);
+					dialog.fields_dict.tote_barcode.$input.trigger('change');
+				},
+			});
+		}
 	}, 150);
 };
 
 navgold.packing.open_scan_item_dialog = function open_scan_item_dialog(
 	frm,
 	process_scan,
+	show_scanner = true,
 ) {
 	const dialog = new frappe.ui.Dialog({
 		title: __('Scan Item Barcode'),
@@ -77,12 +81,14 @@ navgold.packing.open_scan_item_dialog = function open_scan_item_dialog(
 	dialog.show();
 	setTimeout(() => {
 		dialog.fields_dict.item_barcode.$input.focus();
-		new frappe.ui.Scanner({
-			dialog: true,
-			on_scan: (data) => {
-				dialog.fields_dict.item_barcode.$input.val(data.decodedText);
-				dialog.fields_dict.item_barcode.$input.trigger('change');
-			},
-		});
+		if (show_scanner) {
+			new frappe.ui.Scanner({
+				dialog: true,
+				on_scan: (data) => {
+					dialog.fields_dict.item_barcode.$input.val(data.decodedText);
+					dialog.fields_dict.item_barcode.$input.trigger('change');
+				},
+			});
+		}
 	}, 150);
 };
