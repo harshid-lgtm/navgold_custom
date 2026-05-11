@@ -26,7 +26,7 @@ function add_scan_buttons(frm) {
 
 	if (frm.doc.custom_tote) {
 		frm.add_custom_button(__('Scan Item Barcode'), () =>
-			navgold.packing.open_scan_item_dialog(frm, process_item_scan),
+			navgold.packing.open_scan_item_dialog(frm, process_item_scan, false),
 		);
 	}
 }
