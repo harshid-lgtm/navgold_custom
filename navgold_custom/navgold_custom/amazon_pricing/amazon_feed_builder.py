@@ -19,6 +19,7 @@ from navgold_custom.navgold_custom.amazon_pricing.strategy_selector import get_s
 SHIPPING_GROUPS = {
 	"sfp": "57d54587-7341-4c9f-b3f9-546c8d798b21",
 	"main_revised": "a31ca016-36ab-481f-b399-b61d727c93d3",
+	"two_day": "2285513b3c-c531-42c1-9adb-ee55d0318d1a",
 }
 
 
@@ -141,7 +142,7 @@ def build_proxy_sku_info_map(proxy_sku_names: list) -> dict:
 	proxy_sku_rows = frappe.get_all(
 		"Proxy SKU",
 		filters={"name": ["in", proxy_sku_names]},
-		fields=["name", "item", "uom"],
+		fields=["name", "item", "uom", "merchant_shipping_group"],
 	)
 
 	proxy_sku_map = {row.name: row for row in proxy_sku_rows}
@@ -173,7 +174,13 @@ def build_proxy_sku_info_map(proxy_sku_names: list) -> dict:
 	for proxy_sku, row in proxy_sku_map.items():
 		pool_size = pool_size_map.get(row.item, 1)
 		pack_size = uom_factor_map.get((row.item, row.uom), 1.0)
-		result[proxy_sku] = {"item": row.item, "uom": row.uom, "pool_size": pool_size, "pack_size": pack_size}
+		result[proxy_sku] = {
+			"item": row.item,
+			"uom": row.uom,
+			"pool_size": pool_size,
+			"pack_size": pack_size,
+			"merchant_shipping_group": row.merchant_shipping_group,
+		}
 
 	return result
 
@@ -211,9 +218,20 @@ def get_sku_inventory_data(
 		item_code = sku_info["item"]
 		pool_size = sku_info["pool_size"]
 		pack_size = sku_info["pack_size"]
+		sku_shipping_group_choice = sku_info.get("merchant_shipping_group")
 	else:
-		item_code = frappe.db.get_value("Proxy SKU", pricing.proxy_sku, "item")
-		proxy_uom = frappe.db.get_value("Proxy SKU", pricing.proxy_sku, "uom")
+		proxy_sku_row = (
+			frappe.db.get_value(
+				"Proxy SKU",
+				pricing.proxy_sku,
+				["item", "uom", "merchant_shipping_group"],
+				as_dict=True,
+			)
+			or {}
+		)
+		item_code = proxy_sku_row.get("item")
+		proxy_uom = proxy_sku_row.get("uom")
+		sku_shipping_group_choice = proxy_sku_row.get("merchant_shipping_group")
 		pool_size = frappe.db.count("Proxy SKU", filters={"item": item_code, "is_active": 1}) or 1
 		pack_size = (
 			flt(
@@ -251,7 +269,11 @@ def get_sku_inventory_data(
 		po_date = stock_info.get("restock_date")
 		restock_date = cstr(po_date) if po_date else cstr(add_days(today(), lead_time_days))
 
-	shipping_group = SHIPPING_GROUPS["sfp"] if is_sfp else SHIPPING_GROUPS["main_revised"]
+	if is_sfp:
+		is_two_day = (sku_shipping_group_choice or "").strip().lower() == "twoday"
+		shipping_group = SHIPPING_GROUPS["two_day"] if is_two_day else SHIPPING_GROUPS["sfp"]
+	else:
+		shipping_group = SHIPPING_GROUPS["main_revised"]
 
 	return {
 		"quantity": quantity,
