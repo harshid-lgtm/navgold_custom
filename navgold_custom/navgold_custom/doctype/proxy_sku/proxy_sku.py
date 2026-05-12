@@ -235,7 +235,7 @@ def process_bulk_listing_import():
 			updates["is_fba"] = is_fba
 		if proxy_sku.is_active != is_active:
 			updates["is_active"] = is_active
-		if shipping_group and proxy_sku.merchant_shipping_group != shipping_group:
+		if (proxy_sku.merchant_shipping_group or "") != shipping_group:
 			updates["merchant_shipping_group"] = shipping_group
 
 		if updates:
