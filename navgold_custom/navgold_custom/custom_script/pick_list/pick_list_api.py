@@ -5,7 +5,7 @@ import frappe
 from erpnext.selling.doctype.sales_order.sales_order import create_pick_list
 from erpnext.stock.doctype.pick_list.pick_list import create_stock_entry
 from frappe import _
-from frappe.utils import flt, orjson_dumps
+from frappe.utils import flt
 
 
 @frappe.whitelist()
@@ -143,7 +143,7 @@ def create_fba_transfer_stock_entry(pick_list_name: str) -> dict:
 		return frappe.get_cached_doc("Stock Entry", existing).as_dict()
 
 	pick_list_doc = frappe.get_cached_doc("Pick List", pick_list_name)
-	stock_entry = create_stock_entry(orjson_dumps(pick_list_doc.as_dict()))
+	stock_entry = create_stock_entry(frappe.as_json(pick_list_doc.as_dict()))
 
 	if not stock_entry:
 		frappe.throw(_("Could not create Stock Entry for Pick List {0}").format(pick_list_name))
