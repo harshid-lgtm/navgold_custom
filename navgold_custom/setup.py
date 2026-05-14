@@ -114,6 +114,15 @@ def get_sales_order_custom_fields():
 				"read_only": 1,
 				"no_copy": 1,
 			},
+			{
+				"fieldname": "is_prime",
+				"fieldtype": "Check",
+				"label": "Is Prime",
+				"insert_after": "amazon_order_amount",
+				"read_only": 1,
+				"no_copy": 1,
+				"in_standard_filter": 1,
+			},
 		],
 		"Sales Order Item": [
 			{

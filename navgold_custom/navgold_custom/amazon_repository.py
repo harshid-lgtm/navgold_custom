@@ -286,6 +286,7 @@ class AmazonRepository:
 					"amazon_order_status": order.get("OrderStatus"),
 					"fulfillment_channel": order.get("FulfillmentChannel"),
 					"amazon_customer_type": "B2B" if order.get("IsBusinessOrder") else "B2C",
+					"is_prime": 1 if order.get("IsPrime") else 0,
 					"customer": customer_name,
 					"company": self.amz_setting.company,
 					"transaction_date": transaction_date,
