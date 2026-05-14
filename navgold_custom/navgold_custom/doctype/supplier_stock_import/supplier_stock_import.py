@@ -188,16 +188,26 @@ class SupplierStockImport(Document):
 		price = frappe.utils.flt(row[3]) if len(row) > 3 else 0
 		barcode = row[4] if len(row) > 4 else None
 
-		uom = self.get_uom_from_barcode_and_conversion_factor(barcode, uom)
 		if self.use_supplier_part_number:
 			if not supplier_part_number:
 				raise ValueError(
 					"Supplier Part Number is required when 'Use Supplier Part Number' is checked"
 				)
-		else:
-			if not barcode:
-				raise ValueError("Barcode is required")
+			existing_record = self.get_existing_record_from_spn(supplier_part_number)
+			if not existing_record:
+				raise ValueError(
+					f"No existing record for supplier part number '{supplier_part_number}'. "
+					f"SPN mode can only update existing records."
+				)
 
+			self.update_record(existing_record, stock_qty, price, supplier_part_number)
+			self.append_log(f"Row {row_idx-1}: Updated {existing_record}")
+			return
+
+		if not barcode:
+			raise ValueError("Barcode is required")
+
+		uom = self.get_uom_from_barcode_and_conversion_factor(barcode, uom)
 		if not uom:
 			raise ValueError("UOM is required")
 
@@ -213,6 +223,13 @@ class SupplierStockImport(Document):
 
 			new_name = self.create_record(item, uom, stock_qty, price, supplier_part_number, barcode)
 			self.append_log(f"Row {row_idx-1}: Created {new_name}")
+
+	def get_existing_record_from_spn(self, supplier_part_number):
+		return frappe.db.get_value(
+			"Supplier Item Price and Stock",
+			{"supplier": self.supplier, "supplier_part_number": supplier_part_number},
+			"name",
+		)
 
 	def get_existing_record(self, supplier_part_number, barcode, uom):
 		if self.use_supplier_part_number:
