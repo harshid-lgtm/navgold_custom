@@ -33,6 +33,7 @@ def get_open_sales_orders_for_delivery(customer: str | None = None, company: str
 			"per_picked",
 			"per_delivered",
 			"company",
+			"is_prime",
 		],
 		order_by="delivery_date asc, creation desc",
 	)
@@ -105,6 +106,7 @@ def get_open_sales_orders_for_delivery(customer: str | None = None, company: str
 					"total_weight": round(stats["total_weight"], 2),
 					"pending_items_count": stats["pending_items_count"],
 					"company": so.company,
+					"is_prime": so.is_prime,
 				}
 			)
 

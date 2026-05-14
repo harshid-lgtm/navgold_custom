@@ -102,6 +102,45 @@ frappe.query_reports['Navgold Forecast Report'] = {
 			return valid_items;
 		};
 
+		report.page.add_inner_button(__('Create Material Request'), () => {
+			const valid_items = get_valid_items();
+			if (!valid_items) return;
+
+			frappe.confirm(
+				__('Create Material Request for {0} items?', [valid_items.length]),
+				async () => {
+					try {
+						const response = await frappe.call({
+							method:
+								'navgold_custom.navgold_custom.report.navgold_forecast_report.navgold_forecast_report.create_material_requests_from_forecast_report',
+							args: { selected_items: valid_items },
+							freeze: true,
+							freeze_message: __('Creating Material Request...'),
+						});
+
+						if (response.message?.success) {
+							const mr_name = response.message.material_request;
+							frappe.msgprint({
+								title: __('Created Successfully'),
+								message: `MR: <a href="/app/material-request/${mr_name}" target="_blank">${mr_name}</a>`,
+								indicator: 'green',
+							});
+							forecast_report_state.edited_quantities = {};
+							report.refresh();
+						}
+					} catch (error) {
+						frappe.msgprint({
+							title: __('Error'),
+							message: __(
+								'Failed to create Material Request. Check error log.',
+							),
+							indicator: 'red',
+						});
+					}
+				},
+			);
+		});
+
 		report.page.add_inner_button(__('Create PO + Material Request'), () => {
 			const valid_items = get_valid_items();
 			if (!valid_items) return;

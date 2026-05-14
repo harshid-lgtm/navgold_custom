@@ -146,7 +146,8 @@ frappe.ui.form.on('Pick List', {
 						<th style="width: 50px;"><input type="checkbox" id="select-all-so"></th>
 						<th>Sales Order</th>
 						<th>Customer</th>
-						<th>Delivery Date</th>
+						<th>Dispatch Date</th>
+						<th>Is Prime</th>
 						<th>Total Weight (g)</th>
 						<th>Pending Items</th>
 					</tr>
@@ -168,6 +169,11 @@ frappe.ui.form.on('Pick List', {
             </a></td>
             <td>${so.customer}</td>
             <td>${frappe.datetime.str_to_user(so.delivery_date) || '-'}</td>
+            <td>${
+							cint(so.is_prime)
+								? '<span class="indicator-pill blue">Prime</span>'
+								: '-'
+						}</td>
             <td>${flt(so.total_weight, 2)}</td>
             <td>${so.pending_items_count}</td>
         </tr>

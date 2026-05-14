@@ -971,6 +971,32 @@ def create_purchase_orders_from_forecast_report(selected_items: str | list[dict]
 
 
 @frappe.whitelist()
+def create_material_requests_from_forecast_report(selected_items: str | list[dict]):
+	if isinstance(selected_items, str):
+		selected_items = frappe.parse_json(selected_items)
+
+	if not selected_items:
+		frappe.throw(_("No items selected"))
+
+	sku_info = build_sku_info(selected_items)
+
+	amz_setting = frappe.get_single("Amazon SP API Settings")
+	company = amz_setting.company
+	target_warehouse = amz_setting.afn_warehouse
+
+	if not target_warehouse:
+		frappe.throw(_("AFN Warehouse not configured in Amazon SP API Settings"))
+
+	material_request = create_material_request_doc(selected_items, sku_info, company, target_warehouse)[0]
+
+	return {
+		"success": True,
+		"material_request": material_request.name,
+		"message": _("Created Material Request {0}").format(material_request.name),
+	}
+
+
+@frappe.whitelist()
 def create_purchase_orders_and_material_request_from_forecast_report(selected_items: str):
 	if isinstance(selected_items, str):
 		selected_items = frappe.parse_json(selected_items)
