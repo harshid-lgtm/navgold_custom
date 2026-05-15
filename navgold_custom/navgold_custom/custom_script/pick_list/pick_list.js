@@ -147,6 +147,7 @@ frappe.ui.form.on('Pick List', {
 						<th>Sales Order</th>
 						<th>Customer</th>
 						<th>Dispatch Date</th>
+						<th>Delivery Date</th>
 						<th>Is Prime</th>
 						<th>Total Weight (g)</th>
 						<th>Pending Items</th>
@@ -168,6 +169,7 @@ frappe.ui.form.on('Pick List', {
                 ${so.sales_order}
             </a></td>
             <td>${so.customer}</td>
+            <td>${frappe.datetime.str_to_user(so.dispatch_date) || '-'}</td>
             <td>${frappe.datetime.str_to_user(so.delivery_date) || '-'}</td>
             <td>${
 							cint(so.is_prime)

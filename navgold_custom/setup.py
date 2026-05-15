@@ -123,6 +123,16 @@ def get_sales_order_custom_fields():
 				"no_copy": 1,
 				"in_standard_filter": 1,
 			},
+			{
+				"fieldname": "dispatch_date",
+				"fieldtype": "Date",
+				"label": "Dispatch Date",
+				"insert_after": "is_prime",
+				"read_only": 1,
+				"no_copy": 1,
+				"in_standard_filter": 1,
+				"description": "Amazon's LatestShipDate — SLA deadline to ship by",
+			},
 		],
 		"Sales Order Item": [
 			{

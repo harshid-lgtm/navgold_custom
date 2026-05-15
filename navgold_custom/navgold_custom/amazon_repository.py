@@ -272,8 +272,23 @@ class AmazonRepository:
 			customer_name = self.create_customer(order)
 			self.create_address(order, customer_name)
 
-			delivery_date = getdate(parse_amazon_utc(order.get("LatestShipDate")))
-			transaction_date = getdate(parse_amazon_utc(order.get("PurchaseDate")))
+			purchase_date_str = order.get("PurchaseDate")
+			latest_ship_date_str = order.get("LatestShipDate")
+			latest_delivery_date_str = order.get("LatestDeliveryDate")
+
+			transaction_date = (
+				getdate(parse_amazon_utc(purchase_date_str)) if purchase_date_str else getdate()
+			)
+			dispatch_date = getdate(parse_amazon_utc(latest_ship_date_str)) if latest_ship_date_str else None
+			delivery_date = (
+				getdate(parse_amazon_utc(latest_delivery_date_str)) if latest_delivery_date_str else None
+			)
+
+			if not delivery_date:
+				delivery_date = dispatch_date or transaction_date
+
+			if delivery_date < transaction_date:
+				delivery_date = transaction_date
 
 			warehouse = self.amz_setting.warehouse
 			if order.get("FulfillmentChannel") == "AFN":
@@ -290,7 +305,8 @@ class AmazonRepository:
 					"customer": customer_name,
 					"company": self.amz_setting.company,
 					"transaction_date": transaction_date,
-					"delivery_date": delivery_date if delivery_date > transaction_date else transaction_date,
+					"delivery_date": delivery_date,
+					"dispatch_date": dispatch_date,
 				}
 			)
 
