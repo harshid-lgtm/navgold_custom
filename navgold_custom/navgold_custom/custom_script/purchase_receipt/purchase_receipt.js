@@ -5,7 +5,7 @@ frappe.ui.form.on('Purchase Receipt', {
 	refresh(frm) {
 		if (frm.doc.docstatus === 0) {
 			frm.add_custom_button(__('Scan Item'), () =>
-				frm.events.open_scan_dialog(frm),
+				frm.events.open_scan_dialog(frm, false),
 			);
 		}
 
@@ -16,7 +16,7 @@ frappe.ui.form.on('Purchase Receipt', {
 		}
 	},
 
-	open_scan_dialog(frm) {
+	open_scan_dialog(frm, show_scanner = true) {
 		if (!frm.doc.supplier) {
 			frappe.throw({
 				title: __('Mandatory'),
@@ -66,14 +66,15 @@ frappe.ui.form.on('Purchase Receipt', {
 
 		control.refresh();
 		dialog.barcode_control = control;
+		dialog._show_scanner = show_scanner;
 
-		new frappe.ui.Scanner({
-			dialog: true,
-			on_scan: (data) => {
+		navgold.packing.attach_camera_scanner(
+			(data) => {
 				control.$input.val(data.decodedText);
 				control.$input.focus();
 			},
-		});
+			{ show_scanner },
+		);
 
 		const handle_scanner_value = async (barcode_value) => {
 			if (frm._scan_locked) return;
@@ -402,19 +403,10 @@ frappe.ui.form.on('Purchase Receipt', {
 
 				setTimeout(() => {
 					if (frappe.ui.open_dialogs.length < 1) {
-						frm.events.open_scan_dialog(frm);
-					} else {
-						new frappe.ui.Scanner({
-							dialog: true,
-							on_scan: (data) => {
-								scan_dialog?.fields_dict.scan_wrapper.$wrapper
-									.find('input')
-									.val(data.decodedText);
-								scan_dialog?.fields_dict.scan_wrapper.$wrapper
-									.find('input')
-									.focus();
-							},
-						});
+						frm.events.open_scan_dialog(
+							frm,
+							scan_dialog?._show_scanner ?? true,
+						);
 					}
 				}, 400);
 			}

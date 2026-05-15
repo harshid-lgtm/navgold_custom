@@ -252,13 +252,13 @@ function add_scan_buttons(frm) {
 
 	if (!frm.doc.custom_tote) {
 		frm.add_custom_button(__('Scan Tote'), () =>
-			navgold.packing.open_scan_tote_dialog(frm, 'custom_tote'),
+			navgold.packing.open_scan_tote_dialog(frm, 'custom_tote', false),
 		);
 	}
 
 	if (frm.doc.custom_tote) {
 		frm.add_custom_button(__('Scan Item'), () =>
-			navgold.packing.open_scan_item_dialog(frm, process_pick_scan),
+			navgold.packing.open_scan_item_dialog(frm, process_pick_scan, false),
 		);
 	}
 }
@@ -498,8 +498,10 @@ function show_pick_summary_dialog(frm, row) {
 		primary_action_label: __('Scan Item'),
 		primary_action() {
 			dialog.hide();
-			navgold.packing.open_scan_item_dialog(frm, (_frm, barcode) =>
-				process_pick_scan(_frm, barcode, row.item_code),
+			navgold.packing.open_scan_item_dialog(
+				frm,
+				(_frm, barcode) => process_pick_scan(_frm, barcode, row.item_code),
+				false,
 			);
 		},
 	});
