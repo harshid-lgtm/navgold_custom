@@ -30,12 +30,13 @@ def get_open_sales_orders_for_delivery(customer: str | None = None, company: str
 			"customer",
 			"customer_name",
 			"delivery_date",
+			"dispatch_date",
 			"per_picked",
 			"per_delivered",
 			"company",
 			"is_prime",
 		],
-		order_by="delivery_date asc, creation desc",
+		order_by="dispatch_date asc, delivery_date asc, creation desc",
 	)
 
 	sales_orders = [
@@ -103,6 +104,7 @@ def get_open_sales_orders_for_delivery(customer: str | None = None, company: str
 					"sales_order": so.name,
 					"customer": so.customer_name or so.customer,
 					"delivery_date": so.delivery_date,
+					"dispatch_date": so.dispatch_date,
 					"total_weight": round(stats["total_weight"], 2),
 					"pending_items_count": stats["pending_items_count"],
 					"company": so.company,
@@ -110,7 +112,14 @@ def get_open_sales_orders_for_delivery(customer: str | None = None, company: str
 				}
 			)
 
-	result.sort(key=lambda x: (x["delivery_date"] is None, x["delivery_date"] or "9999-12-31"))
+	result.sort(
+		key=lambda x: (
+			x["dispatch_date"] is None,
+			x["dispatch_date"] or "9999-12-31",
+			x["delivery_date"] is None,
+			x["delivery_date"] or "9999-12-31",
+		)
+	)
 
 	return result
 
