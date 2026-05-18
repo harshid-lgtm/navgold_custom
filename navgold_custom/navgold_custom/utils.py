@@ -1,5 +1,5 @@
 import frappe
-from frappe.query_builder import DocType
+from frappe.query_builder import DocType, Order
 from frappe.query_builder.functions import Sum
 from frappe.utils import flt
 from frappe.utils.caching import redis_cache
@@ -11,6 +11,47 @@ def bulk_set_value(doctype: str, names: list, field: str, value, batch_size: int
 	for i in range(0, len(names), batch_size):
 		batch = names[i : i + batch_size]
 		frappe.db.set_value(doctype, {"name": ["in", batch]}, field, value)
+
+
+def get_afn_warehouse_stock_map(item_codes: list[str], warehouse: str) -> dict[str, float]:
+	if not item_codes or not warehouse:
+		return {}
+
+	bin_dt = DocType("Bin")
+	rows = (
+		frappe.qb.from_(bin_dt)
+		.select(bin_dt.item_code, Sum(bin_dt.actual_qty).as_("actual_qty"))
+		.where((bin_dt.item_code.isin(item_codes)) & (bin_dt.warehouse == warehouse))
+		.groupby(bin_dt.item_code)
+	).run(as_dict=True)
+
+	return {row.item_code: flt(row.actual_qty) for row in rows}
+
+
+def get_restock_data_map(item_codes: list[str]) -> dict[str, object]:
+	if not item_codes:
+		return {}
+
+	purchase_order = DocType("Purchase Order")
+	purchase_order_item = DocType("Purchase Order Item")
+	rows = (
+		frappe.qb.from_(purchase_order)
+		.join(purchase_order_item)
+		.on(purchase_order.name == purchase_order_item.parent)
+		.select(purchase_order_item.item_code, purchase_order_item.schedule_date)
+		.where(
+			(purchase_order.docstatus == 1)
+			& (purchase_order.status.notin(["Closed", "Cancelled", "Completed"]))
+			& (purchase_order_item.item_code.isin(item_codes))
+		)
+		.orderby(purchase_order_item.schedule_date, order=Order.desc)
+	).run(as_dict=True)
+
+	restock_map: dict[str, object] = {}
+	for row in rows:
+		if row.item_code not in restock_map:
+			restock_map[row.item_code] = row.schedule_date
+	return restock_map
 
 
 def get_free_qty_map(item_codes: list[str]) -> dict[str, dict[str, float]]:

@@ -44,20 +44,24 @@ class AmazonProductStrategy(Document):
 		self.calculate_reverse_margin()
 
 	def on_update(self):
-		product_pricing = frappe.get_all(
+		pricing = frappe.db.get_value(
 			"Amazon Product Pricing",
-			or_filters={
-				"fba_strategy": self.name,
-				"sfp_strategy": self.name,
-				"backorder_strategy": self.name,
-				"default_strategy": self.name,
-			},
-			pluck="name",
+			self.proxy_sku,
+			["active_strategy", "fixed_price"],
+			as_dict=True,
 		)
-		for pricing_name in product_pricing:
-			pricing = frappe.get_cached_doc("Amazon Product Pricing", pricing_name)
-			pricing.update_current_prices()
-			pricing.save(ignore_permissions=True)
+
+		if not pricing or pricing.fixed_price or pricing.active_strategy != self.name:
+			return
+		frappe.db.set_value(
+			"Amazon Product Pricing",
+			self.proxy_sku,
+			{
+				"current_min_price": self.calculated_min_price,
+				"current_max_price": self.calculated_max_price,
+			},
+			update_modified=False,
+		)
 
 	def validate_margin(self):
 		if self.min_margin > self.max_margin:
