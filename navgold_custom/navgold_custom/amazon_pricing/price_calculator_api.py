@@ -9,6 +9,7 @@ from frappe.utils.data import flt
 from navgold_custom.navgold_custom.amazon_pricing.price_calculator import (
 	calculate_margin_from_price,
 	calculate_prices,
+	get_cost_type_map,
 )
 
 
@@ -17,15 +18,7 @@ def get_cost_data_for_strategy(strategy):
 	if not active_costs:
 		return []
 
-	cost_type_names = list({cost.cost_type for cost in active_costs})
-	cost_type_map = {
-		row.name: row
-		for row in frappe.get_all(
-			"Cost Type",
-			filters={"name": ["in", cost_type_names]},
-			fields=["name", "is_absolute", "is_relative", "is_vat"],
-		)
-	}
+	cost_type_map = get_cost_type_map()
 
 	cost_data = []
 	for cost in active_costs:

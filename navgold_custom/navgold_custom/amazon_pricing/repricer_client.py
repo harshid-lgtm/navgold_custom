@@ -12,9 +12,9 @@ from frappe.integrations.utils import make_get_request, make_post_request
 from frappe.utils import flt, now_datetime
 
 from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import (
-	format_supplier_swap_notes,
+	format_supplier_fallback_notes,
 	get_allowed_pricing_proxy_skus,
-	get_swapped_backorder_prices,
+	recompute_backorder_prices_with_fallback_supplier,
 )
 from navgold_custom.navgold_custom.utils import bulk_set_value
 
@@ -101,7 +101,7 @@ def sync_to_repricer(pricing_names: list) -> dict:
 	# We could have used get_all with filters but we will loose the reason
 	products_to_update = []
 	errors = []
-	swap_records = []
+	fallback_repricings = []
 	for pricing_name in pricing_names:
 		try:
 			pricing = pricing_records.get(pricing_name)
@@ -126,11 +126,11 @@ def sync_to_repricer(pricing_names: list) -> dict:
 
 			final_min = flt(pricing.current_min_price)
 			final_max = flt(pricing.current_max_price)
-			swap_result = get_swapped_backorder_prices(pricing)
-			if swap_result:
-				final_min = swap_result["final_min_price"]
-				final_max = swap_result["final_max_price"]
-				swap_records.append(swap_result["swap_record"])
+			fallback_result = recompute_backorder_prices_with_fallback_supplier(pricing)
+			if fallback_result:
+				final_min = fallback_result["final_min_price"]
+				final_max = fallback_result["final_max_price"]
+				fallback_repricings.append(fallback_result["fallback_repricing"])
 
 			product_update = {
 				"sku": pricing.proxy_sku,
@@ -179,8 +179,8 @@ def sync_to_repricer(pricing_names: list) -> dict:
 	log.completed_at = now_datetime()
 	log.feed_content = csv_data
 	log.response_content = frappe.as_json(response)
-	if swap_records:
-		log.supplier_swap_notes = format_supplier_swap_notes(swap_records)
+	if fallback_repricings:
+		log.supplier_swap_notes = format_supplier_fallback_notes(fallback_repricings)
 	log.save()
 
 	errored_names = {e.split(":")[0] for e in errors}
