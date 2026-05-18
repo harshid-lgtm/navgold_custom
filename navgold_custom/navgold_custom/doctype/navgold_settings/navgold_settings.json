@@ -28,6 +28,10 @@
 		"default_strategy_template",
 		"default_cost_set_template",
 		"cogs_supplier",
+		"fba_fee_report_section",
+		"last_fba_fee_report",
+		"column_break_fba_fee_report",
+		"last_fba_fee_synced_at",
 		"repricer_section",
 		"repricer_enabled",
 		"column_break_repricer",
@@ -223,6 +227,30 @@
 			"fieldtype": "Link",
 			"label": "COGS Supplier",
 			"options": "Supplier"
+		},
+		{
+			"collapsible": 1,
+			"depends_on": "eval:doc.amazon_pricing_enabled",
+			"fieldname": "fba_fee_report_section",
+			"fieldtype": "Section Break",
+			"label": "FBA Fee Report"
+		},
+		{
+			"description": "Latest FBA fee report fetched from Amazon (GET_FBA_ESTIMATED_FBA_FEES_TXT_DATA)",
+			"fieldname": "last_fba_fee_report",
+			"fieldtype": "Attach",
+			"label": "Last FBA Fee Report",
+			"read_only": 1
+		},
+		{
+			"fieldname": "column_break_fba_fee_report",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "last_fba_fee_synced_at",
+			"fieldtype": "Datetime",
+			"label": "Last FBA Fee Synced At",
+			"read_only": 1
 		},
 		{
 			"depends_on": "eval:doc.amazon_pricing_enabled",
