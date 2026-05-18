@@ -183,6 +183,8 @@ def get_active_pricing_records() -> list:
 			"active_strategy",
 			"fixed_price",
 			"fixed_price_value",
+			"current_min_price",
+			"current_max_price",
 		],
 	)
 
@@ -214,19 +216,26 @@ def compute_pricing_update(
 ) -> dict | None:
 	new_strategy = select_strategy(pricing, active_strategies, stock_info)
 
-	if new_strategy == pricing.active_strategy:
-		return None
-
-	update_values = {"active_strategy": new_strategy}
 	if pricing.fixed_price:
-		update_values["current_min_price"] = flt(pricing.fixed_price_value)
-		update_values["current_max_price"] = flt(pricing.fixed_price_value)
+		expected_min = flt(pricing.fixed_price_value)
+		expected_max = flt(pricing.fixed_price_value)
 	else:
 		strategy = strategy_map.get(new_strategy) if new_strategy else None
-		update_values["current_min_price"] = strategy.calculated_min_price if strategy else 0
-		update_values["current_max_price"] = strategy.calculated_max_price if strategy else 0
+		expected_min = flt(strategy.calculated_min_price) if strategy else 0
+		expected_max = flt(strategy.calculated_max_price) if strategy else 0
 
-	return update_values
+	if (
+		new_strategy == pricing.active_strategy
+		and flt(pricing.current_min_price) == expected_min
+		and flt(pricing.current_max_price) == expected_max
+	):
+		return None
+
+	return {
+		"active_strategy": new_strategy,
+		"current_min_price": expected_min,
+		"current_max_price": expected_max,
+	}
 
 
 @frappe.whitelist()
