@@ -5,13 +5,20 @@
 import frappe
 from frappe import _
 from frappe.query_builder import DocType, Order
-from frappe.query_builder.functions import Count
+from frappe.utils.data import flt
 
-from navgold_custom.navgold_custom.utils import get_free_qty_map
+from navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku import get_proxy_sku_map
+from navgold_custom.navgold_custom.utils import (
+	get_afn_warehouse_stock_map,
+	get_free_qty_map,
+	get_restock_data_map,
+)
 
 
-def select_strategy(pricing_doc) -> str | None:
-	stock_info = get_stock_info(pricing_doc.proxy_sku)
+def select_strategy(pricing_doc, active_strategies=None, stock_info=None) -> str | None:
+	if stock_info is None:
+		stock_info = get_stock_info(pricing_doc.proxy_sku)
+
 	all_strategies = [
 		strategy
 		for strategy in [
@@ -26,14 +33,15 @@ def select_strategy(pricing_doc) -> str | None:
 	if not all_strategies:
 		return None
 
-	active_strategies = set(
-		frappe.get_all(
-			"Amazon Product Strategy",
-			filters={"name": ["in", all_strategies], "is_active": 1},
-			pluck="name",
+	if active_strategies is None:
+		active_strategies = set(
+			frappe.get_all(
+				"Amazon Product Strategy",
+				filters={"name": ["in", all_strategies], "is_active": 1},
+				pluck="name",
+			)
 		)
-	)
-	# return pricing_doc.backorder_strategy
+
 	# Priority 1: FBA Strategy
 	if pricing_doc.fba_strategy in active_strategies and stock_info.get("fba_stock", 0) > 0:
 		return pricing_doc.fba_strategy
@@ -92,36 +100,55 @@ def get_stock_info(proxy_sku: str) -> dict:
 	}
 
 
+def get_stock_info_batch(proxy_sku_names: list) -> dict:
+	if not proxy_sku_names:
+		return {}
+
+	proxy_sku_map = get_proxy_sku_map(sku_names=proxy_sku_names)
+	proxy_sku_item_map = {name: info["item"] for name, info in proxy_sku_map.items()}
+	all_item_codes = list({item for item in proxy_sku_item_map.values() if item})
+
+	empty = {
+		"fba_stock": 0,
+		"mfn_stock": 0,
+		"has_restock_date": False,
+		"restock_date": None,
+		"total_stock": 0,
+	}
+
+	if not all_item_codes:
+		return {name: dict(empty) for name in proxy_sku_names}
+
+	sp_api_settings = frappe.get_cached_doc("Amazon SP API Settings")
+	afn_stock_map = get_afn_warehouse_stock_map(all_item_codes, sp_api_settings.afn_warehouse)
+	mfn_stock_data = get_free_qty_map(all_item_codes)
+	restock_map = get_restock_data_map(all_item_codes)
+
+	result = {}
+	for proxy_sku_name in proxy_sku_names:
+		item_code = proxy_sku_item_map.get(proxy_sku_name)
+		if not item_code:
+			result[proxy_sku_name] = dict(empty)
+			continue
+
+		fba_stock = afn_stock_map.get(item_code, 0)
+		mfn_stock = mfn_stock_data.get(item_code, {}).get("free_qty", 0)
+		restock_date = restock_map.get(item_code)
+
+		result[proxy_sku_name] = {
+			"fba_stock": fba_stock,
+			"mfn_stock": mfn_stock,
+			"has_restock_date": bool(restock_date),
+			"restock_date": restock_date,
+			"total_stock": fba_stock + mfn_stock,
+		}
+
+	return result
+
+
 def check_pending_restock(item: str) -> dict:
-	"""
-	Check if there's a pending restock for this item.
-
-	Checks:
-	- Open Material Requests with expected delivery date
-	- Open Purchase Orders with expected delivery date
-	"""
-
-	purchase_order = DocType("Purchase Order")
-	purchase_order_item = DocType("Purchase Order Item")
-
-	po_items = (
-		frappe.qb.from_(purchase_order)
-		.join(purchase_order_item)
-		.on(purchase_order.name == purchase_order_item.parent)
-		.select(purchase_order_item.schedule_date)
-		.where(
-			(purchase_order.docstatus == 1)
-			& (purchase_order.status.notin(["Closed", "Cancelled", "Completed"]))
-			& (purchase_order_item.item_code == item)
-		)
-		.orderby(purchase_order_item.schedule_date, order=Order.desc)
-		.limit(1)
-	).run(as_dict=True)
-
-	restock_date = po_items[0].schedule_date if po_items else None
-	has_restock = bool(restock_date)
-
-	return {"has_restock": has_restock, "restock_date": restock_date}
+	restock_date = get_restock_data_map([item]).get(item)
+	return {"has_restock": bool(restock_date), "restock_date": restock_date}
 
 
 def refresh_active_strategy(pricing_name: str):
@@ -142,23 +169,94 @@ def refresh_active_strategy(pricing_name: str):
 	return pricing.active_strategy
 
 
+def get_active_pricing_records() -> list:
+	return frappe.get_all(
+		"Amazon Product Pricing",
+		filters={"is_active": 1},
+		fields=[
+			"name",
+			"proxy_sku",
+			"fba_strategy",
+			"sfp_strategy",
+			"backorder_strategy",
+			"default_strategy",
+			"active_strategy",
+			"fixed_price",
+			"fixed_price_value",
+		],
+	)
+
+
+def get_strategy_map(pricing_records: list) -> dict:
+	strategy_names = {
+		strategy
+		for pricing in pricing_records
+		for strategy in (
+			pricing.fba_strategy,
+			pricing.sfp_strategy,
+			pricing.backorder_strategy,
+			pricing.default_strategy,
+		)
+		if strategy
+	}
+	if not strategy_names:
+		return {}
+	rows = frappe.get_all(
+		"Amazon Product Strategy",
+		filters={"name": ["in", list(strategy_names)]},
+		fields=["name", "is_active", "calculated_min_price", "calculated_max_price"],
+	)
+	return {row.name: row for row in rows}
+
+
+def compute_pricing_update(
+	pricing, active_strategies: set, stock_info: dict, strategy_map: dict
+) -> dict | None:
+	new_strategy = select_strategy(pricing, active_strategies, stock_info)
+
+	if new_strategy == pricing.active_strategy:
+		return None
+
+	update_values = {"active_strategy": new_strategy}
+	if pricing.fixed_price:
+		update_values["current_min_price"] = flt(pricing.fixed_price_value)
+		update_values["current_max_price"] = flt(pricing.fixed_price_value)
+	else:
+		strategy = strategy_map.get(new_strategy) if new_strategy else None
+		update_values["current_min_price"] = strategy.calculated_min_price if strategy else 0
+		update_values["current_max_price"] = strategy.calculated_max_price if strategy else 0
+
+	return update_values
+
+
 @frappe.whitelist()
 def bulk_refresh_strategies():
-	pricing_records = frappe.get_all("Amazon Product Pricing", filters={"is_active": 1}, pluck="name")
+	pricing_records = get_active_pricing_records()
+	if not pricing_records:
+		return {"total": 0, "updated": 0}
 
-	updated = 0
-	for pricing_name in pricing_records:
+	strategy_map = get_strategy_map(pricing_records)
+	active_strategies = {name for name, row in strategy_map.items() if row.is_active}
+
+	proxy_sku_names = [pricing.proxy_sku for pricing in pricing_records if pricing.proxy_sku]
+	stock_info_map = get_stock_info_batch(proxy_sku_names)
+
+	updates = {}
+	for pricing in pricing_records:
 		try:
-			pricing = frappe.get_cached_doc("Amazon Product Pricing", pricing_name)
-			old_strategy = pricing.active_strategy
-
-			pricing.select_active_strategy()
-			pricing.update_current_prices()
-
-			if pricing.active_strategy != old_strategy:
-				pricing.save()
-				updated += 1
+			stock_info = stock_info_map.get(pricing.proxy_sku, {})
+			update_values = compute_pricing_update(pricing, active_strategies, stock_info, strategy_map)
+			if update_values is None:
+				continue
+			updates[pricing.name] = update_values
 		except Exception as e:
-			frappe.log_error(f"Strategy refresh error for {pricing_name}: {e!s}", "Strategy Refresh")
+			frappe.log_error(f"Strategy refresh error for {pricing.name}: {e!s}", "Strategy Refresh")
 
-	return {"total": len(pricing_records), "updated": updated}
+	if updates:
+		frappe.db.bulk_update(
+			"Amazon Product Pricing",
+			updates,
+			update_modified=False,
+		)
+
+	return {"total": len(pricing_records), "updated": len(updates)}
