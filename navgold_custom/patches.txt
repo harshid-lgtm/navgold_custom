@@ -4,3 +4,5 @@
 
 [post_model_sync]
 # Patches added in this section will be executed after doctypes are migrated
+navgold_custom.patches.v1.consolidate_fba_fee_sub_types
+navgold_custom.patches.v1.dedupe_estimated_fba_fee

@@ -123,6 +123,30 @@ frappe.ui.form.on('Navgold Settings', {
 				},
 				__('Amazon Pricing'),
 			);
+
+			frm.add_custom_button(
+				__('Fetch FBA Fees'),
+				async () => {
+					const confirmed = await navgold.confirm_dialog(
+						__(
+							'This will fetch the latest FBA fees from Amazon SP-API and update the FBA Fee cost on every active FBA strategy. Continue?',
+						),
+					);
+					if (!confirmed) return;
+
+					const response = await frappe.call({
+						method:
+							'navgold_custom.navgold_custom.amazon_pricing.fba_fee_fetcher.bulk_fetch_fba_fees',
+						freeze: true,
+						freeze_message: __('Queuing FBA Fee fetch...'),
+					});
+					frappe.show_alert({
+						message: response.message.message,
+						indicator: 'blue',
+					});
+				},
+				__('Amazon Pricing'),
+			);
 		}
 	},
 
