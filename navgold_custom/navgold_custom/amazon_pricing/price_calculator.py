@@ -3,7 +3,17 @@
 
 
 import frappe
+from frappe.utils.caching import redis_cache
 from frappe.utils.data import flt
+
+
+@redis_cache()
+def get_cost_type_map() -> dict:
+	rows = frappe.get_all(
+		"Cost Type",
+		fields=["name", "is_absolute", "is_relative", "is_vat"],
+	)
+	return {row.name: row for row in rows}
 
 
 def get_pricing_settings():
@@ -69,15 +79,7 @@ def calculate_prices_with_purchase_cost_override(strategy, override_purchase_cos
 	if not active_costs:
 		return {"min_price": 0, "max_price": 0}
 
-	cost_type_names = list({cost.cost_type for cost in active_costs})
-	cost_type_map = {
-		row.name: row
-		for row in frappe.get_all(
-			"Cost Type",
-			filters={"name": ["in", cost_type_names]},
-			fields=["name", "is_absolute", "is_relative", "is_vat"],
-		)
-	}
+	cost_type_map = get_cost_type_map()
 
 	cost_data = []
 	for cost in active_costs:

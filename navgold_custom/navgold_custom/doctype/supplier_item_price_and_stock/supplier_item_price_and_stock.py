@@ -108,7 +108,7 @@ class SupplierItemPriceandStock(Document):
 def update_supplier_rank():
 	frappe.enqueue(
 		"navgold_custom.navgold_custom.doctype.supplier_item_price_and_stock.supplier_item_price_and_stock.run_update_supplier_rank",
-		now=True,
+		now=frappe.flags.in_test,
 	)
 
 
@@ -127,31 +127,30 @@ def run_update_supplier_rank():
 	}
 
 	groups = defaultdict(list)
-	blocked = []
+	all_rank_updates: dict = {}
 
 	for record in records:
 		if record.purchase_blocked:
-			blocked.append(record.name)
+			all_rank_updates[record.name] = {"rank": 0}
 		else:
 			record.supplier_custom_rank = supplier_ranks.get(record.supplier, 0)
-			groups[(record.item)].append(record)
+			groups[record.item].append(record)
 
 	try:
-		if blocked:
-			frappe.db.set_value(
-				"Supplier Item Price and Stock",
-				{"name": ["in", blocked]},
-				"rank",
-				0,
-			)
-
 		for group_records in groups.values():
-			update_rank_by_unit_price(group_records)
+			collect_rank_updates(group_records, all_rank_updates)
+
+		if all_rank_updates:
+			frappe.db.bulk_update(
+				"Supplier Item Price and Stock",
+				all_rank_updates,
+				update_modified=False,
+			)
 	except Exception as error:
 		frappe.log_error(title="Error updating supplier rank", message=error)
 
 
-def update_rank_by_unit_price(group_records):
+def collect_rank_updates(group_records, all_updates):
 	def sort_key(record):
 		price = record.price or 0
 		custom_rank = record.supplier_custom_rank or 0
@@ -159,7 +158,6 @@ def update_rank_by_unit_price(group_records):
 		return (price, custom_rank_sort)
 
 	group_records.sort(key=sort_key)
-	doc_updates = {}
 	rank = 1
 	prev_sort_key = None
 
@@ -169,11 +167,5 @@ def update_rank_by_unit_price(group_records):
 		if prev_sort_key is not None and current_sort_key > prev_sort_key:
 			rank = i + 1
 
-		doc_updates[record.name] = {"rank": rank}
+		all_updates[record.name] = {"rank": rank}
 		prev_sort_key = current_sort_key
-
-	frappe.db.bulk_update(
-		"Supplier Item Price and Stock",
-		doc_updates,
-		update_modified=False,
-	)

@@ -14,7 +14,10 @@ from frappe.utils.data import cint, cstr, flt, orjson_dumps
 from navgold_custom.navgold_custom.amazon_pricing.price_calculator import (
 	calculate_prices_with_purchase_cost_override,
 )
-from navgold_custom.navgold_custom.amazon_pricing.strategy_selector import get_stock_info
+from navgold_custom.navgold_custom.amazon_pricing.strategy_selector import (
+	get_stock_info,
+	get_stock_info_batch,
+)
 
 SHIPPING_GROUPS = {
 	"sfp": "57d54587-7341-4c9f-b3f9-546c8d798b21",
@@ -51,7 +54,12 @@ def get_best_in_stock_supplier_for_item(item_code: str) -> dict | None:
 	return suppliers[0]
 
 
-def get_swapped_backorder_prices(pricing, resolved_suppliers: dict | None = None) -> dict | None:
+# This is for swapping backorder strategy prices based on supplier stock
+def recompute_backorder_prices_with_fallback_supplier(
+	pricing,
+	resolved_suppliers: dict | None = None,
+	backorder_strategy_map: dict | None = None,
+) -> dict | None:
 	if not pricing.get("backorder_strategy"):
 		return None
 	if pricing.get("active_strategy") != pricing.get("backorder_strategy"):
@@ -74,10 +82,17 @@ def get_swapped_backorder_prices(pricing, resolved_suppliers: dict | None = None
 	if flt(in_stock_supplier.get("stock_qty", 0)) <= 0:
 		return None
 
-	try:
-		backorder_strategy = frappe.get_cached_doc("Amazon Product Strategy", pricing["backorder_strategy"])
-	except frappe.DoesNotExistError:
-		return None
+	if backorder_strategy_map is not None:
+		backorder_strategy = backorder_strategy_map.get(pricing["backorder_strategy"])
+		if not backorder_strategy:
+			return None
+	else:
+		try:
+			backorder_strategy = frappe.get_cached_doc(
+				"Amazon Product Strategy", pricing["backorder_strategy"]
+			)
+		except frappe.DoesNotExistError:
+			return None
 
 	recomputed = calculate_prices_with_purchase_cost_override(
 		backorder_strategy, flt(in_stock_supplier.price)
@@ -90,7 +105,7 @@ def get_swapped_backorder_prices(pricing, resolved_suppliers: dict | None = None
 	return {
 		"final_min_price": recomputed_min,
 		"final_max_price": recomputed_max,
-		"swap_record": {
+		"fallback_repricing": {
 			"proxy_sku": pricing["proxy_sku"],
 			"rank_one_supplier": top_supplier.supplier,
 			"rank_one_price": flt(top_supplier.price),
@@ -104,12 +119,12 @@ def get_swapped_backorder_prices(pricing, resolved_suppliers: dict | None = None
 	}
 
 
-def format_supplier_swap_notes(swap_records: list) -> str:
+def format_supplier_fallback_notes(fallback_repricings: list) -> str:
 	def money(amount: float) -> str:
 		return fmt_money(amount, currency="GBP")
 
 	lines = []
-	for record in swap_records:
+	for record in fallback_repricings:
 		lines.append(
 			f"{record['proxy_sku']}: rank-1 {record['rank_one_supplier']} "
 			f"({money(record['rank_one_price'])}, out of stock) -> "
@@ -134,6 +149,93 @@ def get_supplier_lead_time(supplier_name: str) -> int:
 
 	lead_time = row.lead_time_before_12 if current_datetime.hour < 12 else row.lead_time_after_12
 	return cint(lead_time) or 1
+
+
+def get_supplier_data_batch(item_codes: list) -> dict:
+	if not item_codes:
+		return {}
+
+	all_suppliers = frappe.get_all(
+		"Supplier Item Price and Stock",
+		filters={"item": ["in", item_codes], "purchase_blocked": 0},
+		fields=["supplier", "stock_qty", "rank", "price", "item"],
+		order_by="item asc, rank asc",
+	)
+
+	suppliers_by_item: dict = {}
+	for row in all_suppliers:
+		suppliers_by_item.setdefault(row.item, []).append(row)
+
+	result = {}
+	for item_code in item_codes:
+		item_suppliers = suppliers_by_item.get(item_code, [])
+		top_supplier = item_suppliers[0] if item_suppliers else None
+		in_stock_supplier = next(
+			(supplier for supplier in item_suppliers if flt(supplier.get("stock_qty", 0)) > 0),
+			top_supplier,
+		)
+		result[item_code] = {
+			"top_supplier": top_supplier,
+			"in_stock_supplier": in_stock_supplier,
+		}
+
+	return result
+
+
+def get_lead_time_batch(supplier_names: list) -> dict:
+	if not supplier_names:
+		return {}
+
+	current_datetime = now_datetime()
+	day = current_datetime.strftime("%A")
+	is_before_noon = current_datetime.hour < 12
+
+	rows = frappe.get_all(
+		"Supplier Lead Time",
+		filters={"parent": ["in", supplier_names], "parenttype": "Supplier", "day": day},
+		fields=["parent", "lead_time_before_12", "lead_time_after_12"],
+	)
+
+	return {
+		row.parent: cint(row.lead_time_before_12 if is_before_noon else row.lead_time_after_12) or 1
+		for row in rows
+	}
+
+
+def get_backorder_strategy_map(strategy_names: list) -> dict:
+	if not strategy_names:
+		return {}
+
+	parent_rows = frappe.get_all(
+		"Amazon Product Strategy",
+		filters={"name": ["in", strategy_names]},
+		fields=["name", "min_margin", "max_margin"],
+	)
+
+	cost_rows = frappe.get_all(
+		"Amazon Product Cost",
+		filters={
+			"parent": ["in", strategy_names],
+			"parenttype": "Amazon Product Strategy",
+			"is_active": 1,
+		},
+		fields=["parent", "is_active", "cost_type", "source", "value"],
+		order_by="idx asc",
+	)
+
+	costs_by_strategy: dict = {}
+	for cost in cost_rows:
+		costs_by_strategy.setdefault(cost.parent, []).append(cost)
+
+	return {
+		row.name: frappe._dict(
+			name=row.name,
+			min_margin=row.min_margin,
+			max_margin=row.max_margin,
+			costs=costs_by_strategy.get(row.name, []),
+		)
+		for row in parent_rows
+	}
 
 
 # This is a bit complicated
@@ -195,8 +297,15 @@ def get_sku_inventory_data(
 	pricing: dict,
 	zero_stock_proxy_skus: set | None = None,
 	proxy_sku_info: dict | None = None,
+	stock_info_map: dict | None = None,
+	supplier_data_map: dict | None = None,
+	lead_time_map: dict | None = None,
 ) -> dict:
-	stock_info = get_stock_info(pricing.proxy_sku)
+	stock_info = (
+		stock_info_map.get(pricing.proxy_sku, {})
+		if stock_info_map is not None
+		else get_stock_info(pricing.proxy_sku)
+	)
 
 	active = pricing.active_strategy
 	is_fba = active and active == pricing.fba_strategy
@@ -247,15 +356,26 @@ def get_sku_inventory_data(
 	raw_qty = flt(stock_info.get("mfn_stock", 0))
 	warehouse_qty = calculate_adjusted_qty(raw_qty, pool_size, pack_size)
 
-	top_supplier = get_top_supplier_for_item(item_code) if item_code else None
+	if supplier_data_map is not None and item_code:
+		supplier_entry = supplier_data_map.get(item_code, {})
+		top_supplier = supplier_entry.get("top_supplier")
+		in_stock_supplier = supplier_entry.get("in_stock_supplier")
+	else:
+		top_supplier = get_top_supplier_for_item(item_code) if item_code else None
+		in_stock_supplier = None
 
 	resolved_supplier = top_supplier
 	if is_backorder and item_code:
-		in_stock_supplier = get_best_in_stock_supplier_for_item(item_code)
+		if supplier_data_map is None:
+			in_stock_supplier = get_best_in_stock_supplier_for_item(item_code)
 		if in_stock_supplier:
 			resolved_supplier = in_stock_supplier
 
-	lead_time_days = get_supplier_lead_time(resolved_supplier.supplier) if resolved_supplier else 1
+	if lead_time_map is not None and resolved_supplier:
+		lead_time_days = lead_time_map.get(resolved_supplier.supplier, 1)
+	else:
+		lead_time_days = get_supplier_lead_time(resolved_supplier.supplier) if resolved_supplier else 1
+
 	resolved_supplier_stock = resolved_supplier.get("stock_qty", 0) if resolved_supplier else 0
 	resolved_supplier_qty = calculate_adjusted_qty(resolved_supplier_stock, pool_size, pack_size)
 
@@ -363,7 +483,7 @@ def build_inventory_patches(inventory_data: dict, marketplace_id: str) -> list:
 
 def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str) -> dict:
 	messages = []
-	swap_records = []
+	fallback_repricings = []
 	message_id = 1
 	pricing_records = frappe.get_all(
 		"Amazon Product Pricing",
@@ -390,6 +510,29 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 	proxy_sku_names = [pricing.proxy_sku for pricing in pricing_records if pricing.proxy_sku]
 	proxy_sku_info = build_proxy_sku_info_map(proxy_sku_names) if proxy_sku_names else {}
 
+	stock_info_map = get_stock_info_batch(proxy_sku_names) if proxy_sku_names else {}
+
+	all_item_codes = list({info["item"] for info in proxy_sku_info.values() if info.get("item")})
+	supplier_data_map = get_supplier_data_batch(all_item_codes) if all_item_codes else {}
+
+	all_supplier_names = {
+		entry[key].supplier
+		for entry in supplier_data_map.values()
+		for key in ("top_supplier", "in_stock_supplier")
+		if entry.get(key)
+	}
+	lead_time_map = get_lead_time_batch(list(all_supplier_names)) if all_supplier_names else {}
+
+	# used later by recompute_backorder_prices_with_fallback_supplier
+	backorder_strategy_names = list(
+		{
+			pricing.backorder_strategy
+			for pricing in pricing_records
+			if pricing.backorder_strategy and pricing.active_strategy == pricing.backorder_strategy
+		}
+	)
+	backorder_strategy_map = get_backorder_strategy_map(backorder_strategy_names)
+
 	zero_stock_proxy_skus = get_zero_stock_proxy_skus()
 
 	for pricing in pricing_records:
@@ -398,7 +541,14 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 			continue
 
 		try:
-			inventory_data = get_sku_inventory_data(pricing, zero_stock_proxy_skus, proxy_sku_info)
+			inventory_data = get_sku_inventory_data(
+				pricing,
+				zero_stock_proxy_skus,
+				proxy_sku_info,
+				stock_info_map,
+				supplier_data_map,
+				lead_time_map,
+			)
 		except Exception as e:
 			frappe.log_error(f"Skipping inventory patches for {pricing.name}: {e!s}", "Amazon Feed Builder")
 			inventory_data = None
@@ -408,18 +558,22 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 
 		try:
 			resolved_suppliers = inventory_data.get("resolved_suppliers") if inventory_data else None
-			swap_result = get_swapped_backorder_prices(pricing, resolved_suppliers=resolved_suppliers)
+			fallback_result = recompute_backorder_prices_with_fallback_supplier(
+				pricing,
+				resolved_suppliers=resolved_suppliers,
+				backorder_strategy_map=backorder_strategy_map,
+			)
 		except Exception as e:
 			frappe.log_error(
 				f"Backorder price recompute failed for {pricing.name}: {e!s}",
 				"Amazon Feed Builder",
 			)
-			swap_result = None
+			fallback_result = None
 
-		if swap_result:
-			final_min_price = swap_result["final_min_price"]
-			final_max_price = swap_result["final_max_price"]
-			swap_records.append(swap_result["swap_record"])
+		if fallback_result:
+			final_min_price = fallback_result["final_min_price"]
+			final_max_price = fallback_result["final_max_price"]
+			fallback_repricings.append(fallback_result["fallback_repricing"])
 
 		patches = [
 			{
@@ -459,7 +613,7 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 		"messages": messages,
 	}
 
-	return {"feed_content": orjson_dumps(feed), "swap_records": swap_records}
+	return {"feed_content": orjson_dumps(feed), "fallback_repricings": fallback_repricings}
 
 
 def validate_pricing_feed(json_content: str) -> dict:

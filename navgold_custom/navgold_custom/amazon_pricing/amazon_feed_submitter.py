@@ -7,7 +7,7 @@ from frappe.utils import now_datetime
 
 from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import (
 	build_pricing_feed,
-	format_supplier_swap_notes,
+	format_supplier_fallback_notes,
 	get_allowed_pricing_proxy_skus,
 	validate_pricing_feed,
 )
@@ -36,7 +36,7 @@ def submit_pricing(pricing_names: list, test_mode: bool = False) -> dict:
 
 	feed_result = build_pricing_feed(pricing_names, seller_id, settings.get_marketplace_id())
 	json_content = feed_result["feed_content"]
-	swap_records = feed_result["swap_records"]
+	fallback_repricings = feed_result["fallback_repricings"]
 
 	validation = validate_pricing_feed(json_content)
 	if not validation["valid"]:
@@ -48,7 +48,7 @@ def submit_pricing(pricing_names: list, test_mode: bool = False) -> dict:
 			"test_mode": True,
 			"message_count": validation["message_count"],
 			"json_preview": json_content[:2000],
-			"supplier_swaps": swap_records,
+			"fallback_repricings": fallback_repricings,
 		}
 
 	log = frappe.new_doc("Amazon Pricing Submission Log")
@@ -56,8 +56,8 @@ def submit_pricing(pricing_names: list, test_mode: bool = False) -> dict:
 	log.status = "Pending"
 	log.pricing_records = "\n".join(pricing_names)
 	log.feed_content = json_content
-	if swap_records:
-		log.supplier_swap_notes = format_supplier_swap_notes(swap_records)
+	if fallback_repricings:
+		log.supplier_swap_notes = format_supplier_fallback_notes(fallback_repricings)
 	log.insert()
 	try:
 		feeds_client = get_feeds_client(settings)
