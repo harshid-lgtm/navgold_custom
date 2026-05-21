@@ -22,7 +22,7 @@ from navgold_custom.navgold_custom.amazon_pricing.strategy_selector import (
 SHIPPING_GROUPS = {
 	"sfp": "57d54587-7341-4c9f-b3f9-546c8d798b21",
 	"main_revised": "a31ca016-36ab-481f-b399-b61d727c93d3",
-	"two_day": "2285513b3c-c531-42c1-9adb-ee55d0318d1a",
+	"two_day": "85513b3c-c531-42c1-9adb-ee55d0318d1a",
 }
 
 
