@@ -2,6 +2,10 @@
 // For license information, please see license.txt
 
 frappe.ui.form.on('Packing Slip', {
+	onload(frm) {
+		frm.selected_delivery_note = null;
+		frm._row_conversion_factors = {};
+	},
 	refresh(frm) {
 		toggle_fields(frm);
 		add_scan_buttons(frm);
