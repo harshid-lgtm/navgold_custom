@@ -90,8 +90,8 @@ def reset_purchase_cost_sources(
 				update_fields,
 				update_modified=True,
 			)
-			# Persist each chunk in this long-running background job so progress survives. # nosemgrep
-			frappe.db.commit()
+			# Persist each chunk in this long-running background job so progress survives.
+			frappe.db.commit()  # nosemgrep
 			updated_count += len(chunk)
 
 	strategy_names = sorted({row["strategy"] for row in matching})
