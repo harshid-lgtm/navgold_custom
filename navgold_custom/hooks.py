@@ -280,6 +280,9 @@ doc_events = {
 			"navgold_custom.navgold_custom.custom_script.pick_list.pick_list.auto_create_delivery_notes",
 		],
 	},
+	"Stock Entry": {
+		"on_submit": "navgold_custom.navgold_custom.custom_script.stock_entry.stock_entry.update_proxy_sku_transfer_rates",
+	},
 }
 
 after_install = "navgold_custom.install.after_install"

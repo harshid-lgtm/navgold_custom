@@ -31,6 +31,7 @@
 			"options": "Cost Sub Type"
 		},
 		{
+			"description": "For Manual purchase cost, enter the total cost per listing unit (pack or bundle), not the per-Nos unit cost.",
 			"fieldname": "value",
 			"fieldtype": "Float",
 			"in_list_view": 1,

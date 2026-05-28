@@ -6,6 +6,7 @@ from collections import defaultdict
 import frappe
 from frappe import DoesNotExistError, _
 from frappe.model.document import Document
+from frappe.query_builder import DocType, Order
 from frappe.utils.data import flt
 
 
@@ -169,3 +170,26 @@ def collect_rank_updates(group_records, all_updates):
 
 		all_updates[record.name] = {"rank": rank}
 		prev_sort_key = current_sort_key
+
+
+def get_supplier_prices(item_codes: list[str], require_stock: bool = True) -> dict[str, float]:
+	if not item_codes:
+		return {}
+
+	supplier_item = DocType("Supplier Item Price and Stock")
+	conditions = (supplier_item.item.isin(item_codes)) & (supplier_item.purchase_blocked == 0)
+	if require_stock:
+		conditions = conditions & (supplier_item.stock_qty > 0)
+
+	rows = (
+		frappe.qb.from_(supplier_item)
+		.select(supplier_item.item, supplier_item.price, supplier_item.rank)
+		.where(conditions)
+		.orderby(supplier_item.rank, order=Order.asc)
+	).run(as_dict=True)
+
+	result: dict[str, float] = {}
+	for row in rows:
+		if row["item"] not in result:
+			result[row["item"]] = flt(row["price"])
+	return result

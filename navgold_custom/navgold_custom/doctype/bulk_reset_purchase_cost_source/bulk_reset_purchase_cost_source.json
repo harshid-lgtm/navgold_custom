@@ -1,0 +1,116 @@
+{
+	"actions": [],
+	"creation": "2026-05-26 00:00:00.000000",
+	"doctype": "DocType",
+	"engine": "InnoDB",
+	"field_order": [
+		"filters_section",
+		"cost_type",
+		"strategy_name",
+		"current_source",
+		"col_break_filters",
+		"item",
+		"item_group",
+		"proxy_sku",
+		"action_section",
+		"target_source",
+		"manual_value"
+	],
+	"fields": [
+		{
+			"fieldname": "filters_section",
+			"fieldtype": "Section Break",
+			"label": "Filters"
+		},
+		{
+			"fieldname": "cost_type",
+			"fieldtype": "Link",
+			"label": "Cost Type",
+			"options": "Cost Type",
+			"reqd": 1
+		},
+		{
+			"fieldname": "strategy_name",
+			"fieldtype": "Select",
+			"label": "Strategy",
+			"options": "\nfba\nsfp\nbackorder\ndefault"
+		},
+		{
+			"fieldname": "current_source",
+			"fieldtype": "Select",
+			"label": "Current Source",
+			"options": "\nManual\nSupplier-Sync\nPO-Sync\nFBA-Transfer\nAuto-Sync\nAmazon-Sync"
+		},
+		{
+			"fieldname": "col_break_filters",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "item",
+			"fieldtype": "Link",
+			"label": "Item",
+			"options": "Item"
+		},
+		{
+			"fieldname": "item_group",
+			"fieldtype": "Link",
+			"label": "Item Group",
+			"options": "Item Group"
+		},
+		{
+			"fieldname": "proxy_sku",
+			"fieldtype": "Link",
+			"label": "Proxy SKU",
+			"options": "Proxy SKU"
+		},
+		{
+			"fieldname": "action_section",
+			"fieldtype": "Section Break",
+			"label": "Reset Action"
+		},
+		{
+			"default": "Auto",
+			"description": "Auto picks the source per row by cost sub type (e.g. Purchase Cost-Top Supplier → Supplier-Sync).",
+			"fieldname": "target_source",
+			"fieldtype": "Select",
+			"label": "Target Source",
+			"options": "Auto\nManual\nSupplier-Sync\nPO-Sync\nFBA-Transfer",
+			"reqd": 1
+		},
+		{
+			"depends_on": "eval:doc.target_source == 'Manual'",
+			"fieldname": "manual_value",
+			"fieldtype": "Currency",
+			"label": "Manual Value",
+			"mandatory_depends_on": "eval:doc.target_source == 'Manual'"
+		}
+	],
+	"index_web_pages_for_search": 1,
+	"issingle": 1,
+	"links": [],
+	"modified": "2026-05-26 00:00:00.000000",
+	"modified_by": "Administrator",
+	"module": "Navgold Custom",
+	"name": "Bulk Reset Purchase Cost Source",
+	"owner": "Administrator",
+	"permissions": [
+		{
+			"role": "System Manager",
+			"read": 1,
+			"write": 1
+		},
+		{
+			"role": "Stock Manager",
+			"read": 1,
+			"write": 1
+		},
+		{
+			"role": "Purchase Manager",
+			"read": 1,
+			"write": 1
+		}
+	],
+	"sort_field": "creation",
+	"sort_order": "DESC",
+	"states": []
+}

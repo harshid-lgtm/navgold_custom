@@ -3,39 +3,13 @@
 
 
 import frappe
-from frappe import _
 from frappe.utils.data import flt
 
 from navgold_custom.navgold_custom.amazon_pricing.price_calculator import (
 	calculate_margin_from_price,
 	calculate_prices,
-	get_cost_type_map,
+	get_cost_data,
 )
-
-
-def get_cost_data_for_strategy(strategy):
-	active_costs = [cost for cost in strategy.costs if cost.is_active]
-	if not active_costs:
-		return []
-
-	cost_type_map = get_cost_type_map()
-
-	cost_data = []
-	for cost in active_costs:
-		cost_type = cost_type_map.get(cost.cost_type)
-		if not cost_type:
-			continue
-		cost_data.append(
-			{
-				"type": cost.cost_type,
-				"is_absolute": cost_type.is_absolute,
-				"is_relative": cost_type.is_relative,
-				"is_vat": cost_type.is_vat,
-				"value": cost.value,
-			}
-		)
-
-	return cost_data
 
 
 @frappe.whitelist()
@@ -46,7 +20,7 @@ def calculate_margin_for_strategy(strategy_name: str, target_price: float) -> di
 		return {"margin": 0, "profit": 0}
 
 	strategy = frappe.get_cached_doc("Amazon Product Strategy", strategy_name)
-	cost_data = get_cost_data_for_strategy(strategy)
+	cost_data = get_cost_data(strategy)
 
 	if not cost_data:
 		return {"margin": 0, "profit": 0}
@@ -57,7 +31,7 @@ def calculate_margin_for_strategy(strategy_name: str, target_price: float) -> di
 @frappe.whitelist()
 def calculate_prices_for_strategy(strategy_name: str) -> dict:
 	strategy = frappe.get_cached_doc("Amazon Product Strategy", strategy_name)
-	cost_data = get_cost_data_for_strategy(strategy)
+	cost_data = get_cost_data(strategy)
 
 	if not cost_data:
 		return {"min_price": 0, "max_price": 0}
