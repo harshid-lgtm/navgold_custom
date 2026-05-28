@@ -171,7 +171,7 @@ def fetch_active_purchase_cost_rows(filters: dict, purchase_cost_types: list[str
 
 
 @frappe.whitelist()
-def bulk_update_purchase_cost_source(rows):
+def bulk_update_purchase_cost_source(rows: str):
 	rows = frappe.parse_json(rows) or []
 	if not rows:
 		frappe.throw(_("No rows provided."))

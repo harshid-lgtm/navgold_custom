@@ -90,6 +90,7 @@ def reset_purchase_cost_sources(
 				update_fields,
 				update_modified=True,
 			)
+			# Persist each chunk in this long-running background job so progress survives. # nosemgrep
 			frappe.db.commit()
 			updated_count += len(chunk)
 
