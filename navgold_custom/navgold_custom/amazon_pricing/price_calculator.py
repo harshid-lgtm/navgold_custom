@@ -16,6 +16,37 @@ def get_cost_type_map() -> dict:
 	return {row.name: row for row in rows}
 
 
+def get_cost_data(strategy, override_supplier_price: float | None = None) -> list[dict]:
+	active_costs = [cost for cost in strategy.costs if cost.is_active]
+	if not active_costs:
+		return []
+
+	cost_type_map = get_cost_type_map()
+
+	cost_data = []
+	for cost in active_costs:
+		cost_type = cost_type_map.get(cost.cost_type)
+		if not cost_type:
+			continue
+
+		if cost.source == "Supplier-Sync" and override_supplier_price is not None:
+			value = flt(override_supplier_price)
+		else:
+			value = flt(cost.value)
+
+		cost_data.append(
+			{
+				"type": cost.cost_type,
+				"is_absolute": cost_type.is_absolute,
+				"is_relative": cost_type.is_relative,
+				"is_vat": cost_type.is_vat,
+				"value": value,
+			}
+		)
+
+	return cost_data
+
+
 def get_pricing_settings():
 	settings = frappe.get_cached_doc("Navgold Settings")
 	return {
@@ -75,27 +106,9 @@ def calculate_single_price(numerator: float, denominator: float, margin: float, 
 
 
 def calculate_prices_with_purchase_cost_override(strategy, override_purchase_cost: float) -> dict:
-	active_costs = [cost for cost in strategy.costs if cost.is_active]
-	if not active_costs:
+	cost_data = get_cost_data(strategy, override_supplier_price=flt(override_purchase_cost))
+	if not cost_data:
 		return {"min_price": 0, "max_price": 0}
-
-	cost_type_map = get_cost_type_map()
-
-	cost_data = []
-	for cost in active_costs:
-		cost_type = cost_type_map.get(cost.cost_type)
-		if not cost_type:
-			continue
-		value = flt(override_purchase_cost) if cost.source == "Supplier-Sync" else cost.value
-		cost_data.append(
-			{
-				"type": cost.cost_type,
-				"is_absolute": cost_type.is_absolute,
-				"is_relative": cost_type.is_relative,
-				"is_vat": cost_type.is_vat,
-				"value": value,
-			}
-		)
 
 	return calculate_prices(
 		costs=cost_data,

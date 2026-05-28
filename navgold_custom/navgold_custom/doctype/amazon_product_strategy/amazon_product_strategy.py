@@ -9,8 +9,13 @@ from frappe.utils.data import flt
 from navgold_custom.navgold_custom.amazon_pricing.price_calculator import (
 	calculate_margin_from_price,
 	calculate_prices,
+	get_cost_data,
 )
-from navgold_custom.navgold_custom.amazon_pricing.price_calculator_api import get_cost_data_for_strategy
+from navgold_custom.navgold_custom.amazon_pricing.purchase_cost_sources import (
+	get_effective_po_purchase_cost,
+	get_effective_supplier_purchase_cost,
+)
+from navgold_custom.navgold_custom.utils import get_conversion_factor
 
 
 class AmazonProductStrategy(Document):
@@ -68,7 +73,7 @@ class AmazonProductStrategy(Document):
 			frappe.throw(_("Min Margin cannot be greater than Max Margin"))
 
 	def calculate_prices(self):
-		cost_data = get_cost_data_for_strategy(self)
+		cost_data = get_cost_data(self)
 
 		if not cost_data:
 			self.calculated_min_price = 0
@@ -88,7 +93,7 @@ class AmazonProductStrategy(Document):
 			self.calculated_profit = 0
 			return
 
-		cost_data = get_cost_data_for_strategy(self)
+		cost_data = get_cost_data(self)
 
 		if not cost_data:
 			self.calculated_margin = 0
@@ -104,29 +109,32 @@ class AmazonProductStrategy(Document):
 		synced_sources = {cost.source for cost in self.costs if cost.source not in (None, "", "Manual")}
 
 		item_code = None
-		if synced_sources & {"Supplier-Sync", "PO-Sync"}:
-			item_code = frappe.db.get_value("Proxy SKU", self.proxy_sku, "item")
-
+		proxy_sku_uom = None
 		last_transfer_rate = None
-		if "FBA-Transfer" in synced_sources:
-			last_transfer_rate = frappe.db.get_value("Proxy SKU", self.proxy_sku, "last_transfer_rate")
+		if synced_sources & {"Supplier-Sync", "PO-Sync", "FBA-Transfer"}:
+			proxy_sku_row = frappe.db.get_value(
+				"Proxy SKU",
+				self.proxy_sku,
+				["item", "uom", "last_transfer_rate"],
+				as_dict=True,
+			)
+			if proxy_sku_row:
+				item_code = proxy_sku_row.item
+				proxy_sku_uom = proxy_sku_row.uom
+				last_transfer_rate = proxy_sku_row.last_transfer_rate
 
 		supplier_price = None
 		if "Supplier-Sync" in synced_sources and item_code:
-			supplier_price = frappe.db.get_value(
-				"Supplier Item Price and Stock",
-				{"item": item_code, "purchase_blocked": 0, "stock_qty": [">", 0]},
-				order_by="rank asc",
-				fieldname="price",
-			)
+			supplier_price = get_effective_supplier_purchase_cost(item_code, proxy_sku_uom)
 
 		po_cost = None
 		if "PO-Sync" in synced_sources and item_code:
-			po_cost = frappe.db.get_value(
-				"Purchase Order Item",
-				{"item_code": item_code, "docstatus": 1},
-				order_by="creation desc",
-				fieldname="rate",
+			po_cost = get_effective_po_purchase_cost(item_code, proxy_sku_uom)
+
+		effective_transfer_rate = None
+		if "FBA-Transfer" in synced_sources and item_code:
+			effective_transfer_rate = flt(last_transfer_rate) * get_conversion_factor(
+				item_code, proxy_sku_uom
 			)
 
 		sub_type_names = [
@@ -151,7 +159,7 @@ class AmazonProductStrategy(Document):
 			elif cost.source == "PO-Sync":
 				cost.value = flt(po_cost)
 			elif cost.source == "FBA-Transfer":
-				cost.value = flt(last_transfer_rate)
+				cost.value = flt(effective_transfer_rate)
 			elif cost.source == "Auto-Sync":
 				cost.value = flt(sub_type_defaults.get(cost.cost_sub_type))
 
@@ -159,6 +167,7 @@ class AmazonProductStrategy(Document):
 STRATEGY_REFRESH_CHUNK_SIZE = 5000
 
 
+@frappe.whitelist()
 def refresh_all_strategy_costs():
 	strategy_names = frappe.get_all(
 		"Amazon Product Strategy",

@@ -86,6 +86,7 @@
 		},
 		{
 			"depends_on": "eval:doc.is_fba",
+			"description": "Per Nos (stock UOM). Populated on submit of FBA Transfer Stock Entries. Consumers multiply by UOM conversion factor for pack Proxy SKUs.",
 			"fieldname": "last_transfer_rate",
 			"fieldtype": "Currency",
 			"label": "Last Transfer Rate"

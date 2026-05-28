@@ -4,27 +4,6 @@
 frappe.ui.form.on('Navgold Settings', {
 	refresh(frm) {
 		if (frm.doc.amazon_pricing_enabled) {
-			if (frm.doc.repricer_enabled) {
-				frm.add_custom_button(
-					__('Sync Repricer Rules'),
-					async () => {
-						const response = await frappe.call({
-							method:
-								'navgold_custom.navgold_custom.amazon_pricing.repricer_client.sync_repricer_rules',
-							freeze: true,
-							freeze_message: __('Syncing rules from Repricer.com...'),
-						});
-						frappe.msgprint(
-							__('Synced {0} rules, created {1} new rules', [
-								response.message.synced,
-								response.message.created,
-							]),
-						);
-					},
-					__('Amazon Pricing'),
-				);
-			}
-
 			if (frm.doc.auto_sync_cogs && frm.doc.cogs_supplier) {
 				frm.add_custom_button(
 					__('Bulk Sync COGS'),
@@ -72,6 +51,33 @@ frappe.ui.form.on('Navgold Settings', {
 							response.message.updated,
 						]),
 					);
+				},
+				__('Amazon Pricing'),
+			);
+
+			frm.add_custom_button(
+				__('Refresh All Costs'),
+				async () => {
+					const confirmed = await navgold.confirm_dialog(
+						__(
+							'This will re-pull synced cost values (PO-Sync, Supplier-Sync, FBA-Transfer, Auto-Sync) into every active strategy and recalculate min/max prices. Continue?',
+						),
+					);
+					if (!confirmed) return;
+
+					const response = await frappe.call({
+						method:
+							'navgold_custom.navgold_custom.doctype.amazon_product_strategy.amazon_product_strategy.refresh_all_strategy_costs',
+						freeze: true,
+						freeze_message: __('Queuing cost refresh...'),
+					});
+					frappe.show_alert({
+						message: __('Queued {0} strategies across {1} chunks', [
+							response.message.total,
+							response.message.chunks_enqueued,
+						]),
+						indicator: 'blue',
+					});
 				},
 				__('Amazon Pricing'),
 			);

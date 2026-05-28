@@ -3,8 +3,10 @@
 
 
 import math
+from functools import partial
 
 import frappe
+from erpnext.stock.doctype.packed_item.packed_item import get_product_bundle_items
 from frappe.query_builder import DocType
 from frappe.query_builder.functions import Count
 from frappe.utils import add_days, fmt_money, getdate, now_datetime, today
@@ -14,10 +16,18 @@ from frappe.utils.data import cint, cstr, flt, orjson_dumps
 from navgold_custom.navgold_custom.amazon_pricing.price_calculator import (
 	calculate_prices_with_purchase_cost_override,
 )
+from navgold_custom.navgold_custom.amazon_pricing.purchase_cost_sources import (
+	calculate_bundle_cost,
+)
 from navgold_custom.navgold_custom.amazon_pricing.strategy_selector import (
 	get_stock_info,
 	get_stock_info_batch,
 )
+from navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku import get_proxy_sku_map
+from navgold_custom.navgold_custom.doctype.supplier_item_price_and_stock.supplier_item_price_and_stock import (
+	get_supplier_prices,
+)
+from navgold_custom.navgold_custom.utils import get_conversion_factor
 
 SHIPPING_GROUPS = {
 	"sfp": "57d54587-7341-4c9f-b3f9-546c8d798b21",
@@ -65,22 +75,53 @@ def recompute_backorder_prices_with_fallback_supplier(
 	if pricing.get("active_strategy") != pricing.get("backorder_strategy"):
 		return None
 
-	if resolved_suppliers:
-		top_supplier = resolved_suppliers.get("top_supplier")
-		in_stock_supplier = resolved_suppliers.get("in_stock_supplier")
-	else:
-		item_code = frappe.db.get_value("Proxy SKU", pricing["proxy_sku"], "item")
-		if not item_code:
-			return None
-		top_supplier = get_top_supplier_for_item(item_code)
-		in_stock_supplier = get_best_in_stock_supplier_for_item(item_code)
+	proxy_sku_info = get_proxy_sku_map(sku_names=[pricing["proxy_sku"]]).get(pricing["proxy_sku"])
+	if not proxy_sku_info or not proxy_sku_info.get("item"):
+		return None
+	item_code = proxy_sku_info["item"]
+	proxy_sku_uom = proxy_sku_info["uom"]
 
-	if not top_supplier or not in_stock_supplier:
-		return None
-	if in_stock_supplier.supplier == top_supplier.supplier:
-		return None
-	if flt(in_stock_supplier.get("stock_qty", 0)) <= 0:
-		return None
+	bundle_components = get_product_bundle_items(item_code)
+	if bundle_components:
+		fulfillable_cost = calculate_bundle_cost(item_code, bundle_components, get_supplier_prices)
+		if fulfillable_cost <= 0:
+			frappe.log_error(
+				f"Bundle {item_code}: a component has no in-stock supplier; skipping fallback repricing",
+				"Amazon Feed Builder",
+			)
+			return None
+
+		cheapest_cost = calculate_bundle_cost(
+			item_code, bundle_components, partial(get_supplier_prices, require_stock=False)
+		)
+		if fulfillable_cost <= cheapest_cost:
+			return None
+
+		override_price = fulfillable_cost
+		rank_one_supplier = f"bundle ({len(bundle_components)} components)"
+		rank_one_price = cheapest_cost
+		fallback_supplier = "in-stock components"
+		fallback_supplier_price = fulfillable_cost
+	else:
+		if resolved_suppliers:
+			top_supplier = resolved_suppliers.get("top_supplier")
+			in_stock_supplier = resolved_suppliers.get("in_stock_supplier")
+		else:
+			top_supplier = get_top_supplier_for_item(item_code)
+			in_stock_supplier = get_best_in_stock_supplier_for_item(item_code)
+
+		if not top_supplier or not in_stock_supplier:
+			return None
+		if in_stock_supplier.supplier == top_supplier.supplier:
+			return None
+		if flt(in_stock_supplier.get("stock_qty", 0)) <= 0:
+			return None
+
+		override_price = flt(in_stock_supplier.price) * get_conversion_factor(item_code, proxy_sku_uom)
+		rank_one_supplier = top_supplier.supplier
+		rank_one_price = flt(top_supplier.price)
+		fallback_supplier = in_stock_supplier.supplier
+		fallback_supplier_price = flt(in_stock_supplier.price)
 
 	if backorder_strategy_map is not None:
 		backorder_strategy = backorder_strategy_map.get(pricing["backorder_strategy"])
@@ -94,9 +135,7 @@ def recompute_backorder_prices_with_fallback_supplier(
 		except frappe.DoesNotExistError:
 			return None
 
-	recomputed = calculate_prices_with_purchase_cost_override(
-		backorder_strategy, flt(in_stock_supplier.price)
-	)
+	recomputed = calculate_prices_with_purchase_cost_override(backorder_strategy, override_price)
 	recomputed_min = flt(recomputed.get("min_price", 0))
 	recomputed_max = flt(recomputed.get("max_price", 0))
 	if recomputed_min <= 0 or recomputed_max <= 0:
@@ -107,10 +146,10 @@ def recompute_backorder_prices_with_fallback_supplier(
 		"final_max_price": recomputed_max,
 		"fallback_repricing": {
 			"proxy_sku": pricing["proxy_sku"],
-			"rank_one_supplier": top_supplier.supplier,
-			"rank_one_price": flt(top_supplier.price),
-			"fallback_supplier": in_stock_supplier.supplier,
-			"fallback_supplier_price": flt(in_stock_supplier.price),
+			"rank_one_supplier": rank_one_supplier,
+			"rank_one_price": rank_one_price,
+			"fallback_supplier": fallback_supplier,
+			"fallback_supplier_price": fallback_supplier_price,
 			"original_min_price": flt(pricing.get("current_min_price", 0)),
 			"original_max_price": flt(pricing.get("current_max_price", 0)),
 			"recomputed_min_price": recomputed_min,
