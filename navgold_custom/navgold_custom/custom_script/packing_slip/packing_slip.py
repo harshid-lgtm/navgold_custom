@@ -3,6 +3,7 @@
 
 import frappe
 from erpnext.stock.doctype.delivery_note.delivery_note import make_sales_invoice
+from erpnext.stock.doctype.packed_item.packed_item import is_product_bundle
 from frappe import _
 from frappe.utils import flt
 
@@ -27,9 +28,14 @@ def auto_submit_delivery_note(delivery_note_name):
 	if delivery_note.docstatus != 0:
 		return
 
-	all_items_packed = all(flt(item.packed_qty) >= flt(item.qty) for item in delivery_note.items)
+	regular_items_packed = all(
+		flt(item.packed_qty) >= flt(item.qty)
+		for item in delivery_note.items
+		if not is_product_bundle(item.item_code)
+	)
+	components_packed = all(flt(item.packed_qty) >= flt(item.qty) for item in delivery_note.packed_items)
 
-	if not all_items_packed:
+	if not (regular_items_packed and components_packed):
 		return
 
 	delivery_note.submit()
