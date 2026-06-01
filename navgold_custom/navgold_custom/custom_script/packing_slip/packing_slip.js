@@ -5,7 +5,7 @@ frappe.ui.form.on('Packing Slip', {
 	onload(frm) {
 		frm.selected_delivery_note = null;
 		frm._row_conversion_factors = {};
-		frm._row_bundles = {};
+		frm.row_bundles = {};
 	},
 	refresh(frm) {
 		toggle_fields(frm);
@@ -296,7 +296,7 @@ async function set_delivery_note_and_load_items(
 	const items = response.message || [];
 
 	frm._row_conversion_factors = {};
-	frm._row_bundles = {};
+	frm.row_bundles = {};
 
 	frm.clear_table('items');
 	for (const item of items) {
@@ -314,7 +314,7 @@ async function set_delivery_note_and_load_items(
 		frm._row_conversion_factors[row_key] = flt(item.conversion_factor) || 1;
 
 		if (item.bundle) {
-			frm._row_bundles[item.pi_detail] = item.bundle;
+			frm.row_bundles[item.pi_detail] = item.bundle;
 		}
 
 		if (item.weight_per_unit) {
@@ -358,11 +358,11 @@ function show_packed_qty_dialog(frm, item_code) {
 
 	const bundles = [
 		...new Set(
-			matching_rows.map((r) => frm._row_bundles?.[r.pi_detail]).filter(Boolean),
+			matching_rows.map((r) => frm.row_bundles?.[r.pi_detail]).filter(Boolean),
 		),
 	];
 	const has_standalone = matching_rows.some(
-		(r) => !frm._row_bundles?.[r.pi_detail],
+		(r) => !frm.row_bundles?.[r.pi_detail],
 	);
 
 	const targets = [
@@ -380,14 +380,14 @@ function show_packed_qty_dialog(frm, item_code) {
 function dispatch_pack_target(frm, target, item_code) {
 	if (target.type === 'bundle') {
 		const bundle_rows = (frm.doc.items || []).filter(
-			(r) => frm._row_bundles?.[r.pi_detail] === target.bundle,
+			(r) => frm.row_bundles?.[r.pi_detail] === target.bundle,
 		);
 		show_pack_qty_dialog(frm, bundle_rows, target.bundle);
 		return;
 	}
 
 	const standalone_rows = (frm.doc.items || []).filter(
-		(r) => r.item_code === item_code && !frm._row_bundles?.[r.pi_detail],
+		(r) => r.item_code === item_code && !frm.row_bundles?.[r.pi_detail],
 	);
 	show_pack_qty_dialog(frm, standalone_rows, item_code);
 }
