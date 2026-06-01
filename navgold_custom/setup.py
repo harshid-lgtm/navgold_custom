@@ -9,6 +9,7 @@
 import frappe
 from frappe import _
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
+from frappe.permissions import add_permission
 
 
 def after_install():
@@ -18,6 +19,12 @@ def after_install():
 	create_custom_fields(get_journal_entry_custom_fields(), ignore_validate=True)
 	create_custom_fields(get_purchase_receipt_custom_fields(), ignore_validate=True)
 	create_custom_fields(get_stock_entry_custom_fields(), ignore_validate=True)
+	setup_navgold_role_permissions()
+
+
+def setup_navgold_role_permissions():
+	if frappe.db.exists("Role", "Navgold - Despatch Warehouse"):
+		add_permission("Address", "Navgold - Despatch Warehouse", 0, "read")
 
 
 def after_migrate():

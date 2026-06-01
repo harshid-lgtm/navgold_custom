@@ -139,7 +139,6 @@ fixtures = [
 				"parent",
 				"in",
 				[
-					"Address",
 					"Batch",
 					"Buying Settings",
 					"Company",
