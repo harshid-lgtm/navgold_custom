@@ -131,6 +131,43 @@ app_include_js = ["/assets/navgold_custom/js/utils.js", "/assets/navgold_custom/
 
 fixtures = [
 	{"dt": "Stock Entry Type", "filters": [["name", "=", "FBA Transfer"]]},
+	{"dt": "Role", "filters": [["name", "like", "Navgold%"]]},
+	{
+		"dt": "Custom DocPerm",
+		"filters": [
+			[
+				"parent",
+				"in",
+				[
+					"Batch",
+					"Buying Settings",
+					"Company",
+					"Currency",
+					"Item",
+					"Item Group",
+					"Item Tax Template",
+					"Material Request",
+					"Packing Slip",
+					"Pick List",
+					"Price List",
+					"Proxy SKU",
+					"Purchase Order",
+					"Purchase Receipt",
+					"Purchase Taxes and Charges Template",
+					"Sales Order",
+					"Stock Entry",
+					"Stock Entry Type",
+					"Stock Ledger Entry",
+					"Stock Reconciliation",
+					"Stock Settings",
+					"Supplier",
+					"Supplier Group",
+					"UOM",
+					"Warehouse",
+				],
+			]
+		],
+	},
 ]
 
 # Document Events
