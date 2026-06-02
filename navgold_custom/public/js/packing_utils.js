@@ -92,3 +92,30 @@ navgold.packing.open_scan_item_dialog = function open_scan_item_dialog(
 		}
 	}, 150);
 };
+
+navgold.packing.prompt_select = function prompt_select({
+	title,
+	label,
+	options,
+	on_select,
+}) {
+	const dialog = new frappe.ui.Dialog({
+		title,
+		fields: [
+			{
+				fieldname: 'value',
+				fieldtype: 'Select',
+				label: label || __('Select'),
+				options: options.join('\n'),
+				reqd: 1,
+				default: options[0],
+			},
+		],
+		primary_action_label: __('Select'),
+		async primary_action({ value }) {
+			dialog.hide();
+			await on_select(value);
+		},
+	});
+	dialog.show();
+};

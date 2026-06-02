@@ -6,6 +6,7 @@ import base64
 import frappe
 from erpnext.stock.doctype.delivery_note.delivery_note import make_packing_slip
 from erpnext.stock.doctype.item.item import get_uom_conv_factor
+from erpnext.stock.doctype.packed_item.packed_item import is_product_bundle
 from frappe import _
 from frappe.utils import flt
 from frappe.utils.data import cstr
@@ -55,7 +56,9 @@ def get_draft_delivery_note_items(tote: str | None = None):
 		fields=["item_code", "item_name", "against_sales_order", "qty", "packed_qty", "parent"],
 	)
 
-	return [
+	dn_names = {item.parent for item in delivery_note_items}
+
+	result = [
 		{
 			"item_code": item.item_code,
 			"item_name": item.item_name,
@@ -63,8 +66,27 @@ def get_draft_delivery_note_items(tote: str | None = None):
 			"sales_order": item.against_sales_order,
 		}
 		for item in delivery_note_items
-		if flt(item.packed_qty) < flt(item.qty)
+		if flt(item.packed_qty) < flt(item.qty) and not is_product_bundle(item.item_code)
 	]
+
+	if dn_names:
+		packed_items = frappe.get_all(
+			"Packed Item",
+			filters={"parent": ["in", list(dn_names)], "docstatus": 0},
+			fields=["item_code", "item_name", "parent", "parent_item", "qty", "packed_qty"],
+		)
+		result.extend(
+			{
+				"item_code": packed.item_code,
+				"item_name": packed.item_name,
+				"delivery_note": packed.parent,
+				"bundle": packed.parent_item,
+			}
+			for packed in packed_items
+			if flt(packed.packed_qty) < flt(packed.qty)
+		)
+
+	return result
 
 
 @frappe.whitelist()
@@ -74,6 +96,15 @@ def get_delivery_note_items(delivery_note: str):
 	item_weights = get_item_weight_map(item_codes)
 	uom_conversion_map = get_uom_conversion_map(list(item_codes))
 
+	pi_parent_map = {
+		row.name: row.parent_item
+		for row in frappe.get_all(
+			"Packed Item",
+			filters={"parent": delivery_note, "docstatus": 0},
+			fields=["name", "parent_item"],
+		)
+	}
+
 	return [
 		{
 			"item_code": item.item_code,
@@ -82,6 +113,8 @@ def get_delivery_note_items(delivery_note: str):
 			"qty": item.qty,
 			"uom": item.stock_uom,
 			"dn_detail": item.dn_detail,
+			"pi_detail": item.pi_detail,
+			"bundle": pi_parent_map.get(item.pi_detail, ""),
 			"conversion_factor": uom_conversion_map.get((item.item_code, item.stock_uom), 1),
 			"weight_per_unit": flt(item_weights.get(item.item_code, {}).get("weight_per_unit")),
 			"weight_uom": item_weights.get(item.item_code, {}).get("weight_uom", ""),

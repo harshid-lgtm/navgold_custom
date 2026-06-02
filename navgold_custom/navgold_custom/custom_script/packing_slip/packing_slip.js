@@ -5,6 +5,7 @@ frappe.ui.form.on('Packing Slip', {
 	onload(frm) {
 		frm.selected_delivery_note = null;
 		frm._row_conversion_factors = {};
+		frm.row_bundles = {};
 	},
 	refresh(frm) {
 		toggle_fields(frm);
@@ -266,25 +267,13 @@ async function process_item_scan(frm, barcode) {
 }
 
 function show_source_selection_dialog(frm, sources, item_code) {
-	const dialog = new frappe.ui.Dialog({
+	navgold.packing.prompt_select({
 		title: __('Multiple Delivery Notes Found'),
-		fields: [
-			{
-				fieldname: 'source',
-				fieldtype: 'Select',
-				label: __('Select Delivery Note'),
-				options: sources.join('\n'),
-				reqd: 1,
-				default: sources[0],
-			},
-		],
-		primary_action_label: __('Select'),
-		async primary_action({ source }) {
-			dialog.hide();
-			await set_delivery_note_and_load_items(frm, source, item_code);
-		},
+		label: __('Select Delivery Note'),
+		options: sources,
+		on_select: (source) =>
+			set_delivery_note_and_load_items(frm, source, item_code),
 	});
-	dialog.show();
 }
 
 async function set_delivery_note_and_load_items(
@@ -307,6 +296,7 @@ async function set_delivery_note_and_load_items(
 	const items = response.message || [];
 
 	frm._row_conversion_factors = {};
+	frm.row_bundles = {};
 
 	frm.clear_table('items');
 	for (const item of items) {
@@ -317,10 +307,15 @@ async function set_delivery_note_and_load_items(
 		row.qty = flt(item.qty);
 		row.stock_uom = item.uom;
 		row.dn_detail = item.dn_detail || '';
+		row.pi_detail = item.pi_detail || '';
 		row.custom_packed_qty = 0;
 
-		frm._row_conversion_factors[item.dn_detail] =
-			flt(item.conversion_factor) || 1;
+		const row_key = item.dn_detail || item.pi_detail;
+		frm._row_conversion_factors[row_key] = flt(item.conversion_factor) || 1;
+
+		if (item.bundle) {
+			frm.row_bundles[item.pi_detail] = item.bundle;
+		}
 
 		if (item.weight_per_unit) {
 			row.net_weight = flt(item.weight_per_unit) * flt(item.qty);
@@ -340,7 +335,9 @@ async function set_delivery_note_and_load_items(
 }
 
 function get_row_conversion_factor(frm, row) {
-	return flt(frm._row_conversion_factors?.[row.dn_detail]) || 1;
+	return (
+		flt(frm._row_conversion_factors?.[row.dn_detail || row.pi_detail]) || 1
+	);
 }
 
 function show_packed_qty_dialog(frm, item_code) {
@@ -348,6 +345,74 @@ function show_packed_qty_dialog(frm, item_code) {
 		(r) => r.item_code === item_code,
 	);
 
+	if (!matching_rows.length) {
+		frappe.show_alert(
+			{
+				message: __('Item {0} not found in the items table', [item_code]),
+				indicator: 'red',
+			},
+			5,
+		);
+		return;
+	}
+
+	const bundles = [
+		...new Set(
+			matching_rows.map((r) => frm.row_bundles?.[r.pi_detail]).filter(Boolean),
+		),
+	];
+	const has_standalone = matching_rows.some(
+		(r) => !frm.row_bundles?.[r.pi_detail],
+	);
+
+	const targets = [
+		...bundles.map((bundle) => ({ type: 'bundle', bundle })),
+		...(has_standalone ? [{ type: 'standalone' }] : []),
+	];
+
+	if (targets.length === 1) {
+		dispatch_pack_target(frm, targets[0], item_code);
+	} else {
+		show_pack_target_selection_dialog(frm, targets, item_code);
+	}
+}
+
+function dispatch_pack_target(frm, target, item_code) {
+	if (target.type === 'bundle') {
+		const bundle_rows = (frm.doc.items || []).filter(
+			(r) => frm.row_bundles?.[r.pi_detail] === target.bundle,
+		);
+		show_pack_qty_dialog(frm, bundle_rows, target.bundle);
+		return;
+	}
+
+	const standalone_rows = (frm.doc.items || []).filter(
+		(r) => r.item_code === item_code && !frm.row_bundles?.[r.pi_detail],
+	);
+	show_pack_qty_dialog(frm, standalone_rows, item_code);
+}
+
+function show_pack_target_selection_dialog(frm, targets, item_code) {
+	const option_map = new Map();
+	const options = targets.map((target) => {
+		const label =
+			target.type === 'bundle'
+				? __('Bundle: {0}', [target.bundle])
+				: __('Standalone item: {0}', [item_code]);
+		option_map.set(label, target);
+		return label;
+	});
+
+	navgold.packing.prompt_select({
+		title: __('Item belongs to multiple sources'),
+		label: __('Select what to pack'),
+		options,
+		on_select: (value) =>
+			dispatch_pack_target(frm, option_map.get(value), item_code),
+	});
+}
+
+function show_pack_qty_dialog(frm, matching_rows, item_code) {
 	if (!matching_rows.length) {
 		frappe.show_alert(
 			{
