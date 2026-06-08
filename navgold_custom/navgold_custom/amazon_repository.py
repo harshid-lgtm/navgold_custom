@@ -322,7 +322,13 @@ class AmazonRepository:
 				item["warehouse"] = warehouse
 				sales_order.append("items", item)
 
-			sales_order.set_taxes()
+			# ERPNext v17 moved set_taxes() off the controller into TaxService; fall back for older versions
+			try:
+				from erpnext.accounts.services.taxes import TaxService
+
+				TaxService(sales_order).set_taxes()
+			except ImportError:
+				sales_order.set_taxes()
 			for tax_row in sales_order.taxes:
 				tax_row.included_in_print_rate = 1
 
