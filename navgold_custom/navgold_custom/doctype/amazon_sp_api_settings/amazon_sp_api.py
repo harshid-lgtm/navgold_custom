@@ -16,6 +16,12 @@ from frappe.utils.caching import redis_cache
 from requests.exceptions import HTTPError
 
 MAX_RETRIES = 3
+# Amazon Feeds (createFeed/createFeedDocument) restore throttle tokens at ~1 per 2 min, so a 429
+# needs several backoff steps to ride out the window — hence more retries than the default.
+FEED_MAX_RETRIES = 7
+# Cap per-attempt sleep so exponential backoff (1,2,4,...) can't balloon into a multi-minute
+# blocking wait.
+MAX_BACKOFF_SECONDS = 30
 LWA_AUTH_URL = "https://api.amazon.com/auth/o2/token"
 
 
@@ -59,7 +65,11 @@ def fetch_access_token(client_id: str, client_secret: str, refresh_token: str) -
 		)
 
 
-def retry_with_backoff(func, error_title="SP-API Error", max_retries=MAX_RETRIES):
+def is_throttling_error(error) -> bool:
+	return getattr(error, "status_code", None) in (429, 503)
+
+
+def retry_with_backoff(func, error_title="SP-API Error", max_retries=MAX_RETRIES, throttle_only=False):
 	retry_count = 0
 	backoff = 1
 
@@ -67,6 +77,8 @@ def retry_with_backoff(func, error_title="SP-API Error", max_retries=MAX_RETRIES
 		try:
 			return func()
 		except Exception as error:
+			if throttle_only and not is_throttling_error(error):
+				raise
 			retry_count += 1
 			if retry_count > max_retries:
 				frappe.log_error(
@@ -74,7 +86,7 @@ def retry_with_backoff(func, error_title="SP-API Error", max_retries=MAX_RETRIES
 					error_title,
 				)
 				raise
-			time.sleep(backoff)
+			time.sleep(min(backoff, MAX_BACKOFF_SECONDS))
 			backoff *= 2
 
 
@@ -135,6 +147,7 @@ class SPAPIError(Exception):
 	def __init__(self, *args, **kwargs) -> None:
 		self.error = kwargs.get("error", "-")
 		self.error_description = kwargs.get("error_description", "-")
+		self.status_code = kwargs.get("status_code")
 		super().__init__(*args)
 
 
@@ -646,6 +659,34 @@ class Feeds(SPAPI):
 
 	BASE_URI = "/feeds/2021-06-30/"
 
+	def post_feed_json(self, url: str, payload: dict, error_code: str, error_label: str) -> dict:
+		# Retry only on Amazon throttling (429/503); any other error fails fast. status_code is
+		# surfaced on SPAPIError so retry_with_backoff can tell a throttle from a real failure.
+		def request():
+			try:
+				return frappe_make_request(
+					method="POST",
+					url=url,
+					json=payload,
+					headers={**self.get_headers(), "Content-Type": "application/json"},
+				)
+			except HTTPError as error:
+				status_code = error.response.status_code if error.response is not None else None
+				raise SPAPIError(
+					error=error_code,
+					error_description=f"{error_label}: {error!s}",
+					status_code=status_code,
+				) from error
+			except Exception as error:
+				raise SPAPIError(error=error_code, error_description=f"{error_label}: {error!s}") from error
+
+		return retry_with_backoff(
+			request,
+			error_title=error_label,
+			max_retries=FEED_MAX_RETRIES,
+			throttle_only=True,
+		)
+
 	def create_feed_document(self, content_type: str = "application/json") -> dict:
 		"""
 		Create a feed document and get a pre-signed URL for upload.
@@ -660,18 +701,12 @@ class Feeds(SPAPI):
 		"""
 		url = self.endpoint + self.BASE_URI + "documents"
 
-		try:
-			result = frappe_make_request(
-				method="POST",
-				url=url,
-				json={"contentType": content_type},
-				headers={**self.get_headers(), "Content-Type": "application/json"},
-			)
-			return result
-		except Exception as e:
-			raise SPAPIError(
-				error="CreateFeedDocumentError", error_description=f"Failed to create feed document: {e!s}"
-			)
+		return self.post_feed_json(
+			url,
+			{"contentType": content_type},
+			error_code="CreateFeedDocumentError",
+			error_label="Failed to create feed document",
+		)
 
 	def upload_feed_content(
 		self, url: str, content: str | bytes, content_type: str = "application/json"
@@ -714,20 +749,16 @@ class Feeds(SPAPI):
 
 		url = self.endpoint + self.BASE_URI + "feeds"
 
-		try:
-			result = frappe_make_request(
-				method="POST",
-				url=url,
-				json={
-					"feedType": feed_type,
-					"marketplaceIds": marketplace_ids,
-					"inputFeedDocumentId": feed_document_id,
-				},
-				headers={**self.get_headers(), "Content-Type": "application/json"},
-			)
-			return result
-		except Exception as e:
-			raise SPAPIError(error="CreateFeedError", error_description=f"Failed to create feed: {e!s}")
+		return self.post_feed_json(
+			url,
+			{
+				"feedType": feed_type,
+				"marketplaceIds": marketplace_ids,
+				"inputFeedDocumentId": feed_document_id,
+			},
+			error_code="CreateFeedError",
+			error_label="Failed to create feed",
+		)
 
 	def get_feed(self, feed_id: str) -> dict:
 		"""
