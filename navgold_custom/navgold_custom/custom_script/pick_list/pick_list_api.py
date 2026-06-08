@@ -2,10 +2,10 @@
 # For license information, please see license.txt
 
 import frappe
-from erpnext.selling.doctype.sales_order.sales_order import create_pick_list
-from erpnext.stock.doctype.pick_list.pick_list import create_stock_entry
 from frappe import _
 from frappe.utils import flt
+
+from navgold_custom.navgold_custom.erpnext_compat import create_pick_list, create_stock_entry
 
 
 @frappe.whitelist()

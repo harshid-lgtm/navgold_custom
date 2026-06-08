@@ -4,7 +4,6 @@
 import base64
 
 import frappe
-from erpnext.stock.doctype.delivery_note.delivery_note import make_packing_slip
 from erpnext.stock.doctype.item.item import get_uom_conv_factor
 from erpnext.stock.doctype.packed_item.packed_item import is_product_bundle
 from frappe import _
@@ -19,6 +18,7 @@ from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api 
 	Orders,
 	Shipping,
 )
+from navgold_custom.navgold_custom.erpnext_compat import make_packing_slip
 
 
 @frappe.whitelist()

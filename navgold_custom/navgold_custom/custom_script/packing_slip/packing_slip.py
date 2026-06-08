@@ -2,12 +2,12 @@
 # For license information, please see license.txt
 
 import frappe
-from erpnext.stock.doctype.delivery_note.delivery_note import make_sales_invoice
 from erpnext.stock.doctype.packed_item.packed_item import is_product_bundle
 from frappe import _
 from frappe.utils import flt
 
 from navgold_custom.navgold_custom.custom_script.packing_slip.packing_utils import recalculate_net_weight
+from navgold_custom.navgold_custom.erpnext_compat import make_sales_invoice
 
 
 def before_validate(doc, method):

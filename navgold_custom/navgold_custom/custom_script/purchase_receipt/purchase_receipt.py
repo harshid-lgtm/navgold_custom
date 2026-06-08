@@ -2,9 +2,10 @@
 # For license information, please see license.txt
 
 import frappe
-from erpnext.buying.doctype.purchase_order.purchase_order import make_purchase_receipt
 from frappe import _
 from frappe.utils import flt
+
+from navgold_custom.navgold_custom.erpnext_compat import make_purchase_receipt
 
 
 @frappe.whitelist()

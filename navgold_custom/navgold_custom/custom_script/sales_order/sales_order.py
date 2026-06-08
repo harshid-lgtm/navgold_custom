@@ -7,7 +7,6 @@
 # For license information, please see license.txt
 
 import frappe
-from erpnext.selling.doctype.sales_order.sales_order import make_material_request
 from erpnext.stock.doctype.stock_reservation_entry.stock_reservation_entry import (
 	get_sre_reserved_qty_for_items_and_warehouses as get_reserved_stock_details,
 )
@@ -15,6 +14,8 @@ from frappe import _
 from frappe.query_builder import DocType
 from frappe.query_builder.functions import Sum
 from frappe.utils import cint, flt, getdate, nowdate
+
+from navgold_custom.navgold_custom.erpnext_compat import make_material_request
 
 
 def sales_order_on_submit(doc, method):

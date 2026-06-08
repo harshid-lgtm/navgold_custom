@@ -2,8 +2,9 @@
 # For license information, please see license.txt
 
 import frappe
-from erpnext.stock.doctype.pick_list.pick_list import create_delivery_note
 from frappe import _
+
+from navgold_custom.navgold_custom.erpnext_compat import create_delivery_note
 
 
 def sort_item_locations_by_walk_route(doc, method):
