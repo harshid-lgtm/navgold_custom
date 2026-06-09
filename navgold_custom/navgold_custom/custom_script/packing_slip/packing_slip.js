@@ -6,6 +6,7 @@ frappe.ui.form.on('Packing Slip', {
 		frm.selected_delivery_note = null;
 		frm._row_conversion_factors = {};
 		frm.row_bundles = {};
+		frm.row_bundle_descriptions = {};
 	},
 	refresh(frm) {
 		toggle_fields(frm);
@@ -297,6 +298,7 @@ async function set_delivery_note_and_load_items(
 
 	frm._row_conversion_factors = {};
 	frm.row_bundles = {};
+	frm.row_bundle_descriptions = {};
 
 	frm.clear_table('items');
 	for (const item of items) {
@@ -315,6 +317,7 @@ async function set_delivery_note_and_load_items(
 
 		if (item.bundle) {
 			frm.row_bundles[item.pi_detail] = item.bundle;
+			frm.row_bundle_descriptions[item.pi_detail] = item.bundle_description;
 		}
 
 		if (item.weight_per_unit) {
@@ -382,7 +385,13 @@ function dispatch_pack_target(frm, target, item_code) {
 		const bundle_rows = (frm.doc.items || []).filter(
 			(r) => frm.row_bundles?.[r.pi_detail] === target.bundle,
 		);
-		show_pack_qty_dialog(frm, bundle_rows, target.bundle);
+		const bundle_description = bundle_rows.length
+			? frm.row_bundle_descriptions?.[bundle_rows[0].pi_detail] || ''
+			: '';
+		show_pack_qty_dialog(frm, bundle_rows, target.bundle, {
+			is_bundle: true,
+			description: bundle_description,
+		});
 		return;
 	}
 
@@ -412,7 +421,7 @@ function show_pack_target_selection_dialog(frm, targets, item_code) {
 	});
 }
 
-function show_pack_qty_dialog(frm, matching_rows, item_code) {
+function show_pack_qty_dialog(frm, matching_rows, item_code, options = {}) {
 	if (!matching_rows.length) {
 		frappe.show_alert(
 			{
@@ -441,6 +450,10 @@ function show_pack_qty_dialog(frm, matching_rows, item_code) {
 	const show_original_uom =
 		original_uom !== 'Nos' && total_required_uom !== total_required_nos;
 
+	const description = options.is_bundle
+		? options.description
+		: matching_rows[0].description;
+
 	const dialog = new frappe.ui.Dialog({
 		title: __('Update Packed Qty'),
 		fields: [
@@ -456,7 +469,7 @@ function show_pack_qty_dialog(frm, matching_rows, item_code) {
 				fieldtype: 'Small Text',
 				label: __('Description'),
 				read_only: 1,
-				default: matching_rows[0].description,
+				default: description,
 			},
 			{
 				fieldname: 'original_uom_info',
@@ -490,37 +503,44 @@ function show_pack_qty_dialog(frm, matching_rows, item_code) {
 		],
 		primary_action_label: __('Confirm'),
 		primary_action({ qty }) {
-			const new_total_packed_nos = total_packed_nos + flt(qty);
+			const apply_packed_qty = () => {
+				const new_total_packed_nos = total_packed_nos + flt(qty);
 
-			if (new_total_packed_nos > total_required_nos) {
-				frappe.show_alert(
-					{
-						message: __('Packed qty for {0} ({1}) exceeds required qty ({2})', [
-							item_code,
-							new_total_packed_nos,
-							total_required_nos,
-						]),
-						indicator: 'orange',
-					},
-					5,
-				);
+				if (new_total_packed_nos > total_required_nos) {
+					frappe.show_alert(
+						{
+							message: __(
+								'Packed qty for {0} ({1}) exceeds required qty ({2})',
+								[item_code, new_total_packed_nos, total_required_nos],
+							),
+							indicator: 'orange',
+						},
+						5,
+					);
+				}
+
+				distribute_packed_qty(frm, matching_rows, new_total_packed_nos);
+
+				frm.refresh_field('items');
+				frm.dirty();
+
+				frappe.show_alert({
+					message: __('Packed {0}: {1}/{2}', [
+						item_code,
+						new_total_packed_nos,
+						total_required_nos,
+					]),
+					indicator: 'green',
+				});
+
+				dialog.hide();
+			};
+
+			if (options.is_bundle) {
+				frappe.confirm(__('The Item is a Product Bundle.'), apply_packed_qty);
+			} else {
+				apply_packed_qty();
 			}
-
-			distribute_packed_qty(frm, matching_rows, new_total_packed_nos);
-
-			frm.refresh_field('items');
-			frm.dirty();
-
-			frappe.show_alert({
-				message: __('Packed {0}: {1}/{2}', [
-					item_code,
-					new_total_packed_nos,
-					total_required_nos,
-				]),
-				indicator: 'green',
-			});
-
-			dialog.hide();
 		},
 	});
 	dialog.show();

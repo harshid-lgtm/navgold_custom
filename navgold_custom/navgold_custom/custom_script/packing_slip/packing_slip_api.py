@@ -96,14 +96,26 @@ def get_delivery_note_items(delivery_note: str):
 	item_weights = get_item_weight_map(item_codes)
 	uom_conversion_map = get_uom_conversion_map(list(item_codes))
 
-	pi_parent_map = {
-		row.name: row.parent_item
-		for row in frappe.get_all(
-			"Packed Item",
-			filters={"parent": delivery_note, "docstatus": 0},
-			fields=["name", "parent_item"],
+	packed_rows = frappe.get_all(
+		"Packed Item",
+		filters={"parent": delivery_note, "docstatus": 0},
+		fields=["name", "parent_item"],
+	)
+	pi_parent_map = {row.name: row.parent_item for row in packed_rows}
+
+	bundle_item_codes = {row.parent_item for row in packed_rows if row.parent_item}
+	bundle_description_map = (
+		dict(
+			frappe.get_all(
+				"Item",
+				filters={"name": ["in", list(bundle_item_codes)]},
+				fields=["name", "description"],
+				as_list=True,
+			)
 		)
-	}
+		if bundle_item_codes
+		else {}
+	)
 
 	return [
 		{
@@ -115,6 +127,7 @@ def get_delivery_note_items(delivery_note: str):
 			"dn_detail": item.dn_detail,
 			"pi_detail": item.pi_detail,
 			"bundle": pi_parent_map.get(item.pi_detail, ""),
+			"bundle_description": bundle_description_map.get(pi_parent_map.get(item.pi_detail, ""), ""),
 			"conversion_factor": uom_conversion_map.get((item.item_code, item.stock_uom), 1),
 			"weight_per_unit": flt(item_weights.get(item.item_code, {}).get("weight_per_unit")),
 			"weight_uom": item_weights.get(item.item_code, {}).get("weight_uom", ""),
