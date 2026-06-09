@@ -21,7 +21,7 @@ class AmazonCostSetTemplateItem(Document):
 		parentfield: DF.Data
 		parenttype: DF.Data
 		rank: DF.Int
-		source: DF.Literal["Manual", "Auto-Sync", "Supplier-Sync", "PO-Sync", "FBA-Transfer"]
+		source: DF.Literal["Manual", "Auto-Sync", "Supplier-Sync", "PO-Sync", "FBA-Transfer", "Amazon-Sync"]
 	# end: auto-generated types
 
 	pass
