@@ -23,19 +23,7 @@ def apply_template_to_pricing(template_name: str, pricing_name: str) -> dict:
 			).format(len(existing_strategies))
 		)
 
-	strategy_map = {}
-	for template_strategy in template.strategies:
-		strategy = create_strategy_from_template(template_strategy, pricing.proxy_sku)
-		strategy_map[template_strategy.strategy_type] = strategy.name
-
-	if "FBA" in strategy_map:
-		pricing.fba_strategy = strategy_map["FBA"]
-	if "SFP" in strategy_map:
-		pricing.sfp_strategy = strategy_map["SFP"]
-	if "Backorder" in strategy_map:
-		pricing.backorder_strategy = strategy_map["Backorder"]
-	if "Default" in strategy_map:
-		pricing.default_strategy = strategy_map["Default"]
+	strategy_map = link_strategies_to_pricing(pricing, template)
 
 	pricing.save()
 
@@ -45,6 +33,56 @@ def apply_template_to_pricing(template_name: str, pricing_name: str) -> dict:
 		"strategies_created": len(strategy_map),
 		"strategies": strategy_map,
 	}
+
+
+def link_strategies_to_pricing(pricing_doc, template) -> dict:
+	"""Create strategies for the proxy SKU and set the 4 link fields on the pricing doc.
+
+	Returns the strategy_type -> strategy name map. Does NOT save the pricing doc, the
+	caller owns the single insert/save so both the existing-pricing and new-pricing paths
+	share one code path.
+	"""
+	strategy_map = {}
+	for template_strategy in template.strategies:
+		strategy = create_strategy_from_template(template_strategy, pricing_doc.proxy_sku)
+		strategy_map[template_strategy.strategy_type] = strategy.name
+
+	if "FBA" in strategy_map:
+		pricing_doc.fba_strategy = strategy_map["FBA"]
+	if "SFP" in strategy_map:
+		pricing_doc.sfp_strategy = strategy_map["SFP"]
+	if "Backorder" in strategy_map:
+		pricing_doc.backorder_strategy = strategy_map["Backorder"]
+	if "Default" in strategy_map:
+		pricing_doc.default_strategy = strategy_map["Default"]
+
+	return strategy_map
+
+
+def apply_template_to_proxy_sku(template_name: str, proxy_sku: str) -> dict:
+	if frappe.db.exists("Amazon Product Strategy", {"proxy_sku": proxy_sku}):
+		return {"proxy_sku": proxy_sku, "status": "skipped", "strategies_created": 0}
+
+	template = frappe.get_cached_doc("Amazon Strategy Template", template_name)
+
+	pricing_name = frappe.db.get_value("Amazon Product Pricing", {"proxy_sku": proxy_sku}, "name")
+	if pricing_name:
+		pricing = frappe.get_cached_doc("Amazon Product Pricing", pricing_name)
+	else:
+		# Inherit is_active from the Proxy SKU — the action deliberately permits inactive
+		# selections, so hardcoding 1 would wrongly activate pricing for an inactive SKU.
+		pricing = frappe.new_doc("Amazon Product Pricing")
+		pricing.proxy_sku = proxy_sku
+		pricing.is_active = frappe.db.get_value("Proxy SKU", proxy_sku, "is_active")
+
+	strategy_map = link_strategies_to_pricing(pricing, template)
+
+	if pricing_name:
+		pricing.save()
+	else:
+		pricing.insert()
+
+	return {"proxy_sku": proxy_sku, "status": "applied", "strategies_created": len(strategy_map)}
 
 
 def create_strategy_from_template(template_strategy, proxy_sku: str):
@@ -138,3 +176,61 @@ def run_bulk_apply_template(template_name: str, pricing_names: list):
 		{"success_count": success, "error_count": len(errors)},
 		user=frappe.session.user,
 	)
+
+
+@frappe.whitelist()
+def bulk_apply_template_to_proxy_skus(template_name: str, proxy_sku_names: str) -> dict:
+	if isinstance(proxy_sku_names, str):
+		proxy_sku_names = frappe.parse_json(proxy_sku_names)
+
+	if not frappe.db.exists("Amazon Strategy Template", template_name):
+		frappe.throw(_("Amazon Strategy Template {0} does not exist").format(template_name))
+
+	if not proxy_sku_names:
+		frappe.throw(_("No proxy SKUs selected"))
+
+	frappe.enqueue(
+		run_bulk_apply_to_proxy_skus,
+		template_name=template_name,
+		proxy_sku_names=proxy_sku_names,
+		queue="long",
+		timeout=6000,
+		job_name="Bulk Apply Template to Proxy SKUs",
+	)
+
+	frappe.msgprint(_("Template application has been queued. You will be notified on completion."))
+	return {"queued": True, "count": len(proxy_sku_names)}
+
+
+def run_bulk_apply_to_proxy_skus(template_name: str, proxy_sku_names: list) -> dict:
+	applied = 0
+	skipped = 0
+	errors = 0
+
+	for proxy_sku in proxy_sku_names:
+		try:
+			frappe.db.savepoint("apply_template")
+			result = apply_template_to_proxy_sku(template_name, proxy_sku)
+			if result["status"] == "applied":
+				applied += 1
+			else:
+				skipped += 1
+		except Exception as error:
+			# Roll back only this item so one failed insert cannot poison the transaction
+			# and cascade-fail the rest of the batch.
+			frappe.db.rollback(save_point="apply_template")
+			errors += 1
+			frappe.log_error(
+				f"Template application error for Proxy SKU {proxy_sku}: {error!s}",
+				"Bulk Apply Template to Proxy SKUs",
+			)
+
+	tally = {"applied": applied, "skipped": skipped, "errors": errors}
+
+	frappe.publish_realtime(
+		"bulk_template_proxy_sku_complete",
+		tally,
+		user=frappe.session.user,
+	)
+
+	return tally
