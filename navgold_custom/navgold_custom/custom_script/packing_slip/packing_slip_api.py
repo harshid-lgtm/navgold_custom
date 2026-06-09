@@ -107,9 +107,9 @@ def get_delivery_note_items(delivery_note: str):
 	bundle_description_map = (
 		dict(
 			frappe.get_all(
-				"Product Bundle",
-				filters={"new_item_code": ["in", list(bundle_item_codes)]},
-				fields=["new_item_code", "description"],
+				"Item",
+				filters={"name": ["in", list(bundle_item_codes)]},
+				fields=["name", "description"],
 				as_list=True,
 			)
 		)
