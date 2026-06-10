@@ -479,25 +479,6 @@ class Listings(SPAPI):
 			return None
 		return summaries[0]
 
-	def fetch_price_for_sku(self, sku_name):
-		try:
-			response = retry_with_backoff(
-				lambda: self.get_listing_item(sku=sku_name, included_data="offers"),
-				error_title=f"Listings API price fetch failed for SKU {sku_name}",
-			)
-		except Exception:
-			return None
-
-		offers = response.get("offers") or []
-		if not offers:
-			return None
-
-		amount = (offers[0].get("price") or {}).get("amount")
-		if amount is None:
-			return None
-
-		return flt(amount)
-
 
 class FBAInventory(SPAPI):
 	"""Amazon FBA Inventory API"""

@@ -1,13 +1,11 @@
 # Copyright (c) 2025, developers@buildwithhussain.com and contributors
 # For license information, please see license.txt
 
-import time
-
 import frappe
 from frappe import _
 from frappe.model.document import Document
 from frappe.query_builder import DocType
-from frappe.utils import now_datetime
+from frappe.utils import flt, now_datetime
 from frappe.utils.xlsxutils import make_xlsx
 
 from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import (
@@ -187,28 +185,40 @@ def bulk_fetch_selling_prices():
 
 
 def process_bulk_selling_price_fetch(seller_skus):
-	listings_client = Listings.from_amazon_settings()
+	# One report download covers every SKU's price — far fewer Amazon calls than
+	# fetching the Listings API per SKU, which throttles on large catalogues.
+	reports_client = Reports.from_amazon_settings()
+	tsv_content = reports_client.request_and_download_report("GET_MERCHANT_LISTINGS_ALL_DATA")
 
+	rows = parse_listings_tsv(tsv_content)
+	if not rows:
+		frappe.publish_realtime("msgprint", "Listings report returned no data", user=frappe.session.user)
+		return
+
+	target_skus = set(seller_skus)
 	updated = 0
-	failed = 0
-	for sku_name in seller_skus:
-		price = listings_client.fetch_price_for_sku(sku_name)
-		if price is None:
-			failed += 1
-		else:
-			frappe.db.set_value(
-				"Proxy SKU",
-				sku_name,
-				{"current_selling_price": price, "selling_price_updated_at": now_datetime()},
-			)
-			updated += 1
+	skipped = 0
+	for row in rows:
+		sku_name = row["seller-sku"]
+		if sku_name not in target_skus:
+			continue
 
-		# Mirror FBAInventory.DELAY_BETWEEN_REQUESTS to respect Listings API throttling
-		time.sleep(0.5)
+		price = flt(row.get("price"))
+		if not price:
+			skipped += 1
+			continue
+
+		frappe.db.set_value(
+			"Proxy SKU",
+			sku_name,
+			{"current_selling_price": price, "selling_price_updated_at": now_datetime()},
+			update_modified=False,
+		)
+		updated += 1
 
 	frappe.publish_realtime(
 		"msgprint",
-		f"Selling Price Fetch Complete: Updated {updated}, Failed {failed}",
+		f"Selling Price Fetch Complete: Updated {updated}, Skipped {skipped}",
 		user=frappe.session.user,
 	)
 
