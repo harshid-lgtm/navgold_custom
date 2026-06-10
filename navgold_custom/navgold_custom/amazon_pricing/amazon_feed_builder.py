@@ -574,6 +574,10 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 
 	zero_stock_proxy_skus = get_zero_stock_proxy_skus()
 
+	send_min_price = frappe.get_cached_value(
+		"Navgold Settings", "Navgold Settings", "send_min_price_to_amazon"
+	)
+
 	for pricing in pricing_records:
 		if not pricing.current_min_price or not pricing.current_max_price:
 			frappe.log_error(f"Skipping {pricing.name}: No calculated prices", "Amazon Feed Builder")
@@ -614,22 +618,22 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 			final_max_price = fallback_result["final_max_price"]
 			fallback_repricings.append(fallback_result["fallback_repricing"])
 
+		purchasable_offer = {
+			"audience": "ALL",
+			"maximum_seller_allowed_price": [{"schedule": [{"value_with_tax": round(final_max_price, 2)}]}],
+		}
+
+		if send_min_price:
+			purchasable_offer["our_price"] = [{"schedule": [{"value_with_tax": round(final_max_price, 2)}]}]
+			purchasable_offer["minimum_seller_allowed_price"] = [
+				{"schedule": [{"value_with_tax": round(final_min_price, 2)}]}
+			]
+
 		patches = [
 			{
 				"op": "replace",
 				"path": "/attributes/purchasable_offer",
-				"value": [
-					{
-						"audience": "ALL",
-						"our_price": [{"schedule": [{"value_with_tax": round(final_max_price, 2)}]}],
-						"minimum_seller_allowed_price": [
-							{"schedule": [{"value_with_tax": round(final_min_price, 2)}]}
-						],
-						"maximum_seller_allowed_price": [
-							{"schedule": [{"value_with_tax": round(final_max_price, 2)}]}
-						],
-					}
-				],
+				"value": [purchasable_offer],
 			},
 		]
 
@@ -723,8 +727,10 @@ def validate_pricing_feed(json_content: str) -> dict:
 			if path == "/attributes/purchasable_offer":
 				has_purchasable_offer = True
 				offer = patch["value"][0] if isinstance(patch.get("value"), list) and patch["value"] else {}
-				if not offer.get("our_price"):
-					errors.append(f"Message {message_index}: Missing our_price in purchasable_offer")
+				if not offer.get("maximum_seller_allowed_price"):
+					errors.append(
+						f"Message {message_index}: Missing maximum_seller_allowed_price in purchasable_offer"
+					)
 
 			if path == "/attributes/fulfillment_availability" and op in ("add", "replace"):
 				has_fulfillment_availability = True
