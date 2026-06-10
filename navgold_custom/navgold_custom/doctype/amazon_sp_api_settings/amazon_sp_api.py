@@ -11,7 +11,7 @@ import time
 import frappe
 from frappe.integrations.utils import make_get_request
 from frappe.integrations.utils import make_request as frappe_make_request
-from frappe.utils import cstr, get_request_session
+from frappe.utils import cstr, flt, get_request_session
 from frappe.utils.caching import redis_cache
 from requests.exceptions import HTTPError
 
@@ -478,6 +478,25 @@ class Listings(SPAPI):
 		if not summaries:
 			return None
 		return summaries[0]
+
+	def fetch_price_for_sku(self, sku_name):
+		try:
+			response = retry_with_backoff(
+				lambda: self.get_listing_item(sku=sku_name, included_data="offers"),
+				error_title=f"Listings API price fetch failed for SKU {sku_name}",
+			)
+		except Exception:
+			return None
+
+		offers = response.get("offers") or []
+		if not offers:
+			return None
+
+		amount = (offers[0].get("price") or {}).get("amount")
+		if amount is None:
+			return None
+
+		return flt(amount)
 
 
 class FBAInventory(SPAPI):

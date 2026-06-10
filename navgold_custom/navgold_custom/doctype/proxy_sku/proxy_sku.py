@@ -1,10 +1,13 @@
 # Copyright (c) 2025, developers@buildwithhussain.com and contributors
 # For license information, please see license.txt
 
+import time
+
 import frappe
 from frappe import _
 from frappe.model.document import Document
 from frappe.query_builder import DocType
+from frappe.utils import now_datetime
 from frappe.utils.xlsxutils import make_xlsx
 
 from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import (
@@ -24,6 +27,7 @@ class ProxySKU(Document):
 		from frappe.types import DF
 
 		asin: DF.Link | None
+		current_selling_price: DF.Currency
 		fnsku: DF.Data | None
 		is_active: DF.Check
 		is_fba: DF.Check
@@ -31,6 +35,7 @@ class ProxySKU(Document):
 		last_transfer_rate: DF.Currency
 		merchant_shipping_group: DF.Data | None
 		naming_series: DF.Data | None
+		selling_price_updated_at: DF.Datetime | None
 		uom: DF.Link | None
 	# end: auto-generated types
 
@@ -157,6 +162,53 @@ def process_bulk_fnsku_fetch(seller_skus):
 	frappe.publish_realtime(
 		"msgprint",
 		f"FNSKU Fetch Complete: Updated {updated}, Failed {failed}",
+		user=frappe.session.user,
+	)
+
+
+@frappe.whitelist()
+def bulk_fetch_selling_prices():
+	proxy_skus = frappe.get_all(
+		"Proxy SKU",
+		filters={"is_active": 1},
+		pluck="name",
+	)
+
+	if not proxy_skus:
+		return {"message": "No active Proxy SKUs found"}
+
+	frappe.enqueue(
+		"navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku.process_bulk_selling_price_fetch",
+		seller_skus=proxy_skus,
+		queue="long",
+	)
+
+	return {"message": f"Queued {len(proxy_skus)} Proxy SKUs for selling price fetch"}
+
+
+def process_bulk_selling_price_fetch(seller_skus):
+	listings_client = Listings.from_amazon_settings()
+
+	updated = 0
+	failed = 0
+	for sku_name in seller_skus:
+		price = listings_client.fetch_price_for_sku(sku_name)
+		if price is None:
+			failed += 1
+		else:
+			frappe.db.set_value(
+				"Proxy SKU",
+				sku_name,
+				{"current_selling_price": price, "selling_price_updated_at": now_datetime()},
+			)
+			updated += 1
+
+		# Mirror FBAInventory.DELAY_BETWEEN_REQUESTS to respect Listings API throttling
+		time.sleep(0.5)
+
+	frappe.publish_realtime(
+		"msgprint",
+		f"Selling Price Fetch Complete: Updated {updated}, Failed {failed}",
 		user=frappe.session.user,
 	)
 

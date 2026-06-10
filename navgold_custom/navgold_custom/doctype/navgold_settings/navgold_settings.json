@@ -56,6 +56,11 @@
 		"sync_pricing_now",
 		"column_break_pricing_sync",
 		"last_pricing_synced_at",
+		"price_deviation_guard_section",
+		"price_change_threshold_percent",
+		"price_change_block_direction",
+		"column_break_price_guard",
+		"pricing_alert_recipients",
 		"stock_tab",
 		"stock_publishing_mode",
 		"zero_stock_items"
@@ -379,6 +384,36 @@
 			"fieldtype": "Datetime",
 			"label": "Last Pricing Synced At",
 			"read_only": 1
+		},
+		{
+			"fieldname": "price_deviation_guard_section",
+			"fieldtype": "Section Break",
+			"label": "Price Deviation Guard"
+		},
+		{
+			"default": "20",
+			"description": "Block a SKU from pricing sync when the new price deviates from its stored Amazon selling price by more than this percent.",
+			"fieldname": "price_change_threshold_percent",
+			"fieldtype": "Float",
+			"label": "Price Change Threshold (%)"
+		},
+		{
+			"default": "Both",
+			"description": "Which deviation directions to block. Drops guard against crashed prices, increases against spiked prices.",
+			"fieldname": "price_change_block_direction",
+			"fieldtype": "Select",
+			"label": "Block Direction",
+			"options": "Both\nDrops Only\nIncreases Only"
+		},
+		{
+			"fieldname": "column_break_price_guard",
+			"fieldtype": "Column Break"
+		},
+		{
+			"description": "Comma or newline separated email addresses for blocked-SKU alerts. Defaults to the Administrator when empty.",
+			"fieldname": "pricing_alert_recipients",
+			"fieldtype": "Small Text",
+			"label": "Pricing Alert Recipients"
 		},
 		{
 			"fieldname": "stock_tab",
