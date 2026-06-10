@@ -344,6 +344,13 @@
 			"options": "Navgold Published Pricing Item"
 		},
 		{
+			"default": "1",
+			"description": "When disabled, the minimum seller allowed price is omitted from the pricing feed sent to Amazon.",
+			"fieldname": "send_min_price_to_amazon",
+			"fieldtype": "Check",
+			"label": "Send Minimum Price to Amazon"
+		},
+		{
 			"fieldname": "pricing_sync_section",
 			"fieldtype": "Section Break",
 			"label": "Pricing Sync"
