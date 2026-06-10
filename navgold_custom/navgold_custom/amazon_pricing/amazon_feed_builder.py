@@ -620,11 +620,11 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 
 		purchasable_offer = {
 			"audience": "ALL",
-			"our_price": [{"schedule": [{"value_with_tax": round(final_max_price, 2)}]}],
 			"maximum_seller_allowed_price": [{"schedule": [{"value_with_tax": round(final_max_price, 2)}]}],
 		}
 
 		if send_min_price:
+			purchasable_offer["our_price"] = [{"schedule": [{"value_with_tax": round(final_max_price, 2)}]}]
 			purchasable_offer["minimum_seller_allowed_price"] = [
 				{"schedule": [{"value_with_tax": round(final_min_price, 2)}]}
 			]
@@ -727,8 +727,10 @@ def validate_pricing_feed(json_content: str) -> dict:
 			if path == "/attributes/purchasable_offer":
 				has_purchasable_offer = True
 				offer = patch["value"][0] if isinstance(patch.get("value"), list) and patch["value"] else {}
-				if not offer.get("our_price"):
-					errors.append(f"Message {message_index}: Missing our_price in purchasable_offer")
+				if not offer.get("maximum_seller_allowed_price"):
+					errors.append(
+						f"Message {message_index}: Missing maximum_seller_allowed_price in purchasable_offer"
+					)
 
 			if path == "/attributes/fulfillment_availability" and op in ("add", "replace"):
 				has_fulfillment_availability = True
