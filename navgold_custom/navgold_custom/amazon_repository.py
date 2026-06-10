@@ -180,6 +180,13 @@ class AmazonRepository:
 				next_token=next_token,
 			)
 
+			if payload is None:
+				# Throttled mid-pagination: the order is only partially read, so fail it
+				# rather than building an incomplete item list.
+				raise Exception(
+					f"Could not fetch all order items for {order_id} (SP-API call failed or throttled)"
+				)
+
 		if unmapped_items:
 			for unmapped_item in unmapped_items:
 				self.create_unmapped_sku(unmapped_item, order_id)

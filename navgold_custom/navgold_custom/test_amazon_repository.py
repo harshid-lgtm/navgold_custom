@@ -56,3 +56,16 @@ class TestGetOrderItems(IntegrationTestCase):
 		):
 			with self.assertRaises(Exception):
 				repository.get_order_items("TEST-ORDER-ID")
+
+	def test_raises_when_pagination_call_fails(self):
+		# A throttle on the NextToken re-fetch leaves the order partially read — it must fail,
+		# not build an incomplete item list.
+		repository = AmazonRepository.__new__(AmazonRepository)
+		repository.amz_setting = frappe._dict(warehouse="_Test Warehouse")
+		first_page = {"OrderItems": [], "NextToken": "TOKEN"}
+		with (
+			patch.object(repository, "get_orders_instance", return_value=None),
+			patch.object(repository, "call_sp_api_method", side_effect=[first_page, None]),
+		):
+			with self.assertRaises(Exception):
+				repository.get_order_items("TEST-ORDER-ID")
