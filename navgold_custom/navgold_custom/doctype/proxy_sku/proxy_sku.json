@@ -12,6 +12,8 @@
 		"uom",
 		"is_active",
 		"merchant_shipping_group",
+		"current_selling_price",
+		"selling_price_updated_at",
 		"section_break_yaut",
 		"naming_series",
 		"fba_tab",
@@ -79,6 +81,19 @@
 			"fieldname": "merchant_shipping_group",
 			"fieldtype": "Data",
 			"label": "Merchant Shipping Group"
+		},
+		{
+			"description": "Live Amazon selling price, populated by Fetch Selling Prices. Used by the price-deviation guard.",
+			"fieldname": "current_selling_price",
+			"fieldtype": "Currency",
+			"label": "Current Selling Price",
+			"read_only": 1
+		},
+		{
+			"fieldname": "selling_price_updated_at",
+			"fieldtype": "Datetime",
+			"label": "Selling Price Updated At",
+			"read_only": 1
 		},
 		{
 			"fieldname": "column_break_ndae",
