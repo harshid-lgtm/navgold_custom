@@ -1,9 +1,12 @@
 # Copyright (c) 2026, developers@buildwithhussain.com and Contributors
 # See license.txt
 
+from unittest.mock import patch
+
+import frappe
 from frappe.tests import IntegrationTestCase
 
-from navgold_custom.navgold_custom.amazon_repository import format_local_as_amazon_utc
+from navgold_custom.navgold_custom.amazon_repository import AmazonRepository, format_local_as_amazon_utc
 
 
 class TestFormatLocalAsAmazonUtc(IntegrationTestCase):
@@ -39,3 +42,17 @@ class TestFormatLocalAsAmazonUtc(IntegrationTestCase):
 				format_local_as_amazon_utc("2026-06-10 09:00:00"),
 				"2026-06-10T03:30:00Z",
 			)
+
+
+class TestGetOrderItems(IntegrationTestCase):
+	def test_raises_when_sp_api_call_fails(self):
+		# A throttled/failed items call (payload is None) must raise, not return [] — otherwise
+		# the order is silently dropped with no Failed Sync Record.
+		repository = AmazonRepository.__new__(AmazonRepository)
+		repository.amz_setting = frappe._dict(warehouse="_Test Warehouse")
+		with (
+			patch.object(repository, "get_orders_instance", return_value=None),
+			patch.object(repository, "call_sp_api_method", return_value=None),
+		):
+			with self.assertRaises(Exception):
+				repository.get_order_items("TEST-ORDER-ID")

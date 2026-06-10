@@ -124,8 +124,10 @@ class AmazonRepository:
 		orders = self.get_orders_instance()
 		payload = self.call_sp_api_method(sp_api_method=orders.get_order_items, order_id=order_id)
 
-		if not payload:
-			return []
+		if payload is None:
+			# A throttled/failed items call must not be swallowed as "no items" — raise so the
+			# caller records a failed sync instead of silently dropping the order.
+			raise Exception(f"Could not fetch order items for {order_id} (SP-API call failed or throttled)")
 
 		raw_items = []
 		unmapped_items = []
