@@ -10,6 +10,7 @@ from frappe import _
 from frappe.utils import flt
 from frappe.utils.data import cstr
 
+from navgold_custom.navgold_custom.amazon_repository import format_local_as_amazon_utc
 from navgold_custom.navgold_custom.custom_script.packing_slip.packing_utils import (
 	get_item_weight_map,
 	get_uom_conversion_map,
@@ -500,7 +501,7 @@ def build_shipping_payload(packing_slip_doc):
 		"shipTo": ship_to,
 		"packages": packages,
 		"channelDetails": channel_details,
-		"shipDate": frappe.utils.now_datetime().strftime("%Y-%m-%dT%H:%M:%SZ"),
+		"shipDate": format_local_as_amazon_utc(frappe.utils.now_datetime()),
 	}
 
 

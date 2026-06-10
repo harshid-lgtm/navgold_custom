@@ -6,17 +6,15 @@
 # Copyright (c) 2025, BWH Studios and contributors
 # For license information, please see license.txt
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import add_days, get_date_str, get_datetime, now_datetime, today
+from frappe.utils import add_days, get_date_str, today
 from frappe.utils.background_jobs import is_job_enqueued
 
-from navgold_custom.navgold_custom.amazon_repository import (
-	get_orders,
-)
+from navgold_custom.navgold_custom.amazon_repository import get_orders
 
 
 class AmazonSPAPISettings(Document):
@@ -107,7 +105,7 @@ class AmazonSPAPISettings(Document):
 			return
 
 		if frappe.conf.developer_mode:
-			get_orders(last_updated_after=self.after_date)
+			get_orders(created_after=self.after_date)
 			return
 
 		if is_job_enqueued("navgold.amazon_manual_order_sync"):
@@ -118,7 +116,7 @@ class AmazonSPAPISettings(Document):
 			job_id="navgold.amazon_manual_order_sync",
 			deduplicate=True,
 			method=get_orders,
-			last_updated_after=self.after_date,
+			created_after=self.after_date,
 			sync_selected_date_only=self.sync_selected_date_only,
 			timeout=6000,
 			now=frappe.flags.in_test,
@@ -140,17 +138,12 @@ def schedule_get_order_details():
 	if not amz_setting.enable_sync:
 		return
 
-	if amz_setting.last_synced_at:
-		fetch_after = (get_datetime(amz_setting.last_synced_at) - timedelta(minutes=10)).strftime(
-			"%Y-%m-%dT%H:%M:%SZ"
-		)
-	else:
-		fetch_after = today()
+	created_after = amz_setting.last_synced_at or today()
 
 	frappe.enqueue(
 		job_id="navgold.amazon_scheduled_order_sync",
 		deduplicate=True,
 		method=get_orders,
-		last_updated_after=fetch_after,
+		created_after=created_after,
 		timeout=6000,
 	)

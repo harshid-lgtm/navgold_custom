@@ -1,8 +1,17 @@
 import time
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import frappe
-from frappe.utils import add_days, convert_utc_to_system_timezone, flt, get_datetime, getdate, now_datetime
+from frappe.utils import (
+	add_days,
+	convert_utc_to_system_timezone,
+	flt,
+	get_datetime,
+	get_system_timezone,
+	getdate,
+	now_datetime,
+)
 
 from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import (
 	Orders,
@@ -14,6 +23,13 @@ def parse_amazon_utc(utc_time_str):
 	utc_time = datetime.strptime(utc_time_str, "%Y-%m-%dT%H:%M:%SZ")
 	local_time = convert_utc_to_system_timezone(utc_time)
 	return local_time.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def format_local_as_amazon_utc(local_datetime):
+	# Frappe datetimes are naive system-local; convert to real UTC so the offset
+	# is not silently sent to Amazon as if it were already UTC.
+	system_datetime = get_datetime(local_datetime).replace(tzinfo=ZoneInfo(get_system_timezone()))
+	return system_datetime.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 class AmazonRepository:
@@ -364,22 +380,24 @@ class AmazonRepository:
 
 		record.insert(ignore_permissions=True)
 
-	def get_orders(self, last_updated_after, sync_selected_date_only=0):
+	def get_orders(self, created_after, sync_selected_date_only=0):
 		orders = self.get_orders_instance()
 		order_statuses = ["Shipped", "InvoiceUnconfirmed", "Canceled", "Unfulfillable"]
 		fulfillment_channels = ["FBA", "SellerFulfilled"]
 
 		kwargs = {
-			"last_updated_after": last_updated_after,
+			"created_after": format_local_as_amazon_utc(created_after),
 			"order_statuses": order_statuses,
 			"fulfillment_channels": fulfillment_channels,
 			"max_results": 50,
 		}
 		if sync_selected_date_only:
-			end_of_day = get_datetime(add_days(getdate(last_updated_after), 1))
-			two_minutes_ago = now_datetime() - timedelta(minutes=3)
-			last_updated_before = min(end_of_day, two_minutes_ago)
-			kwargs["last_updated_before"] = last_updated_before.strftime("%Y-%m-%dT%H:%M:%SZ")
+			selected_date = getdate(created_after)
+			kwargs["created_after"] = format_local_as_amazon_utc(get_datetime(selected_date))
+			end_of_day = get_datetime(add_days(selected_date, 1))
+			three_minutes_ago = now_datetime() - timedelta(minutes=3)
+			created_before = min(end_of_day, three_minutes_ago)
+			kwargs["created_before"] = format_local_as_amazon_utc(created_before)
 
 		orders_payload = self.call_sp_api_method(sp_api_method=orders.get_orders, **kwargs)
 
@@ -420,7 +438,7 @@ class AmazonRepository:
 
 			orders_payload = self.call_sp_api_method(
 				sp_api_method=orders.get_orders,
-				last_updated_after=last_updated_after,
+				created_after=kwargs["created_after"],
 				next_token=next_token,
 			)
 
@@ -443,9 +461,9 @@ class AmazonRepository:
 
 
 @frappe.whitelist()
-def get_orders(last_updated_after: str, sync_selected_date_only: int = 0):
+def get_orders(created_after: str, sync_selected_date_only: int = 0):
 	repository = AmazonRepository()
-	result = repository.get_orders(last_updated_after, sync_selected_date_only)
+	result = repository.get_orders(created_after, sync_selected_date_only)
 
 	if result is not None:
 		frappe.db.set_single_value("Amazon SP API Settings", "last_synced_at", frappe.utils.now_datetime())
