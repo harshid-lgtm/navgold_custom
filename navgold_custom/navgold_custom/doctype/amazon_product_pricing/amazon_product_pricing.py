@@ -7,6 +7,9 @@ from frappe.model.document import Document
 from frappe.utils.data import flt
 
 from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_submitter import submit_pricing
+from navgold_custom.navgold_custom.amazon_pricing.price_guard import (
+	partition_pricing_by_price_deviation,
+)
 from navgold_custom.navgold_custom.amazon_pricing.repricer_client import sync_to_repricer
 from navgold_custom.navgold_custom.amazon_pricing.strategy_selector import select_strategy
 
@@ -71,6 +74,21 @@ class AmazonProductPricing(Document):
 			self.current_min_price = 0
 			self.current_max_price = 0
 
+	def guard_price_deviation(self):
+		record = {
+			"name": self.name,
+			"proxy_sku": self.proxy_sku,
+			"current_min_price": self.current_min_price,
+			"current_max_price": self.current_max_price,
+		}
+		blocked = partition_pricing_by_price_deviation([record])[1]
+		if blocked:
+			frappe.throw(
+				_("Pricing for {0} is blocked by the price-deviation guard: {1}").format(
+					self.proxy_sku, blocked[0]["reason"]
+				)
+			)
+
 	@frappe.whitelist()
 	def submit_to_amazon(self):
 		if not self.is_active:
@@ -78,6 +96,8 @@ class AmazonProductPricing(Document):
 
 		if not self.current_min_price or not self.current_max_price:
 			frappe.throw(_("Cannot submit pricing without calculated prices"))
+
+		self.guard_price_deviation()
 
 		return submit_pricing([self.name])
 
@@ -89,5 +109,7 @@ class AmazonProductPricing(Document):
 
 		if not self.is_active:
 			frappe.throw(_("Cannot sync pricing for inactive products"))
+
+		self.guard_price_deviation()
 
 		return sync_to_repricer([self.name])

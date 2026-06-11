@@ -16,6 +16,9 @@ from frappe.utils.data import cint, cstr, flt, orjson_dumps
 from navgold_custom.navgold_custom.amazon_pricing.price_calculator import (
 	calculate_prices_with_purchase_cost_override,
 )
+from navgold_custom.navgold_custom.amazon_pricing.price_guard import (
+	partition_pricing_by_price_deviation,
+)
 from navgold_custom.navgold_custom.amazon_pricing.purchase_cost_sources import (
 	calculate_bundle_cost,
 )
@@ -546,6 +549,8 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 			pricing for pricing in pricing_records if pricing.proxy_sku in allowed_pricing_proxy_skus
 		]
 
+	pricing_records, blocked_price_deviation = partition_pricing_by_price_deviation(pricing_records)
+
 	proxy_sku_names = [pricing.proxy_sku for pricing in pricing_records if pricing.proxy_sku]
 	proxy_sku_info = build_proxy_sku_info_map(proxy_sku_names) if proxy_sku_names else {}
 
@@ -656,7 +661,11 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 		"messages": messages,
 	}
 
-	return {"feed_content": orjson_dumps(feed), "fallback_repricings": fallback_repricings}
+	return {
+		"feed_content": orjson_dumps(feed),
+		"fallback_repricings": fallback_repricings,
+		"blocked_price_deviation": blocked_price_deviation,
+	}
 
 
 def validate_pricing_feed(json_content: str) -> dict:

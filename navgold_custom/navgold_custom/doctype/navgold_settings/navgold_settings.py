@@ -45,6 +45,9 @@ class NavgoldSettings(Document):
 		last_pricing_synced_at: DF.Datetime | None
 		min_shelf_expiry_in_days: DF.Int
 		multiple_active_item_uom: DF.Check
+		price_change_block_direction: DF.Literal["Both", "Drops Only", "Increases Only"]
+		price_change_threshold_percent: DF.Float
+		pricing_alert_recipients: DF.SmallText | None
 		pricing_publishing_mode: DF.Literal["Publish All Prices", "Publish Selected Prices Only"]
 		published_pricing_items: DF.Table[NavgoldPublishedPricingItem]
 		repricer_api_password: DF.Password | None

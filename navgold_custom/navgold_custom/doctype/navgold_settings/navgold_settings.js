@@ -131,6 +131,30 @@ frappe.ui.form.on('Navgold Settings', {
 			);
 
 			frm.add_custom_button(
+				__('Fetch Selling Prices'),
+				async () => {
+					const confirmed = await navgold.confirm_dialog(
+						__(
+							'This will fetch the live Amazon selling price for every active Proxy SKU and store it for the price-deviation guard. Continue?',
+						),
+					);
+					if (!confirmed) return;
+
+					const response = await frappe.call({
+						method:
+							'navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku.bulk_fetch_selling_prices',
+						freeze: true,
+						freeze_message: __('Queuing selling price fetch...'),
+					});
+					frappe.show_alert({
+						message: response.message.message,
+						indicator: 'blue',
+					});
+				},
+				__('Amazon Pricing'),
+			);
+
+			frm.add_custom_button(
 				__('Fetch FBA Fees'),
 				async () => {
 					const confirmed = await navgold.confirm_dialog(
