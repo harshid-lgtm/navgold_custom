@@ -24,6 +24,7 @@ class ProxySKU(Document):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
+		afn_stock: DF.Float
 		asin: DF.Link | None
 		current_selling_price: DF.Currency
 		fnsku: DF.Data | None
