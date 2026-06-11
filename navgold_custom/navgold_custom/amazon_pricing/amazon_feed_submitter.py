@@ -12,6 +12,10 @@ from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import (
 	validate_pricing_feed,
 )
 from navgold_custom.navgold_custom.amazon_pricing.price_guard import notify_price_deviation_blocks
+from navgold_custom.navgold_custom.amazon_pricing.pricing_validators import (
+	format_blocked_records,
+	merge_blocked_reasons,
+)
 from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import Feeds
 from navgold_custom.navgold_custom.utils import bulk_set_value
 
@@ -39,14 +43,19 @@ def submit_pricing(pricing_names: list, test_mode: bool = False) -> dict:
 	json_content = feed_result["feed_content"]
 	fallback_repricings = feed_result["fallback_repricings"]
 	blocked_price_deviation = feed_result.get("blocked_price_deviation") or []
+	blocked_validation = feed_result.get("blocked_validation") or []
+	blocked_reasons = merge_blocked_reasons(blocked_validation, blocked_price_deviation)
 
-	validation = validate_pricing_feed(json_content)
+	validation = validate_pricing_feed(
+		json_content, require_pricing_patches=feed_result.get("publishing_mode") != "Stock Only"
+	)
 	if not validation["valid"]:
 		return {
 			"success": False,
 			"error": "Feed validation failed",
 			"errors": validation["errors"],
 			"blocked_price_deviation": blocked_price_deviation,
+			"blocked_validation": blocked_validation,
 		}
 
 	if test_mode:
@@ -57,6 +66,7 @@ def submit_pricing(pricing_names: list, test_mode: bool = False) -> dict:
 			"json_preview": json_content[:2000],
 			"fallback_repricings": fallback_repricings,
 			"blocked_price_deviation": blocked_price_deviation,
+			"blocked_validation": blocked_validation,
 		}
 
 	log = frappe.new_doc("Amazon Pricing Submission Log")
@@ -66,6 +76,9 @@ def submit_pricing(pricing_names: list, test_mode: bool = False) -> dict:
 	log.feed_content = json_content
 	if fallback_repricings:
 		log.supplier_swap_notes = format_supplier_fallback_notes(fallback_repricings)
+	if blocked_reasons:
+		log.blocked_records = format_blocked_records(blocked_reasons)
+		log.blocked_count = len(blocked_reasons)
 	log.insert()
 	try:
 		feeds_client = get_feeds_client(settings)
@@ -97,6 +110,7 @@ def submit_pricing(pricing_names: list, test_mode: bool = False) -> dict:
 			"message_count": validation["message_count"],
 			"log_name": log.name,
 			"blocked_price_deviation": blocked_price_deviation,
+			"blocked_validation": blocked_validation,
 		}
 
 	except Exception as e:
@@ -113,6 +127,7 @@ def submit_pricing(pricing_names: list, test_mode: bool = False) -> dict:
 			"error": str(e),
 			"log_name": log.name,
 			"blocked_price_deviation": blocked_price_deviation,
+			"blocked_validation": blocked_validation,
 		}
 
 

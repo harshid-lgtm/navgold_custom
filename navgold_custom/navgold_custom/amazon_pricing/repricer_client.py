@@ -20,6 +20,10 @@ from navgold_custom.navgold_custom.amazon_pricing.price_guard import (
 	notify_price_deviation_blocks,
 	partition_pricing_by_price_deviation,
 )
+from navgold_custom.navgold_custom.amazon_pricing.pricing_validators import (
+	collect_pricing_violations,
+	format_blocked_records,
+)
 from navgold_custom.navgold_custom.utils import bulk_set_value
 
 REPRICER_API_BASE = "https://api.repricer.com/v1/repricers"
@@ -107,6 +111,20 @@ def sync_to_repricer(pricing_names: list) -> dict:
 	blocked_price_deviation = partition_pricing_by_price_deviation(list(pricing_records.values()))[1]
 	blocked_proxy_skus = {record["proxy_sku"] for record in blocked_price_deviation}
 
+	violations_by_pricing = collect_pricing_violations(pricing_names, include_deviation=False)
+
+	blocked_reasons: dict[str, list[str]] = {}
+	for pricing_name, reasons in violations_by_pricing.items():
+		pricing = pricing_records.get(pricing_name)
+		proxy_sku = pricing.proxy_sku if pricing else pricing_name
+		blocked_reasons.setdefault(proxy_sku, []).extend(reasons)
+	for record in blocked_price_deviation:
+		blocked_reasons.setdefault(record["proxy_sku"], []).append(record["reason"])
+
+	if blocked_reasons:
+		log.blocked_records = format_blocked_records(blocked_reasons)
+		log.blocked_count = len(blocked_reasons)
+
 	# We could have used get_all with filters but we will loose the reason
 	products_to_update = []
 	errors = []
@@ -122,16 +140,12 @@ def sync_to_repricer(pricing_names: list) -> dict:
 				errors.append(f"{pricing_name}: Inactive")
 				continue
 
-			if not pricing.current_min_price or not pricing.current_max_price:
-				errors.append(f"{pricing_name}: No calculated prices")
+			if pricing_name in violations_by_pricing:
+				errors.append(f"{pricing_name}: {'; '.join(violations_by_pricing[pricing_name])}")
 				continue
 
 			if pricing.proxy_sku in blocked_proxy_skus:
 				errors.append(f"{pricing_name}: Blocked by price-deviation guard")
-				continue
-
-			if not pricing.active_strategy:
-				errors.append(f"{pricing_name}: No active strategy")
 				continue
 
 			is_fba = fba_map.get(pricing.proxy_sku)
@@ -207,6 +221,7 @@ def sync_to_repricer(pricing_names: list) -> dict:
 		"errors": errors,
 		"log_name": log.name,
 		"blocked_price_deviation": blocked_price_deviation,
+		"blocked_validation": violations_by_pricing,
 	}
 
 

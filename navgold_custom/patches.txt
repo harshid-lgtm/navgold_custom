@@ -7,3 +7,4 @@
 navgold_custom.patches.v1.consolidate_fba_fee_sub_types
 navgold_custom.patches.v1.dedupe_estimated_fba_fee
 navgold_custom.patches.v1.enable_send_min_price_to_amazon
+navgold_custom.patches.v1.set_amazon_publishing_mode_stock_only
