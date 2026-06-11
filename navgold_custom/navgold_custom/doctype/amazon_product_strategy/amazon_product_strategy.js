@@ -109,12 +109,22 @@ frappe.ui.form.on('Amazon Product Strategy', {
 				},
 			};
 		};
+
+		render_cost_filter_controls(frm);
 	},
 
 	validate(frm) {
 		if (frm.doc.min_margin > frm.doc.max_margin) {
 			frappe.throw(__('Min Margin cannot be greater than Max Margin'));
 		}
+	},
+
+	costs_add(frm) {
+		apply_cost_filters(frm);
+	},
+
+	costs_remove(frm) {
+		apply_cost_filters(frm);
 	},
 
 	target_price(frm) {
@@ -140,3 +150,125 @@ frappe.ui.form.on('Amazon Product Strategy', {
 		}
 	},
 });
+
+function render_cost_filter_controls(frm) {
+	const grid_field = frm.fields_dict.costs;
+	if (!grid_field) {
+		return;
+	}
+
+	// Filter state is kept on frm, which is reused across documents of the same
+	// doctype — reset it when the user navigates to another strategy.
+	if (frm.cost_filter_docname !== frm.doc.name) {
+		frm.cost_filter_docname = frm.doc.name;
+		frm.cost_filter_state = { cost_type: null, cost_sub_type: null };
+		if (frm.cost_type_filter_control) {
+			frm.cost_type_filter_control.set_value('');
+			frm.cost_sub_type_filter_control.set_value('');
+		}
+	}
+
+	if (!grid_field.$wrapper.find('.cost-filter-controls').length) {
+		const filter_wrapper = $(`
+			<div class="cost-filter-controls row">
+				<div class="col-sm-3 cost-type-filter"></div>
+				<div class="col-sm-3 cost-sub-type-filter"></div>
+				<div class="col-sm-6 cost-filter-meta">
+					<button class="btn btn-default btn-xs cost-filter-reset hidden">
+						${__('Reset Filters')}
+					</button>
+					<span class="text-muted small cost-filter-count"></span>
+				</div>
+			</div>
+		`).prependTo(grid_field.$wrapper);
+
+		frm.cost_type_filter_control = frappe.ui.form.make_control({
+			parent: filter_wrapper.find('.cost-type-filter'),
+			df: {
+				fieldtype: 'Link',
+				fieldname: 'cost_type_filter',
+				label: __('Filter by Cost Type'),
+				options: 'Cost Type',
+				change: () => {
+					frm.cost_filter_state.cost_type = cstr(
+						frm.cost_type_filter_control.get_value(),
+					);
+					// A sub type from another cost type can't match anymore
+					frm.cost_filter_state.cost_sub_type = null;
+					frm.cost_sub_type_filter_control.set_value('');
+					apply_cost_filters(frm);
+				},
+			},
+			render_input: true,
+		});
+
+		frm.cost_sub_type_filter_control = frappe.ui.form.make_control({
+			parent: filter_wrapper.find('.cost-sub-type-filter'),
+			df: {
+				fieldtype: 'Link',
+				fieldname: 'cost_sub_type_filter',
+				label: __('Filter by Cost Sub Type'),
+				options: 'Cost Sub Type',
+				get_query: () => {
+					const filters = {};
+					if (frm.cost_filter_state.cost_type) {
+						filters.cost_type = frm.cost_filter_state.cost_type;
+					}
+					return { filters };
+				},
+				change: () => {
+					frm.cost_filter_state.cost_sub_type = cstr(
+						frm.cost_sub_type_filter_control.get_value(),
+					);
+					apply_cost_filters(frm);
+				},
+			},
+			render_input: true,
+		});
+
+		filter_wrapper.find('.cost-filter-reset').on('click', () => {
+			frm.cost_filter_state = { cost_type: null, cost_sub_type: null };
+			frm.cost_type_filter_control.set_value('');
+			frm.cost_sub_type_filter_control.set_value('');
+			apply_cost_filters(frm);
+		});
+	}
+
+	apply_cost_filters(frm);
+}
+
+function apply_cost_filters(frm) {
+	const grid_field = frm.fields_dict.costs;
+	if (!grid_field || !frm.cost_filter_state) {
+		return;
+	}
+
+	const { cost_type, cost_sub_type } = frm.cost_filter_state;
+	const filter_active = Boolean(cost_type || cost_sub_type);
+	const grid_rows = grid_field.grid.grid_rows || [];
+
+	let visible_count = 0;
+	for (const grid_row of grid_rows) {
+		// Unsaved rows stay visible so a freshly added row doesn't vanish mid-edit
+		const matches =
+			!filter_active ||
+			Boolean(grid_row.doc.__islocal) ||
+			((!cost_type || grid_row.doc.cost_type === cost_type) &&
+				(!cost_sub_type || grid_row.doc.cost_sub_type === cost_sub_type));
+		grid_row.wrapper.toggle(matches);
+		if (matches) {
+			visible_count += 1;
+		}
+	}
+
+	grid_field.$wrapper
+		.find('.cost-filter-count')
+		.text(
+			filter_active
+				? __('Showing {0} of {1} costs', [visible_count, grid_rows.length])
+				: '',
+		);
+	grid_field.$wrapper
+		.find('.cost-filter-reset')
+		.toggleClass('hidden', !filter_active);
+}
