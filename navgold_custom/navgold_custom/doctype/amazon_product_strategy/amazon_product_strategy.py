@@ -14,6 +14,7 @@ from navgold_custom.navgold_custom.amazon_pricing.price_calculator import (
 from navgold_custom.navgold_custom.amazon_pricing.purchase_cost_sources import (
 	get_effective_po_purchase_cost,
 	get_effective_supplier_purchase_cost,
+	log_missing_bundle_component_rates,
 )
 from navgold_custom.navgold_custom.utils import get_conversion_factor
 
@@ -123,13 +124,18 @@ class AmazonProductStrategy(Document):
 				proxy_sku_uom = proxy_sku_row.uom
 				last_transfer_rate = proxy_sku_row.last_transfer_rate
 
+		# Set by refresh_strategy_costs_chunk so misses across a whole run land in one Error Log
+		missing_component_rates = self.flags.get("missing_bundle_component_rates")
+
 		supplier_price = None
 		if "Supplier-Sync" in synced_sources and item_code:
-			supplier_price = get_effective_supplier_purchase_cost(item_code, proxy_sku_uom)
+			supplier_price = get_effective_supplier_purchase_cost(
+				item_code, proxy_sku_uom, missing_component_rates
+			)
 
 		po_cost = None
 		if "PO-Sync" in synced_sources and item_code:
-			po_cost = get_effective_po_purchase_cost(item_code, proxy_sku_uom)
+			po_cost = get_effective_po_purchase_cost(item_code, proxy_sku_uom, missing_component_rates)
 
 		effective_transfer_rate = None
 		if "FBA-Transfer" in synced_sources and item_code:
@@ -193,9 +199,11 @@ def refresh_all_strategy_costs():
 
 def refresh_strategy_costs_chunk(strategy_names: list):
 	refreshed = 0
+	missing_component_rates: list[tuple[str, str]] = []
 	for strategy_name in strategy_names:
 		try:
 			strategy = frappe.get_doc("Amazon Product Strategy", strategy_name)
+			strategy.flags.missing_bundle_component_rates = missing_component_rates
 			strategy.save(ignore_permissions=True)
 			refreshed += 1
 		except Exception as exception:
@@ -203,5 +211,7 @@ def refresh_strategy_costs_chunk(strategy_names: list):
 				f"Daily strategy cost refresh failed for {strategy_name}: {exception!s}",
 				"Amazon Product Strategy Refresh",
 			)
+
+	log_missing_bundle_component_rates(missing_component_rates)
 
 	return {"total": len(strategy_names), "refreshed": refreshed}
