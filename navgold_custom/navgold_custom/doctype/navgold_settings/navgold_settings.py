@@ -29,6 +29,7 @@ class NavgoldSettings(Document):
 		)
 
 		amazon_pricing_enabled: DF.Check
+		amazon_publishing_mode: DF.Literal["Stock Only", "Stock and Prices"]
 		auto_sync_cogs: DF.Check
 		buying_price_list: DF.Link
 		cogs_supplier: DF.Link | None
@@ -53,6 +54,7 @@ class NavgoldSettings(Document):
 		repricer_api_password: DF.Password | None
 		repricer_api_username: DF.Data | None
 		repricer_enabled: DF.Check
+		send_min_price_to_amazon: DF.Check
 		stock_publishing_mode: DF.Literal[
 			"Publish Actual Stock",
 			"Publish Zero Stock for All Items",

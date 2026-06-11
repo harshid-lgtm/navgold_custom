@@ -94,10 +94,16 @@ class AmazonProductPricing(Document):
 		if not self.is_active:
 			frappe.throw(_("Cannot submit pricing for inactive products"))
 
-		if not self.current_min_price or not self.current_max_price:
-			frappe.throw(_("Cannot submit pricing without calculated prices"))
+		publishing_mode = (
+			frappe.get_cached_value("Navgold Settings", "Navgold Settings", "amazon_publishing_mode")
+			or "Stock Only"
+		)
+		# Stock Only feeds carry no price patches, so price preconditions must not block them
+		if publishing_mode == "Stock and Prices":
+			if not self.current_min_price or not self.current_max_price:
+				frappe.throw(_("Cannot submit pricing without calculated prices"))
 
-		self.guard_price_deviation()
+			self.guard_price_deviation()
 
 		return submit_pricing([self.name])
 

@@ -49,8 +49,10 @@
 		"group_strategies_section",
 		"group_strategies_into_pricing",
 		"pricing_publishing_section",
+		"amazon_publishing_mode",
 		"pricing_publishing_mode",
 		"published_pricing_items",
+		"send_min_price_to_amazon",
 		"pricing_sync_section",
 		"enable_pricing_sync",
 		"sync_pricing_now",
@@ -334,6 +336,14 @@
 			"label": "Pricing Publishing"
 		},
 		{
+			"default": "Stock Only",
+			"description": "Stock Only omits every price patch (min/max/our price) from the Amazon feed; only stock, fulfillment and lead-time patches are sent. Min/max prices keep syncing to Repricer in both modes.",
+			"fieldname": "amazon_publishing_mode",
+			"fieldtype": "Select",
+			"label": "Amazon Publishing Mode",
+			"options": "Stock Only\nStock and Prices"
+		},
+		{
 			"default": "Publish All Prices",
 			"description": "Controls which Amazon Product Pricing records are included in the pricing feed.",
 			"fieldname": "pricing_publishing_mode",
@@ -350,7 +360,8 @@
 		},
 		{
 			"default": "1",
-			"description": "When disabled, the minimum seller allowed price is omitted from the pricing feed sent to Amazon.",
+			"depends_on": "eval:doc.amazon_publishing_mode === 'Stock and Prices'",
+			"description": "When disabled, the minimum seller allowed price is omitted from the pricing feed sent to Amazon. Only applies in Stock and Prices mode.",
 			"fieldname": "send_min_price_to_amazon",
 			"fieldtype": "Check",
 			"label": "Send Minimum Price to Amazon"
@@ -439,7 +450,7 @@
 	"index_web_pages_for_search": 1,
 	"issingle": 1,
 	"links": [],
-	"modified": "2026-04-27 11:14:59.195140",
+	"modified": "2026-06-11 10:00:00.000000",
 	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Navgold Settings",
