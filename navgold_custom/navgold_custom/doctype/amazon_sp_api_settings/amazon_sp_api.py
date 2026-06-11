@@ -11,7 +11,7 @@ import time
 import frappe
 from frappe.integrations.utils import make_get_request
 from frappe.integrations.utils import make_request as frappe_make_request
-from frappe.utils import cstr, get_request_session
+from frappe.utils import cstr, flt, get_request_session
 from frappe.utils.caching import redis_cache
 from requests.exceptions import HTTPError
 
