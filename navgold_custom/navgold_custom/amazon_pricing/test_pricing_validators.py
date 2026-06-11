@@ -248,7 +248,15 @@ class TestFeedBuilderPublishingMode(IntegrationTestCase):
 		strategy = create_strategy(proxy_sku)
 		pricing_name = create_pricing(proxy_sku, strategy)
 
-		with change_settings("Navgold Settings", {"amazon_publishing_mode": "Stock Only"}):
+		with change_settings(
+			"Navgold Settings",
+			{
+				"amazon_publishing_mode": "Stock Only",
+				# the dev/restored site runs Publish Selected Prices Only, which would
+				# filter the fixture out of the feed before any mode logic runs
+				"pricing_publishing_mode": "Publish All Prices",
+			},
+		):
 			feed_result = build_pricing_feed([pricing_name], "SELLER", "MARKETPLACE")
 
 		messages, patch_paths = self.get_patch_paths(feed_result)
@@ -268,6 +276,7 @@ class TestFeedBuilderPublishingMode(IntegrationTestCase):
 			"Navgold Settings",
 			{
 				"amazon_publishing_mode": "Stock and Prices",
+				"pricing_publishing_mode": "Publish All Prices",
 				"price_change_threshold_percent": 50,
 				"price_change_block_direction": "Both",
 			},
@@ -296,6 +305,7 @@ class TestFeedBuilderPublishingMode(IntegrationTestCase):
 			"Navgold Settings",
 			{
 				"amazon_publishing_mode": "Stock and Prices",
+				"pricing_publishing_mode": "Publish All Prices",
 				"price_change_threshold_percent": 50,
 				"price_change_block_direction": "Both",
 			},
