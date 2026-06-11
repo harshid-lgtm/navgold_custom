@@ -36,6 +36,14 @@ class TestFeedStatusPoller(IntegrationTestCase):
 	def setUp(self):
 		super().setUp()
 		frappe.db.set_single_value("Amazon SP API Settings", "is_active", 1)
+		# Pre-existing site logs inside the 7-day window would pollute the poller's
+		# selection; park them as Completed within the test transaction (rolled back).
+		submission_log = frappe.qb.DocType("Amazon Pricing Submission Log")
+		(
+			frappe.qb.update(submission_log)
+			.set(submission_log.status, "Completed")
+			.where(submission_log.status == "Submitted")
+		).run()
 
 	def test_poller_selects_only_eligible_logs(self):
 		eligible = create_submission_log()
