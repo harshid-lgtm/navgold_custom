@@ -55,6 +55,7 @@
 		"send_min_price_to_amazon",
 		"pricing_sync_section",
 		"enable_pricing_sync",
+		"enable_afn_stock_sync",
 		"sync_pricing_now",
 		"column_break_pricing_sync",
 		"last_pricing_synced_at",
@@ -377,6 +378,14 @@
 			"fieldname": "enable_pricing_sync",
 			"fieldtype": "Check",
 			"label": "Enable Scheduled Pricing Sync",
+			"read_only_depends_on": "eval:frappe.session.user != \"Administrator\""
+		},
+		{
+			"default": "0",
+			"description": "Fetch FBA fulfillable stock from Amazon every 30 minutes and use it to drive FBA strategy selection.",
+			"fieldname": "enable_afn_stock_sync",
+			"fieldtype": "Check",
+			"label": "Enable Scheduled AFN Stock Sync",
 			"read_only_depends_on": "eval:frappe.session.user != \"Administrator\""
 		},
 		{

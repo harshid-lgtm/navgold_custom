@@ -10,3 +10,4 @@ navgold_custom.patches.v1.enable_send_min_price_to_amazon
 navgold_custom.patches.v1.set_amazon_publishing_mode_stock_only
 navgold_custom.patches.v1.unflag_prepared_report_for_strategy_price_comparison
 navgold_custom.patches.v1.mark_stale_amazon_submission_logs
+navgold_custom.patches.v1.delete_orphan_afn_stock_scheduled_job
