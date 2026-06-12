@@ -1,0 +1,58 @@
+{
+	"actions": [],
+	"creation": "2026-06-12 10:00:00.000000",
+	"doctype": "DocType",
+	"engine": "InnoDB",
+	"field_order": [
+		"proxy_sku",
+		"our_price",
+		"column_break_main",
+		"min_price",
+		"max_price"
+	],
+	"fields": [
+		{
+			"fieldname": "proxy_sku",
+			"fieldtype": "Link",
+			"in_list_view": 1,
+			"label": "Proxy SKU",
+			"options": "Proxy SKU",
+			"reqd": 1
+		},
+		{
+			"fieldname": "our_price",
+			"fieldtype": "Currency",
+			"in_list_view": 1,
+			"label": "Our Price (Selling)"
+		},
+		{
+			"fieldname": "column_break_main",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "min_price",
+			"fieldtype": "Currency",
+			"in_list_view": 1,
+			"label": "Min Price"
+		},
+		{
+			"fieldname": "max_price",
+			"fieldtype": "Currency",
+			"in_list_view": 1,
+			"label": "Max Price"
+		}
+	],
+	"index_web_pages_for_search": 1,
+	"istable": 1,
+	"links": [],
+	"modified": "2026-06-12 10:00:00.000000",
+	"modified_by": "Administrator",
+	"module": "Navgold Custom",
+	"name": "Amazon Price Snapshot Item",
+	"owner": "Administrator",
+	"permissions": [],
+	"row_format": "Dynamic",
+	"sort_field": "creation",
+	"sort_order": "DESC",
+	"states": []
+}
