@@ -5,10 +5,10 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils.data import flt
 
-from navgold_custom.navgold_custom.report.amazon_golive_data_readiness.amazon_golive_data_readiness import (
+from navgold_custom.navgold_custom.report.amazon_go_live_data_readiness.amazon_go_live_data_readiness import (
 	build_readiness_row,
 )
-from navgold_custom.navgold_custom.report.amazon_golive_data_readiness.amazon_golive_data_readiness import (
+from navgold_custom.navgold_custom.report.amazon_go_live_data_readiness.amazon_go_live_data_readiness import (
 	execute as execute_readiness,
 )
 from navgold_custom.navgold_custom.report.amazon_order_sync_health.amazon_order_sync_health import (
