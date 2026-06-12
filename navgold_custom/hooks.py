@@ -333,6 +333,7 @@ scheduler_events = {
 		],
 		"*/30 * * * *": [
 			"navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api_settings.schedule_get_order_details",
+			"navgold_custom.navgold_custom.doctype.navgold_settings.navgold_settings.schedule_bulk_fetch_afn_stock",
 		],
 		# strategy refresh and pricing submits are deliberately offset so a feed is never
 		# built from half-refreshed strategy prices
