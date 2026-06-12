@@ -7,7 +7,7 @@
         variant="solid"
         size="lg"
         :label="is_blocked ? 'GO-LIVE BLOCKED' : 'ALL CLEAR'"
-        :class="is_blocked ? 'animate-pulse text-base px-6 py-2' : 'text-base px-6 py-2'"
+        :class="is_blocked ? 'verdict-alarm text-base px-6 py-2' : 'text-base px-6 py-2'"
       />
     </div>
 
@@ -95,3 +95,14 @@ function confirm_toggle() {
   pending_flag.value = null
 }
 </script>
+
+<style scoped>
+.verdict-alarm {
+	/* pulse the ring, never the text — the verdict must be legible at every frame */
+	animation: verdict-ring 1.5s ease-in-out infinite;
+}
+@keyframes verdict-ring {
+	0%, 100% { box-shadow: 0 0 0 0 rgba(220, 38, 38, 0.5); }
+	50% { box-shadow: 0 0 0 8px rgba(220, 38, 38, 0); }
+}
+</style>
