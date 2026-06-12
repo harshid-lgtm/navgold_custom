@@ -158,15 +158,41 @@ def load_updates(csv_path: str | None, xlsx_path: str | None) -> list:
 	return DEFAULT_PRICE_UPDATES
 
 
+def validate_updates(updates: list) -> None:
+	problems = []
+	for update in updates:
+		minimum = flt(update.get("min"))
+		maximum = flt(update.get("max"))
+		our_price = flt(update.get("our_price"))
+		if minimum <= 0 or maximum <= 0 or our_price <= 0:
+			problems.append(
+				f"{update.get('sku')}: non-positive price (min={minimum} max={maximum} our={our_price})"
+			)
+		elif minimum > maximum:
+			problems.append(f"{update.get('sku')}: min {minimum} above max {maximum}")
+		elif not (minimum <= our_price <= maximum):
+			problems.append(f"{update.get('sku')}: our_price {our_price} outside [{minimum}, {maximum}]")
+	if problems:
+		frappe.throw("Manual price push blocked:\n" + "\n".join(problems[:50]))
+
+
 def run(
 	csv_path: str | None = None,
 	xlsx_path: str | None = None,
-	dry_run: bool = False,
+	dry_run: bool = True,
+	live: bool = False,
 	preview_path: str | None = None,
 ) -> dict:
+	# dry_run is the default: this tool was used during the June 10 incident and must
+	# never push without an explicit live=True after a reviewed dry run.
+	if live:
+		dry_run = False
+
 	updates = load_updates(csv_path, xlsx_path)
 	if not updates:
 		frappe.throw("No price updates to submit")
+
+	validate_updates(updates)
 
 	settings = frappe.get_single("Amazon SP API Settings")
 	skus = [update["sku"] for update in updates]
