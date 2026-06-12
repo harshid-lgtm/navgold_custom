@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-6">
     <div class="flex items-center justify-between">
-      <h2 class="text-base font-semibold text-ink-gray-9">Order Analytics</h2>
+      <h2 class="text-base font-semibold text-ink-gray-9">Order analytics</h2>
       <TabButtons
         :buttons="period_buttons"
         v-model="selected_hours"
@@ -9,43 +9,43 @@
       />
     </div>
 
-    <div v-if="analytics_data" class="grid grid-cols-2 md:grid-cols-4 gap-4">
-      <div class="bg-surface-white border border-outline-gray-2 rounded-xl p-4">
-        <div class="text-3xl font-bold text-ink-gray-9">{{ analytics_data?.cards?.orders_past_hour ?? 0 }}</div>
-        <div class="text-xs text-ink-gray-4 uppercase tracking-wide mt-1">Orders (1h)</div>
+    <div v-if="analytics_data" class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div class="bg-surface-base border border-outline-gray-1 rounded-md p-4">
+        <div class="text-2xl font-semibold text-ink-gray-9">{{ analytics_data?.cards?.orders_past_hour ?? 0 }}</div>
+        <div class="text-sm text-ink-gray-5 mt-0.5">Orders (1h)</div>
       </div>
-      <div class="bg-surface-white border border-outline-gray-2 rounded-xl p-4">
-        <div class="text-3xl font-bold text-ink-gray-9">{{ format_currency(analytics_data?.cards?.sales_past_hour) }}</div>
-        <div class="text-xs text-ink-gray-4 uppercase tracking-wide mt-1">Sales (1h)</div>
+      <div class="bg-surface-base border border-outline-gray-1 rounded-md p-4">
+        <div class="text-2xl font-semibold text-ink-gray-9">{{ format_currency(analytics_data?.cards?.sales_past_hour) }}</div>
+        <div class="text-sm text-ink-gray-5 mt-0.5">Sales (1h)</div>
       </div>
-      <div class="bg-surface-white border border-outline-gray-2 rounded-xl p-4">
-        <div class="text-3xl font-bold text-ink-gray-9">{{ analytics_data?.cards?.orders_period ?? 0 }}</div>
-        <div class="text-xs text-ink-gray-4 uppercase tracking-wide mt-1">Orders (Period)</div>
+      <div class="bg-surface-base border border-outline-gray-1 rounded-md p-4">
+        <div class="text-2xl font-semibold text-ink-gray-9">{{ analytics_data?.cards?.orders_period ?? 0 }}</div>
+        <div class="text-sm text-ink-gray-5 mt-0.5">Orders (period)</div>
       </div>
-      <div class="bg-surface-white border border-outline-gray-2 rounded-xl p-4">
-        <div class="text-3xl font-bold text-ink-gray-9">{{ format_currency(analytics_data?.cards?.sales_period) }}</div>
-        <div class="text-xs text-ink-gray-4 uppercase tracking-wide mt-1">Sales (Period)</div>
+      <div class="bg-surface-base border border-outline-gray-1 rounded-md p-4">
+        <div class="text-2xl font-semibold text-ink-gray-9">{{ format_currency(analytics_data?.cards?.sales_period) }}</div>
+        <div class="text-sm text-ink-gray-5 mt-0.5">Sales (period)</div>
       </div>
     </div>
-    <div v-else class="grid grid-cols-2 md:grid-cols-4 gap-4">
+    <div v-else class="grid grid-cols-2 md:grid-cols-4 gap-3">
       <div
         v-for="i in 4"
         :key="i"
-        class="bg-surface-gray-1 border border-outline-gray-2 rounded-xl p-4 h-24 animate-pulse"
+        class="bg-surface-gray-1 border border-outline-gray-1 rounded-md p-4 h-24"
       ></div>
     </div>
 
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-      <div class="bg-surface-white border border-outline-gray-2 rounded-xl p-4">
-        <h3 class="text-sm font-semibold text-ink-gray-6 mb-3">Order Types</h3>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div class="bg-surface-base border border-outline-gray-1 rounded-md p-4">
+        <h3 class="text-sm font-semibold text-ink-gray-7 mb-3">Order types</h3>
         <div ref="pie_chart_ref" class="h-48"></div>
       </div>
-      <div class="bg-surface-white border border-outline-gray-2 rounded-xl p-4">
-        <h3 class="text-sm font-semibold text-ink-gray-6 mb-3">Top Categories</h3>
+      <div class="bg-surface-base border border-outline-gray-1 rounded-md p-4">
+        <h3 class="text-sm font-semibold text-ink-gray-7 mb-3">Top categories</h3>
         <div ref="bar_chart_ref" class="h-48"></div>
       </div>
-      <div class="bg-surface-white border border-outline-gray-2 rounded-xl p-4">
-        <h3 class="text-sm font-semibold text-ink-gray-6 mb-3">Hourly Trend</h3>
+      <div class="bg-surface-base border border-outline-gray-1 rounded-md p-4">
+        <h3 class="text-sm font-semibold text-ink-gray-7 mb-3">Hourly trend</h3>
         <div ref="line_chart_ref" class="h-48"></div>
       </div>
     </div>
@@ -57,13 +57,9 @@ import { ref, inject, onMounted, onUnmounted, watch } from 'vue'
 import { TabButtons } from 'frappe-ui'
 import { Chart } from 'frappe-charts'
 
-const props = defineProps({
-  analytics: { type: Object, default: null },
-})
-
 const call = inject('$call')
 
-const analytics_data = ref(props.analytics)
+const analytics_data = ref(null)
 const selected_hours = ref(24)
 
 const pie_chart_ref = ref(null)
@@ -154,18 +150,8 @@ watch(analytics_data, () => {
   render_charts()
 }, { deep: true })
 
-watch(() => props.analytics, (new_val) => {
-  if (new_val && !analytics_data.value) {
-    analytics_data.value = new_val
-  }
-})
-
 onMounted(() => {
-  if (!analytics_data.value) {
-    load_analytics(selected_hours.value)
-  } else {
-    render_charts()
-  }
+  load_analytics(selected_hours.value)
 })
 
 onUnmounted(() => {

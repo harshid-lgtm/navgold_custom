@@ -1,81 +1,105 @@
 <template>
-  <div class="bg-surface-white border border-outline-gray-2 rounded-xl p-6 space-y-4">
-    <h2 class="text-base font-semibold text-ink-red-3 uppercase tracking-wide">Emergency Controls</h2>
+  <div class="space-y-4">
+    <!-- Snapshot card -->
+    <div class="bg-surface-base rounded-md border border-outline-gray-1 p-4">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-base font-semibold text-ink-gray-9">Price snapshot</h3>
+        <Button
+          variant="subtle"
+          size="sm"
+          icon-left="lucide-camera"
+          label="Capture"
+          :loading="capturing_snapshot"
+          @click="on_capture_snapshot"
+        />
+      </div>
+      <div v-if="snapshot" class="space-y-1 text-sm">
+        <div class="flex items-center gap-2 text-ink-gray-7">
+          <span class="text-ink-gray-5 w-12 shrink-0">Name</span>{{ snapshot.name }}
+        </div>
+        <div class="flex items-center gap-2 text-ink-gray-7">
+          <span class="text-ink-gray-5 w-12 shrink-0">Taken</span>{{ snapshot.taken_at }}
+        </div>
+        <div class="flex items-center gap-2 text-ink-gray-7">
+          <span class="text-ink-gray-5 w-12 shrink-0">SKUs</span>{{ snapshot.sku_count }}
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-ink-gray-5 w-12 shrink-0">Status</span>
+          <Badge :label="snapshot.status" theme="blue" variant="subtle" size="sm" />
+        </div>
+      </div>
+      <p v-else class="text-sm text-ink-gray-5">No snapshot captured yet.</p>
+    </div>
 
-    <FormControl
-      label="Type PANIC to enable emergency actions"
-      type="text"
-      placeholder="PANIC"
-      v-model="panic_input"
-      :variant="panic_confirmed ? 'outline' : 'subtle'"
-    />
-
-    <div class="flex gap-3 flex-wrap">
+    <!-- Actions -->
+    <div class="flex gap-2 flex-wrap">
       <Button
         theme="red"
         variant="solid"
-        label="Freeze All Outbound"
-        :disabled="!panic_confirmed"
-        @click="open_freeze_dialog"
+        size="sm"
+        label="Freeze all outbound"
+        @click="freeze_dialog_open = true"
       />
       <Button
         theme="red"
         variant="subtle"
-        label="Restore Snapshot + Freeze"
-        :disabled="!panic_confirmed || !snapshot"
-        :title="!snapshot ? 'No snapshot available' : ''"
-        @click="open_restore_dialog"
+        size="sm"
+        label="Restore snapshot + freeze"
+        :disabled="!snapshot"
+        @click="restore_dialog_open = true"
       />
     </div>
 
-    <div class="border-t border-outline-gray-2 pt-4 space-y-2">
-      <h3 class="text-sm font-semibold text-ink-gray-7 uppercase tracking-wide">Price Snapshot</h3>
-      <div v-if="snapshot" class="text-sm space-y-1 text-ink-gray-6">
-        <div><span class="text-ink-gray-4">Name:</span> {{ snapshot.name }}</div>
-        <div><span class="text-ink-gray-4">Taken:</span> {{ snapshot.taken_at }}</div>
-        <div><span class="text-ink-gray-4">SKUs:</span> {{ snapshot.sku_count }}</div>
-        <div>
-          <span class="text-ink-gray-4">Status:</span>
-          <Badge :label="snapshot.status" theme="blue" variant="subtle" size="sm" class="ml-1" />
-        </div>
-      </div>
-      <div v-else class="text-sm text-ink-gray-4 italic">No snapshot captured</div>
-      <Button
-        variant="subtle"
-        label="Capture Price Snapshot"
-        :loading="capturing_snapshot"
-        @click="on_capture_snapshot"
-      />
-    </div>
-
-    <!-- PANIC: Freeze confirmation dialog -->
-    <Dialog
-      v-model="freeze_dialog_open"
-      :options="{ title: 'Confirm Freeze', size: 'sm' }"
-    >
+    <!-- Freeze dialog with typed confirm -->
+    <Dialog v-model:open="freeze_dialog_open" :options="{ title: 'Freeze all outbound', size: 'sm' }">
       <template #body-content>
-        <p class="text-p-base text-ink-gray-7 mb-4">
-          This will freeze all Amazon outbound actions. Are you sure?
+        <p class="text-p-sm text-ink-gray-7 mb-4">
+          This stops all outbound writes to Amazon and Repricer. Type <strong>FREEZE</strong> to confirm.
         </p>
-        <div class="flex justify-end gap-2">
-          <Button variant="subtle" label="Cancel" @click="freeze_dialog_open = false" />
-          <Button theme="red" variant="solid" label="Freeze All Outbound" :loading="action_loading" @click="on_freeze" />
+        <FormControl v-model="freeze_confirm_text" type="text" placeholder="FREEZE" />
+        <div class="flex justify-end gap-2 mt-4">
+          <Button
+            variant="subtle"
+            size="sm"
+            label="Cancel"
+            @click="freeze_dialog_open = false; freeze_confirm_text = ''"
+          />
+          <Button
+            theme="red"
+            variant="solid"
+            size="sm"
+            label="Freeze"
+            :disabled="freeze_confirm_text !== 'FREEZE'"
+            :loading="action_loading"
+            @click="on_freeze"
+          />
         </div>
       </template>
     </Dialog>
 
-    <!-- PANIC: Restore + Freeze confirmation dialog -->
-    <Dialog
-      v-model="restore_dialog_open"
-      :options="{ title: 'Confirm Restore + Freeze', size: 'sm' }"
-    >
+    <!-- Restore dialog with typed confirm -->
+    <Dialog v-model:open="restore_dialog_open" :options="{ title: 'Restore snapshot + freeze', size: 'sm' }">
       <template #body-content>
-        <p class="text-p-base text-ink-gray-7 mb-4">
-          This will restore the last price snapshot and freeze all Amazon outbound. Are you sure?
+        <p class="text-p-sm text-ink-gray-7 mb-4">
+          Restores the last price snapshot and freezes all Amazon outbound. Type <strong>RESTORE</strong> to confirm.
         </p>
-        <div class="flex justify-end gap-2">
-          <Button variant="subtle" label="Cancel" @click="restore_dialog_open = false" />
-          <Button theme="red" variant="solid" label="Restore + Freeze" :loading="action_loading" @click="on_restore" />
+        <FormControl v-model="restore_confirm_text" type="text" placeholder="RESTORE" />
+        <div class="flex justify-end gap-2 mt-4">
+          <Button
+            variant="subtle"
+            size="sm"
+            label="Cancel"
+            @click="restore_dialog_open = false; restore_confirm_text = ''"
+          />
+          <Button
+            theme="red"
+            variant="solid"
+            size="sm"
+            label="Restore + freeze"
+            :disabled="restore_confirm_text !== 'RESTORE'"
+            :loading="action_loading"
+            @click="on_restore"
+          />
         </div>
       </template>
     </Dialog>
@@ -83,39 +107,29 @@
 </template>
 
 <script setup>
-import { ref, computed, inject } from 'vue'
+import { ref, inject } from 'vue'
 import { Button, Dialog, FormControl, Badge, toast } from 'frappe-ui'
 
 const props = defineProps({
   snapshot: { type: Object, default: null },
-  freeze_active: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['action-complete'])
 const call = inject('$call')
 
-const panic_input = ref('')
 const capturing_snapshot = ref(false)
 const action_loading = ref(false)
 const freeze_dialog_open = ref(false)
 const restore_dialog_open = ref(false)
-
-const panic_confirmed = computed(() => panic_input.value === 'PANIC')
-
-function open_freeze_dialog() {
-  freeze_dialog_open.value = true
-}
-
-function open_restore_dialog() {
-  restore_dialog_open.value = true
-}
+const freeze_confirm_text = ref('')
+const restore_confirm_text = ref('')
 
 async function on_freeze() {
   action_loading.value = true
   try {
     const result = await call('navgold_custom.navgold_custom.amazon_pricing.control_center_api.panic_button', { restore: 0 })
     toast.success(result?.log || 'Freeze initiated.')
-    panic_input.value = ''
+    freeze_confirm_text.value = ''
     freeze_dialog_open.value = false
     emit('action-complete')
   } catch (e) {
@@ -130,7 +144,7 @@ async function on_restore() {
   try {
     const result = await call('navgold_custom.navgold_custom.amazon_pricing.control_center_api.panic_button', { restore: 1 })
     toast.success(result?.log || 'Restore + Freeze initiated.')
-    panic_input.value = ''
+    restore_confirm_text.value = ''
     restore_dialog_open.value = false
     emit('action-complete')
   } catch (e) {
