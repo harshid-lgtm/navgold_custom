@@ -3,10 +3,20 @@ import vue from '@vitejs/plugin-vue';
 import { defineConfig } from 'vite';
 import proxyOptions from './proxyOptions';
 
-// doppio lives at apps/doppio. The relative path from the worktree control_center/ directory
-// to the bench apps/ directory is 5 levels up (no extra /apps segment needed).
-const BENCH_APPS = path.resolve(__dirname, '../../../../../');
-const doppio_root = path.resolve(BENCH_APPS, 'doppio');
+import fs from 'fs';
+
+// doppio lives at apps/doppio, but this app may be built from the repo root or a
+// git worktree at a different depth — walk upward until we find doppio/libs.
+const find_doppio_root = () => {
+	let dir = __dirname;
+	for (let depth = 0; depth < 8; depth += 1) {
+		dir = path.resolve(dir, '..');
+		const candidate = path.join(dir, 'doppio');
+		if (fs.existsSync(path.join(candidate, 'libs'))) return candidate;
+	}
+	throw new Error(`doppio app not found above ${__dirname}`);
+};
+const doppio_root = find_doppio_root();
 
 // https://vitejs.dev/config/
 export default defineConfig({
