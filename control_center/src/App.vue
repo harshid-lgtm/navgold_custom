@@ -1,13 +1,8 @@
 <template>
-	<div>
-		<button v-if="$auth.isLoggedIn" @click="$auth.logout()">Logout</button>
-		<router-view />
-	</div>
+  <div class="min-h-screen bg-gray-950 text-white">
+    <router-view />
+  </div>
 </template>
-
-
 <script>
-export default {
-	inject: ['$auth']
-};
+export default { inject: ['$auth'] }
 </script>
