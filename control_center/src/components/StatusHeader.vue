@@ -1,34 +1,66 @@
 <template>
   <div class="space-y-4">
+    <!-- Status badge — prominent, centered -->
     <div class="flex justify-center">
-      <span
-        :class="is_blocked
-          ? 'bg-red-600 text-white animate-pulse text-2xl font-black uppercase tracking-widest px-8 py-4 rounded-full'
-          : 'bg-green-600 text-white text-2xl font-black uppercase tracking-widest px-8 py-4 rounded-full'"
-      >
-        {{ is_blocked ? 'GO-LIVE BLOCKED' : 'ALL CLEAR' }}
-      </span>
+      <Badge
+        :theme="is_blocked ? 'red' : 'green'"
+        variant="solid"
+        size="lg"
+        :label="is_blocked ? 'GO-LIVE BLOCKED' : 'ALL CLEAR'"
+        :class="is_blocked ? 'animate-pulse text-base px-6 py-2' : 'text-base px-6 py-2'"
+      />
     </div>
+
+    <!-- Feature flag toggles -->
     <div class="flex flex-wrap gap-2 justify-center">
-      <button
+      <Button
         v-for="flag_def in flag_definitions"
         :key="flag_def.key"
+        :variant="get_button_variant(flag_def)"
+        :theme="get_button_theme(flag_def)"
+        :label="flag_def.label"
+        size="sm"
         @click="on_pill_click(flag_def)"
-        :class="get_pill_class(flag_def)"
-      >
-        {{ flag_def.label }}
-      </button>
+      />
     </div>
+
+    <!-- Confirm toggle Dialog -->
+    <Dialog
+      v-model="confirm_dialog_open"
+      :options="{ title: 'Confirm Flag Toggle', size: 'sm' }"
+    >
+      <template #body-content>
+        <p class="text-p-base text-ink-gray-7 mb-4">
+          Are you sure you want to toggle
+          <strong class="text-ink-gray-9">{{ pending_flag?.label }}</strong>?
+        </p>
+        <div class="flex justify-end gap-2">
+          <Button variant="subtle" label="Cancel" @click="confirm_dialog_open = false" />
+          <Button
+            :theme="pending_flag?.is_kill_switch ? 'red' : 'blue'"
+            variant="solid"
+            label="Confirm"
+            @click="confirm_toggle"
+          />
+        </div>
+      </template>
+    </Dialog>
   </div>
 </template>
 
 <script setup>
+import { ref } from 'vue'
+import { Badge, Button, Dialog } from 'frappe-ui'
+
 const props = defineProps({
   flags: { type: Object, default: () => ({}) },
-  is_blocked: { type: Boolean, default: false }
+  is_blocked: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['toggle-flag'])
+
+const confirm_dialog_open = ref(false)
+const pending_flag = ref(null)
 
 const flag_definitions = [
   { key: 'enable_pricing_sync', label: 'Pricing Sync' },
@@ -40,23 +72,26 @@ const flag_definitions = [
   { key: 'enable_sync', label: 'Sync' },
 ]
 
-function get_pill_class(flag_def) {
+function get_button_variant(flag_def) {
   const active = !!props.flags[flag_def.key]
-  if (flag_def.is_kill_switch) {
-    return active
-      ? 'bg-red-900 border-2 border-red-500 text-red-200 font-black text-base px-5 py-2 rounded cursor-pointer'
-      : 'bg-gray-800 border border-gray-600 text-gray-300 text-base px-5 py-2 rounded cursor-pointer'
-  }
-  return active
-    ? 'bg-green-700 text-white text-sm px-4 py-2 rounded cursor-pointer'
-    : 'bg-gray-800 text-gray-400 text-sm px-4 py-2 rounded cursor-pointer'
+  return active ? 'solid' : 'subtle'
+}
+
+function get_button_theme(flag_def) {
+  const active = !!props.flags[flag_def.key]
+  if (flag_def.is_kill_switch) return active ? 'red' : 'gray'
+  return active ? 'green' : 'gray'
 }
 
 function on_pill_click(flag_def) {
-  const current_value = !!props.flags[flag_def.key]
-  const confirmed = confirm(`Toggle ${flag_def.label}?`)
-  if (confirmed) {
-    emit('toggle-flag', flag_def.key, !current_value)
-  }
+  pending_flag.value = flag_def
+  confirm_dialog_open.value = true
+}
+
+function confirm_toggle() {
+  const current_value = !!props.flags[pending_flag.value.key]
+  emit('toggle-flag', pending_flag.value.key, !current_value)
+  confirm_dialog_open.value = false
+  pending_flag.value = null
 }
 </script>

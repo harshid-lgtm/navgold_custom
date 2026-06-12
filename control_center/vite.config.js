@@ -1,5 +1,6 @@
 import path from 'path';
 import vue from '@vitejs/plugin-vue';
+import frappeuiPlugin from 'frappe-ui/vite';
 import { defineConfig } from 'vite';
 import proxyOptions from './proxyOptions';
 
@@ -20,7 +21,15 @@ const doppio_root = find_doppio_root();
 
 // https://vitejs.dev/config/
 export default defineConfig({
-	plugins: [vue()],
+	plugins: [
+		vue(),
+		...frappeuiPlugin({
+			lucideIcons: true,
+			frappeProxy: false,
+			jinjaBootData: false,
+			buildConfig: false,
+		}),
+	],
 	server: {
 		port: 8080,
 		host: '0.0.0.0',

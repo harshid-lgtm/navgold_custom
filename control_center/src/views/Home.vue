@@ -1,10 +1,10 @@
 <template>
-  <div class="min-h-screen bg-gray-950 text-white">
+  <div class="min-h-screen bg-surface-gray-1">
     <TelemetryBanner :visible="telemetry_lost" />
     <div class="max-w-7xl mx-auto px-4 py-6 space-y-6">
       <div class="flex items-center justify-between">
-        <h1 class="text-3xl font-black tracking-tight text-white">Navgold Control Center</h1>
-        <span class="text-xs text-gray-500">Last updated: {{ last_updated || 'Never' }}</span>
+        <h1 class="text-2xl font-semibold text-ink-gray-9">Navgold Control Center</h1>
+        <span class="text-sm text-ink-gray-4">Last updated: {{ last_updated || 'Never' }}</span>
       </div>
       <StatusHeader
         :flags="status_data?.flags || {}"
@@ -48,11 +48,9 @@ const is_blocked = computed(() => {
   const flags = status_data.value?.flags || {}
   return (
     flags.freeze_amazon_outbound ||
-    Object.values(blockers).some((v, i) => {
-      const keys = Object.keys(blockers)
-      const key = keys[i]
-      return key === 'minutes_since_last_order' ? v > 120 : v > 0
-    })
+    Object.entries(blockers).some(([key, value]) =>
+      key === 'minutes_since_last_order' ? value > 120 : value > 0
+    )
   )
 })
 

@@ -1,95 +1,142 @@
 <template>
-  <div class="bg-gray-900 border border-gray-700 rounded-xl p-6 space-y-4">
-    <h2 class="text-red-400 font-black text-lg uppercase tracking-wide">Emergency Controls</h2>
+  <div class="bg-surface-white border border-outline-gray-2 rounded-xl p-6 space-y-4">
+    <h2 class="text-base font-semibold text-ink-red-3 uppercase tracking-wide">Emergency Controls</h2>
 
-    <div class="space-y-2">
-      <label class="text-xs text-gray-400 uppercase tracking-wide">Type PANIC to enable emergency actions</label>
-      <input
-        v-model="panic_input"
-        type="text"
-        placeholder="PANIC"
-        class="w-full bg-gray-800 border border-gray-600 text-white rounded px-3 py-2 text-sm focus:outline-none focus:border-red-500"
+    <FormControl
+      label="Type PANIC to enable emergency actions"
+      type="text"
+      placeholder="PANIC"
+      v-model="panic_input"
+      :variant="panic_confirmed ? 'outline' : 'subtle'"
+    />
+
+    <div class="flex gap-3 flex-wrap">
+      <Button
+        theme="red"
+        variant="solid"
+        label="Freeze All Outbound"
+        :disabled="!panic_confirmed"
+        @click="open_freeze_dialog"
+      />
+      <Button
+        theme="red"
+        variant="subtle"
+        label="Restore Snapshot + Freeze"
+        :disabled="!panic_confirmed || !snapshot"
+        :title="!snapshot ? 'No snapshot available' : ''"
+        @click="open_restore_dialog"
       />
     </div>
 
-    <div class="flex gap-3">
-      <button
-        :disabled="!panic_confirmed"
-        @click="on_freeze"
-        class="bg-red-800 hover:bg-red-700 text-white font-bold px-6 py-3 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed"
-      >
-        Freeze All Outbound
-      </button>
-      <button
-        :disabled="!panic_confirmed || !snapshot"
-        @click="on_restore"
-        :title="!snapshot ? 'No snapshot available' : ''"
-        class="bg-orange-800 hover:bg-orange-700 text-white font-bold px-6 py-3 rounded-lg disabled:opacity-30 disabled:cursor-not-allowed"
-      >
-        Restore Snapshot + Freeze
-      </button>
-    </div>
-
-    <div v-if="action_result" class="bg-gray-800 rounded p-3 text-sm text-green-300 whitespace-pre-wrap">{{ action_result }}</div>
-
-    <hr class="border-gray-700" />
-
-    <div class="space-y-2">
-      <h3 class="text-sm font-semibold text-gray-300 uppercase tracking-wide">Price Snapshot</h3>
-      <div v-if="snapshot" class="text-sm space-y-1 text-gray-300">
-        <div><span class="text-gray-500">Name:</span> {{ snapshot.name }}</div>
-        <div><span class="text-gray-500">Taken:</span> {{ snapshot.taken_at }}</div>
-        <div><span class="text-gray-500">SKUs:</span> {{ snapshot.sku_count }}</div>
-        <div><span class="text-gray-500">Status:</span> {{ snapshot.status }}</div>
+    <div class="border-t border-outline-gray-2 pt-4 space-y-2">
+      <h3 class="text-sm font-semibold text-ink-gray-7 uppercase tracking-wide">Price Snapshot</h3>
+      <div v-if="snapshot" class="text-sm space-y-1 text-ink-gray-6">
+        <div><span class="text-ink-gray-4">Name:</span> {{ snapshot.name }}</div>
+        <div><span class="text-ink-gray-4">Taken:</span> {{ snapshot.taken_at }}</div>
+        <div><span class="text-ink-gray-4">SKUs:</span> {{ snapshot.sku_count }}</div>
+        <div>
+          <span class="text-ink-gray-4">Status:</span>
+          <Badge :label="snapshot.status" theme="blue" variant="subtle" size="sm" class="ml-1" />
+        </div>
       </div>
-      <div v-else class="text-sm text-gray-500 italic">No snapshot captured</div>
-      <button
+      <div v-else class="text-sm text-ink-gray-4 italic">No snapshot captured</div>
+      <Button
+        variant="subtle"
+        label="Capture Price Snapshot"
+        :loading="capturing_snapshot"
         @click="on_capture_snapshot"
-        :disabled="capturing_snapshot"
-        class="bg-blue-800 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        {{ capturing_snapshot ? 'Capturing...' : 'Capture Price Snapshot' }}
-      </button>
+      />
     </div>
+
+    <!-- PANIC: Freeze confirmation dialog -->
+    <Dialog
+      v-model="freeze_dialog_open"
+      :options="{ title: 'Confirm Freeze', size: 'sm' }"
+    >
+      <template #body-content>
+        <p class="text-p-base text-ink-gray-7 mb-4">
+          This will freeze all Amazon outbound actions. Are you sure?
+        </p>
+        <div class="flex justify-end gap-2">
+          <Button variant="subtle" label="Cancel" @click="freeze_dialog_open = false" />
+          <Button theme="red" variant="solid" label="Freeze All Outbound" :loading="action_loading" @click="on_freeze" />
+        </div>
+      </template>
+    </Dialog>
+
+    <!-- PANIC: Restore + Freeze confirmation dialog -->
+    <Dialog
+      v-model="restore_dialog_open"
+      :options="{ title: 'Confirm Restore + Freeze', size: 'sm' }"
+    >
+      <template #body-content>
+        <p class="text-p-base text-ink-gray-7 mb-4">
+          This will restore the last price snapshot and freeze all Amazon outbound. Are you sure?
+        </p>
+        <div class="flex justify-end gap-2">
+          <Button variant="subtle" label="Cancel" @click="restore_dialog_open = false" />
+          <Button theme="red" variant="solid" label="Restore + Freeze" :loading="action_loading" @click="on_restore" />
+        </div>
+      </template>
+    </Dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, inject } from 'vue'
+import { Button, Dialog, FormControl, Badge, toast } from 'frappe-ui'
 
 const props = defineProps({
   snapshot: { type: Object, default: null },
-  freeze_active: { type: Boolean, default: false }
+  freeze_active: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['action-complete'])
 const call = inject('$call')
 
 const panic_input = ref('')
-const action_result = ref('')
 const capturing_snapshot = ref(false)
+const action_loading = ref(false)
+const freeze_dialog_open = ref(false)
+const restore_dialog_open = ref(false)
 
 const panic_confirmed = computed(() => panic_input.value === 'PANIC')
 
+function open_freeze_dialog() {
+  freeze_dialog_open.value = true
+}
+
+function open_restore_dialog() {
+  restore_dialog_open.value = true
+}
+
 async function on_freeze() {
+  action_loading.value = true
   try {
     const result = await call('navgold_custom.navgold_custom.amazon_pricing.control_center_api.panic_button', { restore: 0 })
-    action_result.value = result?.log || 'Freeze initiated.'
+    toast.success(result?.log || 'Freeze initiated.')
     panic_input.value = ''
+    freeze_dialog_open.value = false
     emit('action-complete')
   } catch (e) {
-    action_result.value = 'Error: ' + (e?.message || 'Unknown error')
+    toast.error('Freeze failed: ' + (e?.message || 'Unknown error'))
+  } finally {
+    action_loading.value = false
   }
 }
 
 async function on_restore() {
+  action_loading.value = true
   try {
     const result = await call('navgold_custom.navgold_custom.amazon_pricing.control_center_api.panic_button', { restore: 1 })
-    action_result.value = result?.log || 'Restore + Freeze initiated.'
+    toast.success(result?.log || 'Restore + Freeze initiated.')
     panic_input.value = ''
+    restore_dialog_open.value = false
     emit('action-complete')
   } catch (e) {
-    action_result.value = 'Error: ' + (e?.message || 'Unknown error')
+    toast.error('Restore failed: ' + (e?.message || 'Unknown error'))
+  } finally {
+    action_loading.value = false
   }
 }
 
@@ -97,9 +144,10 @@ async function on_capture_snapshot() {
   capturing_snapshot.value = true
   try {
     await call('navgold_custom.navgold_custom.amazon_pricing.control_center_api.capture_price_snapshot')
+    toast.success('Price snapshot captured.')
     emit('action-complete')
   } catch (e) {
-    console.error('capture_price_snapshot failed', e)
+    toast.error('Snapshot failed: ' + (e?.message || 'Unknown error'))
   } finally {
     capturing_snapshot.value = false
   }

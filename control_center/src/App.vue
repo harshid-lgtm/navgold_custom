@@ -1,8 +1,11 @@
 <template>
-  <div class="min-h-screen bg-gray-950 text-white">
-    <router-view />
-  </div>
+  <FrappeUIProvider>
+    <div class="min-h-screen bg-surface-white text-ink-gray-9">
+      <router-view />
+    </div>
+  </FrappeUIProvider>
 </template>
-<script>
-export default { inject: ['$auth'] }
+
+<script setup>
+import { FrappeUIProvider } from 'frappe-ui'
 </script>
