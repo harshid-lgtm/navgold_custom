@@ -1,47 +1,50 @@
 <template>
-  <div class="min-h-screen bg-surface-gray-1">
-    <TelemetryBanner :visible="telemetry_lost" />
-    <div class="max-w-7xl mx-auto px-4 py-6 space-y-6">
-      <div class="flex items-center justify-between">
-        <h1 class="text-2xl font-semibold text-ink-gray-9">Navgold Control Center</h1>
-        <span class="text-sm text-ink-gray-4">Last updated: {{ last_updated || 'Never' }}</span>
-      </div>
-      <StatusHeader
-        :flags="status_data?.flags || {}"
-        :is_blocked="is_blocked"
-        @toggle-flag="on_toggle_flag"
+  <div class="flex flex-col h-full">
+    <!-- Page header -->
+    <header class="sticky top-0 z-10 flex min-h-12 items-center gap-3 border-b border-outline-gray-1 bg-surface-base px-3 sm:px-5">
+      <h1 class="text-base font-semibold text-ink-gray-9 flex-1">Overview</h1>
+      <Badge
+        :label="is_blocked ? 'Blocked' : 'All clear'"
+        :theme="is_blocked ? 'red' : 'green'"
+        variant="subtle"
+        size="sm"
       />
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div class="lg:col-span-1">
-          <PanicCard
-            :snapshot="status_data?.snapshot || null"
-            :freeze_active="status_data?.flags?.freeze_amazon_outbound || false"
-            @action-complete="fetch_status"
-          />
-        </div>
-        <div class="lg:col-span-2">
-          <BlockersGrid :blockers="status_data?.blockers || {}" />
-        </div>
-      </div>
-      <AnalyticsPanel :analytics="analytics_data" />
+      <span v-if="last_updated" class="text-sm text-ink-gray-5">Updated {{ last_updated }}</span>
+      <Button
+        variant="subtle"
+        size="sm"
+        icon="lucide-refresh-cw"
+        :loading="refreshing"
+        @click="on_manual_refresh"
+      />
+    </header>
+
+    <!-- Body -->
+    <div class="px-3 sm:px-5 pt-5 pb-10 space-y-6">
+      <!-- Read-only flag badge row -->
+      <StatusHeader :flags="status_data?.flags || {}" />
+
+      <!-- Blocker stat tiles -->
+      <BlockersGrid :blockers="status_data?.blockers || {}" />
+
+      <!-- Order analytics with charts -->
+      <AnalyticsPanel />
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, inject } from 'vue'
+import { ref, computed, inject, watch } from 'vue'
+import { Badge, Button } from 'frappe-ui'
 import StatusHeader from '../components/StatusHeader.vue'
-import PanicCard from '../components/PanicCard.vue'
 import BlockersGrid from '../components/BlockersGrid.vue'
 import AnalyticsPanel from '../components/AnalyticsPanel.vue'
-import TelemetryBanner from '../components/TelemetryBanner.vue'
 
-const call = inject('$call')
+const status_data = inject('status_data')
+const refetch_status = inject('refetch_status')
 
-const status_data = ref(null)
-const analytics_data = ref(null)
-const telemetry_lost = ref(false)
 const last_updated = ref('')
+const refreshing = ref(false)
 
 const is_blocked = computed(() => {
   const blockers = status_data.value?.blockers || {}
@@ -54,48 +57,14 @@ const is_blocked = computed(() => {
   )
 })
 
-async function fetch_status() {
-  try {
-    const result = await call('navgold_custom.navgold_custom.amazon_pricing.control_center_api.get_control_center_status')
-    status_data.value = result
-    telemetry_lost.value = false
-    last_updated.value = new Date().toLocaleTimeString()
-  } catch (e) {
-    telemetry_lost.value = true
-  }
-}
-
-async function fetch_analytics() {
-  try {
-    const result = await call('navgold_custom.navgold_custom.amazon_pricing.control_center_api.get_order_analytics', { hours: 24 })
-    analytics_data.value = result
-    telemetry_lost.value = false
-  } catch (e) {
-    telemetry_lost.value = true
-  }
-}
-
-async function on_toggle_flag(fieldname, value) {
-  try {
-    await call('navgold_custom.navgold_custom.amazon_pricing.control_center_api.toggle_flag', { fieldname, value })
-    await fetch_status()
-  } catch (e) {
-    console.error('toggle_flag failed', e)
-  }
-}
-
-let status_interval = null
-let analytics_interval = null
-
-onMounted(() => {
-  fetch_status()
-  fetch_analytics()
-  status_interval = setInterval(fetch_status, 10000)
-  analytics_interval = setInterval(fetch_analytics, 60000)
+watch(status_data, () => {
+  last_updated.value = new Date().toLocaleTimeString()
 })
 
-onUnmounted(() => {
-  clearInterval(status_interval)
-  clearInterval(analytics_interval)
-})
+async function on_manual_refresh() {
+  refreshing.value = true
+  await refetch_status()
+  last_updated.value = new Date().toLocaleTimeString()
+  refreshing.value = false
+}
 </script>

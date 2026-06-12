@@ -9,7 +9,7 @@
 		"ignoreUnknown": false,
 		"ignore": [
 			"public/js/vendor/**/*",
-			"navgold_custom/public/control_center/**/*"
+			"navgold_custom/public/control_center/**"
 		]
 	},
 	"formatter": {
