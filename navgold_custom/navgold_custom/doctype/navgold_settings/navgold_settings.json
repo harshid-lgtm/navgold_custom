@@ -49,13 +49,20 @@
 		"group_strategies_section",
 		"group_strategies_into_pricing",
 		"pricing_publishing_section",
+		"amazon_publishing_mode",
 		"pricing_publishing_mode",
 		"published_pricing_items",
+		"send_min_price_to_amazon",
 		"pricing_sync_section",
 		"enable_pricing_sync",
 		"sync_pricing_now",
 		"column_break_pricing_sync",
 		"last_pricing_synced_at",
+		"price_deviation_guard_section",
+		"price_change_threshold_percent",
+		"price_change_block_direction",
+		"column_break_price_guard",
+		"pricing_alert_recipients",
 		"stock_tab",
 		"stock_publishing_mode",
 		"zero_stock_items"
@@ -329,6 +336,14 @@
 			"label": "Pricing Publishing"
 		},
 		{
+			"default": "Stock Only",
+			"description": "Stock Only omits every price patch (min/max/our price) from the Amazon feed; only stock, fulfillment and lead-time patches are sent. Min/max prices keep syncing to Repricer in both modes.",
+			"fieldname": "amazon_publishing_mode",
+			"fieldtype": "Select",
+			"label": "Amazon Publishing Mode",
+			"options": "Stock Only\nStock and Prices"
+		},
+		{
 			"default": "Publish All Prices",
 			"description": "Controls which Amazon Product Pricing records are included in the pricing feed.",
 			"fieldname": "pricing_publishing_mode",
@@ -345,7 +360,8 @@
 		},
 		{
 			"default": "1",
-			"description": "When disabled, the minimum seller allowed price is omitted from the pricing feed sent to Amazon.",
+			"depends_on": "eval:doc.amazon_publishing_mode === 'Stock and Prices'",
+			"description": "When disabled, the minimum seller allowed price is omitted from the pricing feed sent to Amazon. Only applies in Stock and Prices mode.",
 			"fieldname": "send_min_price_to_amazon",
 			"fieldtype": "Check",
 			"label": "Send Minimum Price to Amazon"
@@ -381,6 +397,36 @@
 			"read_only": 1
 		},
 		{
+			"fieldname": "price_deviation_guard_section",
+			"fieldtype": "Section Break",
+			"label": "Price Deviation Guard"
+		},
+		{
+			"default": "20",
+			"description": "Block a SKU from pricing sync when the new price deviates from its stored Amazon selling price by more than this percent.",
+			"fieldname": "price_change_threshold_percent",
+			"fieldtype": "Float",
+			"label": "Price Change Threshold (%)"
+		},
+		{
+			"default": "Both",
+			"description": "Which deviation directions to block. Drops guard against crashed prices, increases against spiked prices.",
+			"fieldname": "price_change_block_direction",
+			"fieldtype": "Select",
+			"label": "Block Direction",
+			"options": "Both\nDrops Only\nIncreases Only"
+		},
+		{
+			"fieldname": "column_break_price_guard",
+			"fieldtype": "Column Break"
+		},
+		{
+			"description": "Comma or newline separated email addresses for blocked-SKU alerts. Defaults to the Administrator when empty.",
+			"fieldname": "pricing_alert_recipients",
+			"fieldtype": "Small Text",
+			"label": "Pricing Alert Recipients"
+		},
+		{
 			"fieldname": "stock_tab",
 			"fieldtype": "Tab Break",
 			"label": "Stock"
@@ -404,7 +450,7 @@
 	"index_web_pages_for_search": 1,
 	"issingle": 1,
 	"links": [],
-	"modified": "2026-04-27 11:14:59.195140",
+	"modified": "2026-06-11 10:00:00.000000",
 	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Navgold Settings",

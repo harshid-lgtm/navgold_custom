@@ -21,6 +21,8 @@ class AmazonPricingSubmissionLog(Document):
 		from frappe.types import DF
 
 		amazon_status: DF.Data | None
+		blocked_count: DF.Int
+		blocked_records: DF.SmallText | None
 		completed_at: DF.Datetime | None
 		error_message: DF.LongText | None
 		feed_content: DF.Code | None

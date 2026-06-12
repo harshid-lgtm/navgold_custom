@@ -16,8 +16,15 @@ from frappe.utils.data import cint, cstr, flt, orjson_dumps
 from navgold_custom.navgold_custom.amazon_pricing.price_calculator import (
 	calculate_prices_with_purchase_cost_override,
 )
+from navgold_custom.navgold_custom.amazon_pricing.price_guard import (
+	partition_pricing_by_price_deviation,
+)
+from navgold_custom.navgold_custom.amazon_pricing.pricing_validators import (
+	collect_pricing_violations,
+)
 from navgold_custom.navgold_custom.amazon_pricing.purchase_cost_sources import (
 	calculate_bundle_cost,
+	get_bundle_components,
 )
 from navgold_custom.navgold_custom.amazon_pricing.strategy_selector import (
 	get_stock_info,
@@ -27,7 +34,7 @@ from navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku import get_proxy_
 from navgold_custom.navgold_custom.doctype.supplier_item_price_and_stock.supplier_item_price_and_stock import (
 	get_supplier_prices,
 )
-from navgold_custom.navgold_custom.utils import get_conversion_factor
+from navgold_custom.navgold_custom.utils import get_conversion_factor, get_free_qty_map
 
 SHIPPING_GROUPS = {
 	"sfp": "57d54587-7341-4c9f-b3f9-546c8d798b21",
@@ -332,6 +339,32 @@ def calculate_adjusted_qty(raw_qty: float, pool_size: int, pack_size: float) -> 
 	return max(math.floor(raw_qty / pool_size / pack_size), 0)
 
 
+# Bundle parents can carry their own (possibly stale) Bin rows; the only honest quantity
+# is what the component free stock can actually assemble right now.
+def get_bundle_buildable_map(item_codes: list) -> dict:
+	bundle_components_map = get_bundle_components(item_codes)
+	if not bundle_components_map:
+		return {}
+
+	component_item_codes = list(
+		{component["item_code"] for components in bundle_components_map.values() for component in components}
+	)
+	component_free_qty_map = get_free_qty_map(component_item_codes)
+
+	buildable_map = {}
+	for item_code, components in bundle_components_map.items():
+		buildable_counts = []
+		for component in components:
+			per_bundle_qty = flt(component["qty"])
+			if per_bundle_qty <= 0:
+				continue
+			component_stock = flt(component_free_qty_map.get(component["item_code"], {}).get("free_qty", 0))
+			buildable_counts.append(math.floor(component_stock / per_bundle_qty))
+		buildable_map[item_code] = max(min(buildable_counts), 0) if buildable_counts else 0
+
+	return buildable_map
+
+
 def get_sku_inventory_data(
 	pricing: dict,
 	zero_stock_proxy_skus: set | None = None,
@@ -339,6 +372,7 @@ def get_sku_inventory_data(
 	stock_info_map: dict | None = None,
 	supplier_data_map: dict | None = None,
 	lead_time_map: dict | None = None,
+	bundle_buildable_map: dict | None = None,
 ) -> dict:
 	stock_info = (
 		stock_info_map.get(pricing.proxy_sku, {})
@@ -417,6 +451,15 @@ def get_sku_inventory_data(
 
 	resolved_supplier_stock = resolved_supplier.get("stock_qty", 0) if resolved_supplier else 0
 	resolved_supplier_qty = calculate_adjusted_qty(resolved_supplier_stock, pool_size, pack_size)
+
+	if not is_backorder and warehouse_qty > 0 and item_code:
+		if bundle_buildable_map is None:
+			bundle_buildable_map = get_bundle_buildable_map([item_code])
+		buildable_bundles = bundle_buildable_map.get(item_code)
+		# A bundle whose components cannot cover the promised quantity must go out as zero,
+		# never as the parent item's warehouse quantity.
+		if buildable_bundles is not None and buildable_bundles < warehouse_qty * pack_size:
+			warehouse_qty = 0
 
 	quantity = resolved_supplier_qty if is_backorder else warehouse_qty
 
@@ -546,6 +589,32 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 			pricing for pricing in pricing_records if pricing.proxy_sku in allowed_pricing_proxy_skus
 		]
 
+	publishing_mode = (
+		frappe.get_cached_value("Navgold Settings", "Navgold Settings", "amazon_publishing_mode")
+		or "Stock Only"
+	)
+	send_prices = publishing_mode == "Stock and Prices"
+
+	# Price guards only gate price-bearing feeds; a stock-only feed must keep updating
+	# stock even for SKUs whose pricing data is currently invalid.
+	blocked_price_deviation = []
+	blocked_validation = []
+	if send_prices:
+		pricing_records, blocked_price_deviation = partition_pricing_by_price_deviation(pricing_records)
+
+		violations_by_pricing = collect_pricing_violations(
+			[pricing.name for pricing in pricing_records], include_deviation=False
+		)
+		if violations_by_pricing:
+			blocked_validation = [
+				{"proxy_sku": pricing.proxy_sku, "reasons": violations_by_pricing[pricing.name]}
+				for pricing in pricing_records
+				if pricing.name in violations_by_pricing
+			]
+			pricing_records = [
+				pricing for pricing in pricing_records if pricing.name not in violations_by_pricing
+			]
+
 	proxy_sku_names = [pricing.proxy_sku for pricing in pricing_records if pricing.proxy_sku]
 	proxy_sku_info = build_proxy_sku_info_map(proxy_sku_names) if proxy_sku_names else {}
 
@@ -574,15 +643,13 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 
 	zero_stock_proxy_skus = get_zero_stock_proxy_skus()
 
+	bundle_buildable_map = get_bundle_buildable_map(all_item_codes) if all_item_codes else {}
+
 	send_min_price = frappe.get_cached_value(
 		"Navgold Settings", "Navgold Settings", "send_min_price_to_amazon"
 	)
 
 	for pricing in pricing_records:
-		if not pricing.current_min_price or not pricing.current_max_price:
-			frappe.log_error(f"Skipping {pricing.name}: No calculated prices", "Amazon Feed Builder")
-			continue
-
 		try:
 			inventory_data = get_sku_inventory_data(
 				pricing,
@@ -591,54 +658,66 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 				stock_info_map,
 				supplier_data_map,
 				lead_time_map,
+				bundle_buildable_map,
 			)
 		except Exception as e:
 			frappe.log_error(f"Skipping inventory patches for {pricing.name}: {e!s}", "Amazon Feed Builder")
 			inventory_data = None
 
-		final_min_price = flt(pricing.current_min_price)
-		final_max_price = flt(pricing.current_max_price)
+		patches = []
 
-		try:
-			resolved_suppliers = inventory_data.get("resolved_suppliers") if inventory_data else None
-			fallback_result = recompute_backorder_prices_with_fallback_supplier(
-				pricing,
-				resolved_suppliers=resolved_suppliers,
-				backorder_strategy_map=backorder_strategy_map,
+		if send_prices:
+			final_min_price = flt(pricing.current_min_price)
+			final_max_price = flt(pricing.current_max_price)
+
+			try:
+				resolved_suppliers = inventory_data.get("resolved_suppliers") if inventory_data else None
+				fallback_result = recompute_backorder_prices_with_fallback_supplier(
+					pricing,
+					resolved_suppliers=resolved_suppliers,
+					backorder_strategy_map=backorder_strategy_map,
+				)
+			except Exception as e:
+				frappe.log_error(
+					f"Backorder price recompute failed for {pricing.name}: {e!s}",
+					"Amazon Feed Builder",
+				)
+				fallback_result = None
+
+			if fallback_result:
+				final_min_price = fallback_result["final_min_price"]
+				final_max_price = fallback_result["final_max_price"]
+				fallback_repricings.append(fallback_result["fallback_repricing"])
+
+			purchasable_offer = {
+				"audience": "ALL",
+				"maximum_seller_allowed_price": [
+					{"schedule": [{"value_with_tax": round(final_max_price, 2)}]}
+				],
+			}
+
+			if send_min_price:
+				purchasable_offer["our_price"] = [
+					{"schedule": [{"value_with_tax": round(final_max_price, 2)}]}
+				]
+				purchasable_offer["minimum_seller_allowed_price"] = [
+					{"schedule": [{"value_with_tax": round(final_min_price, 2)}]}
+				]
+
+			patches.append(
+				{
+					"op": "replace",
+					"path": "/attributes/purchasable_offer",
+					"value": [purchasable_offer],
+				}
 			)
-		except Exception as e:
-			frappe.log_error(
-				f"Backorder price recompute failed for {pricing.name}: {e!s}",
-				"Amazon Feed Builder",
-			)
-			fallback_result = None
-
-		if fallback_result:
-			final_min_price = fallback_result["final_min_price"]
-			final_max_price = fallback_result["final_max_price"]
-			fallback_repricings.append(fallback_result["fallback_repricing"])
-
-		purchasable_offer = {
-			"audience": "ALL",
-			"maximum_seller_allowed_price": [{"schedule": [{"value_with_tax": round(final_max_price, 2)}]}],
-		}
-
-		if send_min_price:
-			purchasable_offer["our_price"] = [{"schedule": [{"value_with_tax": round(final_max_price, 2)}]}]
-			purchasable_offer["minimum_seller_allowed_price"] = [
-				{"schedule": [{"value_with_tax": round(final_min_price, 2)}]}
-			]
-
-		patches = [
-			{
-				"op": "replace",
-				"path": "/attributes/purchasable_offer",
-				"value": [purchasable_offer],
-			},
-		]
 
 		if inventory_data:
 			patches.extend(build_inventory_patches(inventory_data, marketplace_id))
+
+		if not patches:
+			frappe.log_error(f"Skipping {pricing.name}: no patches to send", "Amazon Feed Builder")
+			continue
 
 		message = {
 			"messageId": message_id,
@@ -656,10 +735,16 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 		"messages": messages,
 	}
 
-	return {"feed_content": orjson_dumps(feed), "fallback_repricings": fallback_repricings}
+	return {
+		"feed_content": orjson_dumps(feed),
+		"fallback_repricings": fallback_repricings,
+		"blocked_price_deviation": blocked_price_deviation,
+		"blocked_validation": blocked_validation,
+		"publishing_mode": publishing_mode,
+	}
 
 
-def validate_pricing_feed(json_content: str) -> dict:
+def validate_pricing_feed(json_content: str, require_pricing_patches: bool = True) -> dict:
 	errors = []
 
 	try:
@@ -746,7 +831,7 @@ def validate_pricing_feed(json_content: str) -> dict:
 					if qty is not None and qty < 0:
 						errors.append(f"Message {message_index}: quantity must be non-negative for MFN items")
 
-		if not has_purchasable_offer:
+		if require_pricing_patches and not has_purchasable_offer:
 			errors.append(f"Message {message_index}: Missing purchasable_offer patch")
 
 		if not has_fulfillment_availability:
