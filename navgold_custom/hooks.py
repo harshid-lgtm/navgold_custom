@@ -351,3 +351,7 @@ scheduler_events = {
 		"navgold_custom.navgold_custom.amazon_pricing.fba_fee_fetcher.bulk_fetch_fba_fees",
 	],
 }
+
+website_route_rules = [
+	{"from_route": "/control_center/<path:app_path>", "to_route": "control_center"},
+]
