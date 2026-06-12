@@ -99,10 +99,10 @@ class SupplierOfferImport(Document):
 			try:
 				updated_count = self.process_row(row)
 				self.successful_imports += 1
-				self.append_log(f"Row {row_idx-1}: Updated {updated_count} record(s) for item {row[0]}")
+				self.append_log(f"Row {row_idx - 1}: Updated {updated_count} record(s) for item {row[0]}")
 			except Exception as e:
 				self.failed_imports += 1
-				self.append_log(f"Row {row_idx-1}: {e!s}")
+				self.append_log(f"Row {row_idx - 1}: {e!s}")
 				errored_rows_data.append([*list(row), str(e)])
 
 			if self.total_rows > 5:

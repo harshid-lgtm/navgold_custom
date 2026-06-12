@@ -55,6 +55,8 @@
 		"send_min_price_to_amazon",
 		"pricing_sync_section",
 		"enable_pricing_sync",
+		"freeze_amazon_outbound",
+		"pause_strategy_refresh",
 		"sync_pricing_now",
 		"column_break_pricing_sync",
 		"last_pricing_synced_at",
@@ -378,6 +380,20 @@
 			"fieldtype": "Check",
 			"label": "Enable Scheduled Pricing Sync",
 			"read_only_depends_on": "eval:frappe.session.user != \"Administrator\""
+		},
+		{
+			"default": "0",
+			"description": "Emergency kill switch: blocks every outbound write to Amazon and Repricer (feeds, buttons, scripts).",
+			"fieldname": "freeze_amazon_outbound",
+			"fieldtype": "Check",
+			"label": "Freeze Amazon Outbound"
+		},
+		{
+			"default": "0",
+			"description": "Pause the scheduled strategy refresh (strategy switching) during incidents.",
+			"fieldname": "pause_strategy_refresh",
+			"fieldtype": "Check",
+			"label": "Pause Strategy Refresh"
 		},
 		{
 			"description": "Submit a pricing feed to Amazon and sync prices to Repricer (if enabled) for all active Amazon Product Pricing records. Honors the Pricing Publishing Mode selection above.",

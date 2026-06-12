@@ -24,7 +24,7 @@ from navgold_custom.navgold_custom.amazon_pricing.pricing_validators import (
 	collect_pricing_violations,
 	format_blocked_records,
 )
-from navgold_custom.navgold_custom.utils import bulk_set_value
+from navgold_custom.navgold_custom.utils import assert_amazon_outbound_not_frozen, bulk_set_value
 
 REPRICER_API_BASE = "https://api.repricer.com/v1/repricers"
 
@@ -49,6 +49,7 @@ class RepricerClient:
 		return {"Authorization": f"Basic {encoded}", "Content-Type": "application/json"}
 
 	def post_repricer_data(self, products) -> dict:
+		assert_amazon_outbound_not_frozen()
 		headers = self.get_auth_headers()
 		return make_post_request(url=REPRICER_API_BASE, data=products, headers=headers)
 

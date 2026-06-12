@@ -40,6 +40,8 @@ class NavgoldSettings(Document):
 		default_stock_allocation_warehouse: DF.Link | None
 		default_strategy_template: DF.Link | None
 		enable_pricing_sync: DF.Check
+		freeze_amazon_outbound: DF.Check
+		pause_strategy_refresh: DF.Check
 		fba_inbound_enabled: DF.Check
 		fba_source_address: DF.Link | None
 		high_price_commission_adjustment: DF.Float
@@ -216,6 +218,9 @@ def schedule_submit_active_repricer():
 
 
 def schedule_bulk_refresh_strategies():
+	if frappe.db.get_single_value("Navgold Settings", "pause_strategy_refresh"):
+		return
+
 	frappe.enqueue(
 		job_id="navgold.scheduled_bulk_refresh_strategies",
 		deduplicate=True,

@@ -15,6 +15,8 @@ from frappe.utils import cstr, flt, get_request_session
 from frappe.utils.caching import redis_cache
 from requests.exceptions import HTTPError
 
+from navgold_custom.navgold_custom.utils import assert_amazon_outbound_not_frozen
+
 MAX_RETRIES = 3
 # Amazon Feeds (createFeed/createFeedDocument) restore throttle tokens at ~1 per 2 min, so a 429
 # needs several backoff steps to ride out the window — hence more retries than the default.
@@ -62,7 +64,7 @@ def fetch_access_token(client_id: str, client_secret: str, refresh_token: str) -
 			raise
 		raise SPAPIError(
 			error="AuthenticationError", error_description=f"Failed to authenticate with Amazon: {e!s}"
-		)
+		) from None
 
 
 def is_throttling_error(error) -> bool:
@@ -214,7 +216,8 @@ class SPAPI:
 			raise
 		except HTTPError as e:
 			if e.response is None:
-				raise SPAPIError(error="HTTPError", error_description=cstr(e))
+				# `from None` drops the chained frames whose locals contain auth headers
+				raise SPAPIError(error="HTTPError", error_description=cstr(e)) from None
 
 			response_text = e.response.text or ""
 			try:
@@ -235,12 +238,12 @@ class SPAPI:
 			raise SPAPIError(
 				error=f"HTTP {e.response.status_code}",
 				error_description=description,
-			)
+			) from None
 		except Exception as e:
 			raise SPAPIError(
 				error=type(e).__name__,
 				error_description=cstr(e),
-			)
+			) from None
 
 	def list_to_dict(self, key: str, values: list, data: dict) -> None:
 		if values and isinstance(values, list):
@@ -688,6 +691,7 @@ class Feeds(SPAPI):
 		)
 
 	def create_feed_document(self, content_type: str = "application/json") -> dict:
+		assert_amazon_outbound_not_frozen()
 		"""
 		Create a feed document and get a pre-signed URL for upload.
 
@@ -732,6 +736,7 @@ class Feeds(SPAPI):
 			)
 
 	def create_feed(self, feed_type: str, feed_document_id: str, marketplace_ids: list | None = None) -> dict:
+		assert_amazon_outbound_not_frozen()
 		"""
 		Submit the feed for processing.
 
