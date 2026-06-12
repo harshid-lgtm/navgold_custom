@@ -1,6 +1,12 @@
+import frappeUIPreset from 'frappe-ui/tailwind';
+
 /** @type {import('tailwindcss').Config} */
 export default {
-	content: ['./src/**/*.{html,jsx,tsx,vue,js,ts}'],
+	presets: [frappeUIPreset],
+	content: [
+		'./src/**/*.{html,jsx,tsx,vue,js,ts}',
+		'./node_modules/frappe-ui/src/components/**/*.{vue,js,ts}',
+	],
 	safelist: ['animate-pulse', 'animate-ping'],
 	theme: {
 		extend: {},

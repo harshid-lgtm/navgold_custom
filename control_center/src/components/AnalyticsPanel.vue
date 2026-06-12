@@ -1,52 +1,51 @@
 <template>
   <div class="space-y-6">
     <div class="flex items-center justify-between">
-      <h2 class="text-xl font-bold text-white">Order Analytics</h2>
-      <div class="flex gap-2">
-        <button
-          v-for="period in periods"
-          :key="period.label"
-          @click="select_period(period)"
-          :class="selected_hours === period.hours ? 'bg-blue-600 text-white px-4 py-2 rounded text-sm font-semibold' : 'bg-gray-800 text-gray-400 px-4 py-2 rounded text-sm font-semibold'"
-        >
-          {{ period.label }}
-        </button>
-      </div>
+      <h2 class="text-base font-semibold text-ink-gray-9">Order Analytics</h2>
+      <TabButtons
+        :buttons="period_buttons"
+        v-model="selected_hours"
+        @update:modelValue="on_period_change"
+      />
     </div>
 
     <div v-if="analytics_data" class="grid grid-cols-2 md:grid-cols-4 gap-4">
-      <div class="bg-gray-900 rounded-xl p-4 border border-gray-700">
-        <div class="text-3xl font-black text-white">{{ analytics_data?.cards?.orders_past_hour ?? 0 }}</div>
-        <div class="text-xs text-gray-400 uppercase tracking-wide mt-1">Orders (1h)</div>
+      <div class="bg-surface-white border border-outline-gray-2 rounded-xl p-4">
+        <div class="text-3xl font-bold text-ink-gray-9">{{ analytics_data?.cards?.orders_past_hour ?? 0 }}</div>
+        <div class="text-xs text-ink-gray-4 uppercase tracking-wide mt-1">Orders (1h)</div>
       </div>
-      <div class="bg-gray-900 rounded-xl p-4 border border-gray-700">
-        <div class="text-3xl font-black text-white">{{ format_currency(analytics_data?.cards?.sales_past_hour) }}</div>
-        <div class="text-xs text-gray-400 uppercase tracking-wide mt-1">Sales (1h)</div>
+      <div class="bg-surface-white border border-outline-gray-2 rounded-xl p-4">
+        <div class="text-3xl font-bold text-ink-gray-9">{{ format_currency(analytics_data?.cards?.sales_past_hour) }}</div>
+        <div class="text-xs text-ink-gray-4 uppercase tracking-wide mt-1">Sales (1h)</div>
       </div>
-      <div class="bg-gray-900 rounded-xl p-4 border border-gray-700">
-        <div class="text-3xl font-black text-white">{{ analytics_data?.cards?.orders_period ?? 0 }}</div>
-        <div class="text-xs text-gray-400 uppercase tracking-wide mt-1">Orders (Period)</div>
+      <div class="bg-surface-white border border-outline-gray-2 rounded-xl p-4">
+        <div class="text-3xl font-bold text-ink-gray-9">{{ analytics_data?.cards?.orders_period ?? 0 }}</div>
+        <div class="text-xs text-ink-gray-4 uppercase tracking-wide mt-1">Orders (Period)</div>
       </div>
-      <div class="bg-gray-900 rounded-xl p-4 border border-gray-700">
-        <div class="text-3xl font-black text-white">{{ format_currency(analytics_data?.cards?.sales_period) }}</div>
-        <div class="text-xs text-gray-400 uppercase tracking-wide mt-1">Sales (Period)</div>
+      <div class="bg-surface-white border border-outline-gray-2 rounded-xl p-4">
+        <div class="text-3xl font-bold text-ink-gray-9">{{ format_currency(analytics_data?.cards?.sales_period) }}</div>
+        <div class="text-xs text-ink-gray-4 uppercase tracking-wide mt-1">Sales (Period)</div>
       </div>
     </div>
     <div v-else class="grid grid-cols-2 md:grid-cols-4 gap-4">
-      <div v-for="i in 4" :key="i" class="bg-gray-900 rounded-xl p-4 border border-gray-700 h-24 animate-pulse"></div>
+      <div
+        v-for="i in 4"
+        :key="i"
+        class="bg-surface-gray-1 border border-outline-gray-2 rounded-xl p-4 h-24 animate-pulse"
+      ></div>
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-      <div class="bg-gray-900 rounded-xl p-4 border border-gray-700">
-        <h3 class="text-sm font-semibold text-gray-300 mb-3">Order Types</h3>
+      <div class="bg-surface-white border border-outline-gray-2 rounded-xl p-4">
+        <h3 class="text-sm font-semibold text-ink-gray-6 mb-3">Order Types</h3>
         <div ref="pie_chart_ref" class="h-48"></div>
       </div>
-      <div class="bg-gray-900 rounded-xl p-4 border border-gray-700">
-        <h3 class="text-sm font-semibold text-gray-300 mb-3">Top Categories</h3>
+      <div class="bg-surface-white border border-outline-gray-2 rounded-xl p-4">
+        <h3 class="text-sm font-semibold text-ink-gray-6 mb-3">Top Categories</h3>
         <div ref="bar_chart_ref" class="h-48"></div>
       </div>
-      <div class="bg-gray-900 rounded-xl p-4 border border-gray-700">
-        <h3 class="text-sm font-semibold text-gray-300 mb-3">Hourly Trend</h3>
+      <div class="bg-surface-white border border-outline-gray-2 rounded-xl p-4">
+        <h3 class="text-sm font-semibold text-ink-gray-6 mb-3">Hourly Trend</h3>
         <div ref="line_chart_ref" class="h-48"></div>
       </div>
     </div>
@@ -55,10 +54,11 @@
 
 <script setup>
 import { ref, inject, onMounted, onUnmounted, watch } from 'vue'
+import { TabButtons } from 'frappe-ui'
 import { Chart } from 'frappe-charts'
 
 const props = defineProps({
-  analytics: { type: Object, default: null }
+  analytics: { type: Object, default: null },
 })
 
 const call = inject('$call')
@@ -74,10 +74,10 @@ let pie_chart_instance = null
 let bar_chart_instance = null
 let line_chart_instance = null
 
-const periods = [
-  { label: '1h', hours: 1 },
-  { label: '24h', hours: 24 },
-  { label: '1w', hours: 168 },
+const period_buttons = [
+  { label: '1h', value: 1 },
+  { label: '24h', value: 24 },
+  { label: '1w', value: 168 },
 ]
 
 function format_currency(value) {
@@ -85,9 +85,8 @@ function format_currency(value) {
   return '£' + Number(value).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
-async function select_period(period) {
-  selected_hours.value = period.hours
-  await load_analytics(period.hours)
+async function on_period_change(hours) {
+  await load_analytics(hours)
 }
 
 async function load_analytics(hours) {
@@ -109,11 +108,11 @@ function render_charts() {
     pie_chart_instance = new Chart(pie_chart_ref.value, {
       type: 'pie',
       data: {
-        labels: pie_data.map(d => d.label),
-        datasets: [{ values: pie_data.map(d => d.value) }]
+        labels: pie_data.map((d) => d.label),
+        datasets: [{ values: pie_data.map((d) => d.value) }],
       },
       colors: ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6'],
-      height: 180
+      height: 180,
     })
   }
 
@@ -124,11 +123,11 @@ function render_charts() {
     bar_chart_instance = new Chart(bar_chart_ref.value, {
       type: 'bar',
       data: {
-        labels: top_categories.map(d => d.label),
-        datasets: [{ name: 'Qty', values: top_categories.map(d => d.qty) }]
+        labels: top_categories.map((d) => d.label),
+        datasets: [{ name: 'Qty', values: top_categories.map((d) => d.qty) }],
       },
       colors: ['#3b82f6'],
-      height: 180
+      height: 180,
     })
   }
 
@@ -139,14 +138,14 @@ function render_charts() {
     line_chart_instance = new Chart(line_chart_ref.value, {
       type: 'line',
       data: {
-        labels: hourly_series.map(d => d.ts),
+        labels: hourly_series.map((d) => d.ts),
         datasets: [
-          { name: 'Orders', values: hourly_series.map(d => d.orders) },
-          { name: 'Sales', values: hourly_series.map(d => d.sales) }
-        ]
+          { name: 'Orders', values: hourly_series.map((d) => d.orders) },
+          { name: 'Sales', values: hourly_series.map((d) => d.sales) },
+        ],
       },
       colors: ['#10b981', '#f59e0b'],
-      height: 180
+      height: 180,
     })
   }
 }

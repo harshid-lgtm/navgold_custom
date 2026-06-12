@@ -1,7 +1,9 @@
+import 'frappe-ui/style.css';
 import { createApp, reactive } from 'vue';
 import App from './App.vue';
 import './index.css';
 
+import { FrappeUI } from 'frappe-ui';
 import Auth from '../../../doppio/libs/controllers/auth';
 import call from '../../../doppio/libs/controllers/call';
 import socket from '../../../doppio/libs/controllers/socket';
@@ -14,18 +16,16 @@ const auth = reactive(new Auth());
 // Plugins
 app.use(router);
 app.use(resourceManager);
+app.use(FrappeUI, { call: true, socketio: false, resources: false });
 
-// Global Properties,
-// components can inject this
+// Global provides, components can inject these
 app.provide('$auth', auth);
 app.provide('$call', call);
 app.provide('$socket', socket);
 
-// Configure route gaurds
+// Configure route guards
 router.beforeEach(async (to, from, next) => {
 	if (to.matched.some((record) => !record.meta.isLoginPage)) {
-		// this route requires auth, check if logged in
-		// if not, redirect to login page.
 		if (!auth.isLoggedIn) {
 			next({ name: 'Login', query: { route: to.path } });
 		} else {
