@@ -55,7 +55,7 @@
 
 <script setup>
 import { ref, inject, onMounted, onUnmounted, watch } from 'vue'
-import Chart from 'frappe-charts'
+import { Chart } from 'frappe-charts'
 
 const props = defineProps({
   analytics: { type: Object, default: null }
