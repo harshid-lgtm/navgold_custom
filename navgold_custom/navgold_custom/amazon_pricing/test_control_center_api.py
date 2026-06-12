@@ -6,6 +6,7 @@ from unittest.mock import patch
 import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.tests.utils import change_settings
+from frappe.utils.data import cint
 
 from navgold_custom.navgold_custom.amazon_pricing.control_center_api import (
 	capture_price_snapshot,
@@ -16,7 +17,6 @@ from navgold_custom.navgold_custom.amazon_pricing.control_center_api import (
 )
 
 TEST_ITEM_CODE = "TEST-CC-API-ITEM"
-TEST_ASIN = "B0TEST00001"
 
 
 def make_test_item():
@@ -47,7 +47,7 @@ def make_test_proxy_sku():
 	proxy = frappe.new_doc("Proxy SKU")
 	proxy.item = item_code
 	proxy.uom = "Nos"
-	proxy.asin = TEST_ASIN
+	# asin left unset: it is a Link field and fixtures must not depend on ASIN masters
 	proxy.is_active = 1
 	proxy.current_selling_price = 9.99
 	proxy.insert()
@@ -167,20 +167,19 @@ class TestPanicButton(IntegrationTestCase):
 		):
 			result = panic_button(restore=0)
 
-		self.assertEqual(result["frozen"], 1)
-		self.assertIn("enable_pricing_sync", result["stopped"])
-		self.assertIn("repricer_enabled", result["stopped"])
-		self.assertIn("pause_strategy_refresh", result["stopped"])
-		self.assertEqual(result["restored_skus"], 0)
+			self.assertEqual(result["frozen"], 1)
+			self.assertIn("enable_pricing_sync", result["stopped"])
+			self.assertIn("repricer_enabled", result["stopped"])
+			self.assertIn("pause_strategy_refresh", result["stopped"])
+			self.assertEqual(result["restored_skus"], 0)
 
-		# Confirm the DB writes landed
-		settings = frappe.get_single("Navgold Settings")
-		self.assertEqual(settings.freeze_amazon_outbound, 1)
-		self.assertEqual(settings.enable_pricing_sync, 0)
-		self.assertEqual(settings.repricer_enabled, 0)
-
-		# Cleanup — unfreeze so other tests don't break
-		frappe.db.set_single_value("Navgold Settings", "freeze_amazon_outbound", 0)
+			# Assertions stay INSIDE change_settings: it restores all flags on exit,
+			# which would wipe panic's writes before we could read them.
+			self.assertEqual(
+				cint(frappe.db.get_single_value("Navgold Settings", "freeze_amazon_outbound")), 1
+			)
+			self.assertEqual(cint(frappe.db.get_single_value("Navgold Settings", "enable_pricing_sync")), 0)
+			self.assertEqual(cint(frappe.db.get_single_value("Navgold Settings", "repricer_enabled")), 0)
 
 	def test_panic_with_restore_and_no_snapshot_still_freezes(self):
 		# When restore=1 but there is no Captured snapshot, the freeze must still land
@@ -224,10 +223,11 @@ class TestPanicButton(IntegrationTestCase):
 			):
 				result = panic_button(restore=1)
 
-		# Even with restore crashing, freeze must have landed
-		self.assertEqual(result["frozen"], 1)
-		freeze_value = frappe.db.get_single_value("Navgold Settings", "freeze_amazon_outbound")
-		self.assertEqual(freeze_value, 1)
+			# Even with restore crashing, freeze must have landed (asserted inside
+			# change_settings — it restores flags on exit)
+			self.assertEqual(result["frozen"], 1)
+			freeze_value = cint(frappe.db.get_single_value("Navgold Settings", "freeze_amazon_outbound"))
+			self.assertEqual(freeze_value, 1)
 
 		# Cleanup
 		frappe.db.set_single_value("Navgold Settings", "freeze_amazon_outbound", 0)
