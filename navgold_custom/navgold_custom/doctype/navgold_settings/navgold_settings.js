@@ -56,6 +56,52 @@ frappe.ui.form.on('Navgold Settings', {
 			);
 
 			frm.add_custom_button(
+				__('Dry Run (No Push)'),
+				() => {
+					frappe.prompt(
+						{
+							fieldname: 'refresh_first',
+							fieldtype: 'Check',
+							label: __('Refresh strategies first'),
+							default: 0,
+							description: __(
+								'Recalculates and writes prices to ERP before rendering. Leave off to render the prices exactly as they stand now.',
+							),
+						},
+						async (values) => {
+							const response = await frappe.call({
+								method:
+									'navgold_custom.navgold_custom.amazon_pricing.pricing_dry_run.dry_run_pricing',
+								args: { refresh_first: values.refresh_first },
+								freeze: true,
+								freeze_message: __('Rendering feed (no push)...'),
+							});
+							const result = response.message;
+							frappe.msgprint({
+								title: __('Dry Run Complete — Nothing Pushed'),
+								indicator: result.valid ? 'green' : 'red',
+								message: __(
+									'Rendered {0} message(s). {1} mover(s), {2} new, {3} dropped. {4} deviation-blocked, {5} validation-blocked.<br><br>Open snapshot <a href="/app/amazon-pricing-snapshot/{6}">{6}</a> for the variance and rendered feed.',
+									[
+										result.message_count,
+										result.variance.movers,
+										result.variance.new,
+										result.variance.dropped,
+										result.blocked_price_deviation,
+										result.blocked_validation,
+										result.snapshot,
+									],
+								),
+							});
+						},
+						__('Dry Run Pricing'),
+						__('Run'),
+					);
+				},
+				__('Amazon Pricing'),
+			);
+
+			frm.add_custom_button(
 				__('Refresh All Costs'),
 				async () => {
 					const confirmed = await navgold.confirm_dialog(

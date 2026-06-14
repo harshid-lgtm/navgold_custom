@@ -12,11 +12,13 @@
 		"column_break_head",
 		"item_count",
 		"status",
+		"submission_log",
 		"section_break_notes",
 		"notes",
 		"section_break_data",
 		"preview_html",
-		"snapshot_data"
+		"snapshot_data",
+		"variance_data"
 	],
 	"fields": [
 		{
@@ -39,7 +41,7 @@
 			"fieldtype": "Select",
 			"in_list_view": 1,
 			"label": "Trigger",
-			"options": "Manual\nScheduled",
+			"options": "Manual\nScheduled\nDry Run",
 			"read_only": 1
 		},
 		{
@@ -59,7 +61,14 @@
 			"fieldtype": "Select",
 			"in_list_view": 1,
 			"label": "Status",
-			"options": "Captured\nReverted",
+			"options": "Captured\nReverted\nDry Run",
+			"read_only": 1
+		},
+		{
+			"fieldname": "submission_log",
+			"fieldtype": "Link",
+			"label": "Rendered Feed (Dry Run)",
+			"options": "Amazon Pricing Submission Log",
 			"read_only": 1
 		},
 		{
@@ -86,6 +95,13 @@
 			"fieldtype": "Long Text",
 			"hidden": 1,
 			"label": "Snapshot Data (JSON)",
+			"read_only": 1
+		},
+		{
+			"fieldname": "variance_data",
+			"fieldtype": "Long Text",
+			"hidden": 1,
+			"label": "Variance Data (JSON)",
 			"read_only": 1
 		}
 	],

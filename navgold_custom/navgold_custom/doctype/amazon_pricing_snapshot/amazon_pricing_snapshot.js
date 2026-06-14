@@ -63,9 +63,93 @@ frappe.ui.form.on('Amazon Pricing Snapshot', {
 			__('Publish'),
 		);
 
+		if (frm.doc.submission_log) {
+			frm.add_custom_button(__('Open Rendered Feed'), () =>
+				frappe.set_route(
+					'Form',
+					'Amazon Pricing Submission Log',
+					frm.doc.submission_log,
+				),
+			);
+		}
+
 		render_preview(frm);
+		render_variance(frm);
 	},
 });
+
+function render_variance(frm) {
+	if (!frm.doc.variance_data) return;
+	let variance = {};
+	try {
+		variance = JSON.parse(frm.doc.variance_data);
+	} catch (e) {
+		return;
+	}
+	const summary = variance.summary || {};
+	const flagged = (variance.rows || []).filter((row) => row.status !== 'OK');
+
+	const body = flagged
+		.map(
+			(row) => `<tr>
+				<td>${frappe.utils.escape_html(row.proxy_sku || '')}</td>
+				<td class="text-right">${
+					row.prev_min == null ? '—' : format_currency(row.prev_min, 'GBP')
+				}</td>
+				<td class="text-right">${format_currency(row.min_price || 0, 'GBP')}</td>
+				<td class="text-right" style="color:${delta_colour(
+					row.min_delta_pct,
+				)}">${format_delta(row.min_delta_pct)}</td>
+				<td class="text-right">${format_currency(row.max_price || 0, 'GBP')}</td>
+				<td class="text-right" style="color:${delta_colour(
+					row.max_delta_pct,
+				)}">${format_delta(row.max_delta_pct)}</td>
+				<td>${frappe.utils.escape_html(row.status || '')}</td>
+			</tr>`,
+		)
+		.join('');
+
+	const wrapper = frm.get_field('preview_html').$wrapper;
+	wrapper.prepend(`
+		<div style="margin-bottom:14px">
+			<div class="text-muted small" style="margin-bottom:6px">
+				Variance vs ${
+					summary.compared_against
+						? frappe.utils.escape_html(summary.compared_against)
+						: 'no prior snapshot'
+				}
+				— ${cint(summary.movers)} mover(s) over ${flt(summary.threshold_pct)}%,
+				${cint(summary.new)} new, ${cint(summary.dropped)} dropped of ${cint(
+					summary.total,
+				)} SKUs
+			</div>
+			<div style="max-height:300px;overflow:auto">
+				<table class="table table-bordered" style="font-size:12.5px">
+					<thead><tr>
+						<th>SKU</th><th class="text-right">Prev Min</th><th class="text-right">Min</th>
+						<th class="text-right">Δ%</th><th class="text-right">Max</th><th class="text-right">Δ%</th><th>Status</th>
+					</tr></thead>
+					<tbody>${
+						body ||
+						'<tr><td colspan="7" class="text-center text-muted">No flagged movers</td></tr>'
+					}</tbody>
+				</table>
+			</div>
+		</div>
+	`);
+}
+
+function delta_colour(pct) {
+	if (flt(pct) > 0) return '#b94a48';
+	if (flt(pct) < 0) return '#3c763d';
+	return 'inherit';
+}
+
+function format_delta(pct) {
+	const value = flt(pct);
+	if (!value) return '0%';
+	return `${value > 0 ? '+' : ''}${value}%`;
+}
 
 function get_selected_pricing(frm) {
 	const wrapper = frm.get_field('preview_html').$wrapper;
