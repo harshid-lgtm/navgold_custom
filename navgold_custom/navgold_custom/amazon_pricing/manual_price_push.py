@@ -176,50 +176,9 @@ def validate_updates(updates: list) -> None:
 		frappe.throw("Manual price push blocked:\n" + "\n".join(problems[:50]))
 
 
-def run(
-	csv_path: str | None = None,
-	xlsx_path: str | None = None,
-	dry_run: bool = True,
-	live: bool = False,
-	preview_path: str | None = None,
-) -> dict:
-	# dry_run is the default: this tool was used during the June 10 incident and must
-	# never push without an explicit live=True after a reviewed dry run.
-	if live:
-		dry_run = False
-
-	updates = load_updates(csv_path, xlsx_path)
-	if not updates:
-		frappe.throw("No price updates to submit")
-
-	validate_updates(updates)
-
-	settings = frappe.get_single("Amazon SP API Settings")
+def submit_feed(updates: list, settings) -> dict:
 	skus = [update["sku"] for update in updates]
 	json_content = build_feed(updates, settings.merchant_id, settings.get_marketplace_id())
-	feed_text = json_content.decode() if isinstance(json_content, bytes) else json_content
-
-	print(f"Prepared feed for {len(updates)} SKU(s).")
-	print("First 3 rows:")
-	for update in updates[:3]:
-		print(f"  {update['sku']}: min={update['min']} max={update['max']} our_price={update['our_price']}")
-	print("Last row:")
-	last = updates[-1]
-	print(f"  {last['sku']}: min={last['min']} max={last['max']} our_price={last['our_price']}")
-
-	if not preview_path:
-		preview_path = f"/tmp/manual_price_feed_{len(updates)}_skus.json"
-	with open(preview_path, "w") as preview_file:
-		preview_file.write(feed_text)
-	print(f"\nFull feed written to: {preview_path}")
-
-	if dry_run:
-		print("Dry run — nothing submitted.")
-		return {
-			"dry_run": True,
-			"sku_count": len(updates),
-			"preview_path": preview_path,
-		}
 
 	log = frappe.new_doc("Amazon Pricing Submission Log")
 	log.submission_type = "Amazon"
@@ -247,6 +206,88 @@ def run(
 
 	frappe.db.commit()
 
-	print(f"\nSubmitted feed: feed_id={feed_id}, log={log.name}")
-	print(f"Check status with: check_feed_status('{log.name}')")
 	return {"feed_id": feed_id, "log_name": log.name, "sku_count": len(updates), "skus": skus}
+
+
+@frappe.whitelist()
+def push_manual_prices(updates: str | list, live: bool = False) -> dict:
+	# Desk entry point for the manual hotfix path. Same guards as the CLI tool; defaults to a
+	# dry run so a reviewed preview always precedes a real push, per the June-10 incident rules.
+	frappe.only_for("System Manager")
+
+	updates = frappe.parse_json(updates) if isinstance(updates, str) else updates
+	normalised = [
+		{
+			"sku": cstr(update.get("sku")).strip(),
+			"min": flt(update.get("min")),
+			"max": flt(update.get("max")),
+			"our_price": flt(update.get("our_price")),
+		}
+		for update in updates
+		if cstr(update.get("sku")).strip()
+	]
+	if not normalised:
+		frappe.throw("No SKUs supplied for manual price push.")
+
+	validate_updates(normalised)
+
+	if not live:
+		return {
+			"dry_run": True,
+			"sku_count": len(normalised),
+			"updates": normalised,
+		}
+
+	settings = frappe.get_single("Amazon SP API Settings")
+	return submit_feed(normalised, settings)
+
+
+def run(
+	csv_path: str | None = None,
+	xlsx_path: str | None = None,
+	dry_run: bool = True,
+	live: bool = False,
+	preview_path: str | None = None,
+) -> dict:
+	# dry_run is the default: this tool was used during the June 10 incident and must
+	# never push without an explicit live=True after a reviewed dry run.
+	if live:
+		dry_run = False
+
+	updates = load_updates(csv_path, xlsx_path)
+	if not updates:
+		frappe.throw("No price updates to submit")
+
+	validate_updates(updates)
+
+	settings = frappe.get_single("Amazon SP API Settings")
+	json_content = build_feed(updates, settings.merchant_id, settings.get_marketplace_id())
+	feed_text = json_content.decode() if isinstance(json_content, bytes) else json_content
+
+	print(f"Prepared feed for {len(updates)} SKU(s).")
+	print("First 3 rows:")
+	for update in updates[:3]:
+		print(f"  {update['sku']}: min={update['min']} max={update['max']} our_price={update['our_price']}")
+	print("Last row:")
+	last = updates[-1]
+	print(f"  {last['sku']}: min={last['min']} max={last['max']} our_price={last['our_price']}")
+
+	if not preview_path:
+		preview_path = f"/tmp/manual_price_feed_{len(updates)}_skus.json"
+	with open(preview_path, "w") as preview_file:
+		preview_file.write(feed_text)
+	print(f"\nFull feed written to: {preview_path}")
+
+	if dry_run:
+		print("Dry run — nothing submitted.")
+		return {
+			"dry_run": True,
+			"sku_count": len(updates),
+			"preview_path": preview_path,
+		}
+
+	result = submit_feed(updates, settings)
+
+	print(f"\nSubmitted feed: feed_id={result['feed_id']}, log={result['log_name']}")
+	print(f"Check status with: check_feed_status('{result['log_name']}')")
+	return result
