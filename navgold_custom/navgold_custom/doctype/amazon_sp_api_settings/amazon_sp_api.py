@@ -575,18 +575,24 @@ class Reports(SPAPI):
 	POLL_INTERVAL = 20
 	MAX_POLL_ATTEMPTS = 30
 
-	def create_report(self, report_type, marketplace_ids=None):
+	def create_report(self, report_type, marketplace_ids=None, data_start_time=None, data_end_time=None):
 		if not marketplace_ids:
 			marketplace_ids = [self.marketplace_id]
+
+		body = {
+			"reportType": report_type,
+			"marketplaceIds": marketplace_ids,
+		}
+		if data_start_time:
+			body["dataStartTime"] = data_start_time
+		if data_end_time:
+			body["dataEndTime"] = data_end_time
 
 		url = self.endpoint + self.BASE_URI + "reports"
 		result = frappe_make_request(
 			method="POST",
 			url=url,
-			json={
-				"reportType": report_type,
-				"marketplaceIds": marketplace_ids,
-			},
+			json=body,
 			headers={**self.get_headers(), "Content-Type": "application/json"},
 		)
 		return result.get("reportId")
@@ -607,9 +613,11 @@ class Reports(SPAPI):
 		except UnicodeDecodeError:
 			return content.decode("cp1252")
 
-	def request_and_download_report(self, report_type):
+	def request_and_download_report(self, report_type, data_start_time=None, data_end_time=None):
 		report_id = retry_with_backoff(
-			lambda: self.create_report(report_type),
+			lambda: self.create_report(
+				report_type, data_start_time=data_start_time, data_end_time=data_end_time
+			),
 			error_title=f"Reports API: failed to create {report_type}",
 		)
 

@@ -349,6 +349,7 @@ scheduler_events = {
 		"navgold_custom.navgold_custom.doctype.supplier_item_price_and_stock.supplier_item_price_and_stock.run_update_supplier_rank",
 		"navgold_custom.navgold_custom.doctype.amazon_product_strategy.amazon_product_strategy.refresh_all_strategy_costs",
 		"navgold_custom.navgold_custom.amazon_pricing.fba_fee_fetcher.bulk_fetch_fba_fees",
+		"navgold_custom.navgold_custom.amazon_pricing.daily_order_stats.sync_daily_order_stats",
 	],
 }
 
