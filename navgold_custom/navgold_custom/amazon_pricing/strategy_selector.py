@@ -256,4 +256,8 @@ def bulk_refresh_strategies():
 			update_modified=False,
 		)
 
+	# Stamp completion so the scheduled pricing submit can verify a refresh ran in this window
+	# before building a feed (see schedule_submit_active_pricing stagger guard).
+	frappe.db.set_single_value("Navgold Settings", "last_strategy_refresh_at", frappe.utils.now_datetime())
+
 	return {"total": len(pricing_records), "updated": len(updates)}

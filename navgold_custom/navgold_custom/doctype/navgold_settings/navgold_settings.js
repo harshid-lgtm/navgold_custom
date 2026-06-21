@@ -3,6 +3,39 @@
 
 frappe.ui.form.on('Navgold Settings', {
 	refresh(frm) {
+		if (frm.doc.pricing_sync_mode === 'Live') {
+			frm.add_custom_button(
+				__('Revert to Dry Run'),
+				async () => {
+					await frappe.call({
+						doc: frm.doc,
+						method: 'revert_to_dry_run',
+					});
+					frm.reload_doc();
+				},
+				__('Go Live'),
+			);
+		} else {
+			frm.add_custom_button(
+				__('Approve & Go Live'),
+				async () => {
+					const confirmed = await navgold.confirm_dialog(
+						__(
+							'This switches Pricing Sync to LIVE. Real prices and feeds will be pushed to Amazon and Repricer. Continue?',
+						),
+					);
+					if (!confirmed) return;
+
+					await frappe.call({
+						doc: frm.doc,
+						method: 'approve_and_go_live',
+					});
+					frm.reload_doc();
+				},
+				__('Go Live'),
+			);
+		}
+
 		if (frm.doc.amazon_pricing_enabled) {
 			if (frm.doc.auto_sync_cogs && frm.doc.cogs_supplier) {
 				frm.add_custom_button(
