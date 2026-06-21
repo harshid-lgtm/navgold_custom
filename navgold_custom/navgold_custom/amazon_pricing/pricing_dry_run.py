@@ -9,7 +9,7 @@ to Amazon. Born from the go-live incident where prices went out with no rendered
 
 import frappe
 from frappe import _
-from frappe.utils.data import cint, flt
+from frappe.utils.data import cint, cstr, flt
 
 from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import (
 	build_pricing_feed,
@@ -124,6 +124,18 @@ def dry_run_pricing(refresh_first: bool = False) -> dict:
 
 	settings = frappe.get_single("Amazon SP API Settings")
 
+	# A dry run is typically run pre-go-live when SP-API config may be half-filled. The feed
+	# builder needs both a seller id and a marketplace id, so fail loud here (mirrors the
+	# order-report client's "no active settings" guard) rather than rendering a feed with
+	# missing header fields that would silently differ from a real one.
+	marketplace_id = settings.get_marketplace_id()
+	if not settings.merchant_id or not marketplace_id:
+		frappe.throw(
+			_(
+				"Amazon SP API Settings is missing Merchant ID or Marketplace — set both before running a dry run."
+			)
+		)
+
 	pricing_rows = frappe.get_all(
 		"Amazon Product Pricing",
 		filters={"is_active": 1},
@@ -137,7 +149,7 @@ def dry_run_pricing(refresh_first: bool = False) -> dict:
 	if not pricing_names:
 		frappe.throw(_("No eligible pricing records to dry run."))
 
-	feed_result = build_pricing_feed(pricing_names, settings.merchant_id, settings.get_marketplace_id())
+	feed_result = build_pricing_feed(pricing_names, settings.merchant_id, marketplace_id)
 	json_content = feed_result["feed_content"]
 	blocked_price_deviation = feed_result.get("blocked_price_deviation") or []
 	blocked_validation = feed_result.get("blocked_validation") or []
@@ -161,7 +173,8 @@ def dry_run_pricing(refresh_first: bool = False) -> dict:
 	log = frappe.new_doc("Amazon Pricing Submission Log")
 	log.submission_type = "Amazon"
 	log.status = "Dry Run"
-	log.pricing_records = "\n".join(pricing_names)
+	# pricing record names can be int (autoincrement naming), so coerce before joining.
+	log.pricing_records = "\n".join(cstr(name) for name in pricing_names)
 	log.feed_content = json_content
 	log.insert(ignore_permissions=True)
 

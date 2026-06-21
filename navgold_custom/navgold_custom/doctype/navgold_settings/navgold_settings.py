@@ -240,6 +240,18 @@ def schedule_submit_active_pricing():
 
 	frappe.db.set_single_value("Navgold Settings", "last_pricing_submit_at", frappe.utils.now_datetime())
 
+	# In Dry Run mode the scheduled sync must still DO something useful: render the exact feed
+	# a live sync would push and persist it as a never-submitted preview + variance, instead of
+	# letting it sail into the approval gate only to be blocked. Live mode submits for real.
+	if settings.pricing_sync_mode == "Dry Run":
+		frappe.enqueue(
+			job_id="navgold.amazon_scheduled_pricing_dry_run",
+			deduplicate=True,
+			method="navgold_custom.navgold_custom.amazon_pricing.pricing_dry_run.dry_run_pricing",
+			timeout=6000,
+		)
+		return
+
 	frappe.enqueue(
 		job_id="navgold.amazon_scheduled_pricing_sync",
 		deduplicate=True,
@@ -254,6 +266,13 @@ def schedule_submit_active_repricer():
 		return
 
 	if not settings.repricer_enabled:
+		return
+
+	# In Dry Run mode the Amazon pricing schedule already renders the shared preview + variance,
+	# so the Repricer push has nothing extra to preview — skip it rather than enqueue a job that
+	# only exists to be blocked at the approval gate.
+	if settings.pricing_sync_mode == "Dry Run":
+		frappe.logger().info("Skipping scheduled Repricer submit: Dry Run mode (preview already rendered).")
 		return
 
 	if should_defer_scheduled_submit(settings, "last_repricer_submit_at"):

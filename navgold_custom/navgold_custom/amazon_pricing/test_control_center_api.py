@@ -13,8 +13,10 @@ from navgold_custom.navgold_custom.amazon_pricing.control_center_api import (
 	get_control_center_status,
 	get_order_analytics,
 	panic_button,
+	submit_restore_feed_from_snapshot,
 	toggle_flag,
 )
+from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import Feeds
 
 TEST_ITEM_CODE = "TEST-CC-API-ITEM"
 
@@ -69,20 +71,25 @@ def make_test_pricing(proxy_sku_name):
 
 def make_test_snapshot(status="Captured", with_items=True):
 	proxy_sku_name = make_test_proxy_sku()
-	snapshot = frappe.new_doc("Amazon Price Snapshot")
-	snapshot.taken_at = frappe.utils.now_datetime()
+	pricing_name = make_test_pricing(proxy_sku_name)
+	snapshot = frappe.new_doc("Amazon Pricing Snapshot")
+	snapshot.trigger_type = "Manual"
 	snapshot.status = status
-	snapshot.sku_count = 1 if with_items else 0
 	if with_items:
-		snapshot.append(
-			"items",
-			{
-				"proxy_sku": proxy_sku_name,
-				"our_price": 9.99,
-				"min_price": 8.00,
-				"max_price": 12.00,
-			},
+		snapshot.snapshot_data = frappe.as_json(
+			[
+				{
+					"pricing": pricing_name,
+					"proxy_sku": proxy_sku_name,
+					"active_strategy": None,
+					"min_price": 8.00,
+					"max_price": 12.00,
+					"fixed_price": 0,
+					"fixed_price_value": 0.0,
+				}
+			]
 		)
+		snapshot.item_count = 1
 	snapshot.insert()
 	return snapshot.name
 
@@ -231,11 +238,55 @@ class TestPanicButton(IntegrationTestCase):
 
 		# Cleanup
 		frappe.db.set_single_value("Navgold Settings", "freeze_amazon_outbound", 0)
-		frappe.delete_doc("Amazon Price Snapshot", snapshot_name, force=True)
+		frappe.delete_doc("Amazon Pricing Snapshot", snapshot_name, force=True)
+
+	def test_restore_in_dry_run_never_reaches_amazon_transport(self):
+		"""Dry Run must block the restore feed at the chokepoint gate before any HTTP call.
+
+		Uses the REAL submit_restore_feed_from_snapshot so revert -> publish("Amazon") ->
+		bulk_submit_pricing -> Feeds.create_feed_document runs the real assert_pricing_push_approved
+		gate. Only the lowest HTTP seam (Feeds.post_feed_json) is patched, so if any push slipped
+		past the gate the assertion would catch a would-be Amazon call. freeze_amazon_outbound is 0
+		so the ONLY thing standing between the restore and Amazon is the Dry Run gate.
+		"""
+		with change_settings(
+			"Navgold Settings",
+			{
+				"pricing_sync_mode": "Dry Run",
+				"freeze_amazon_outbound": 0,
+				"enable_pricing_sync": 1,
+				# Restored-site data may have a "Publish Selected Prices Only" list that excludes
+				# the test SKU and would reject the publish before the gate; neutralise it so the
+				# Dry Run gate is the thing actually under test.
+				"pricing_publishing_mode": "Publish All Prices",
+			},
+		):
+			snapshot_name = make_test_snapshot(status="Captured")
+
+			# Patch the HTTP transport seam only — the gate inside create_feed_document is real.
+			with patch.object(Feeds, "post_feed_json") as mock_post:
+				log_name, restored_skus = submit_restore_feed_from_snapshot(snapshot_name)
+
+				# The Dry Run gate must have blocked the push before any Amazon HTTP call.
+				mock_post.assert_not_called()
+
+			# ERP-side revert still happened: the snapshot's pricing record was written back.
+			self.assertGreaterEqual(restored_skus, 1)
+			self.assertEqual(
+				frappe.db.get_value("Amazon Pricing Snapshot", snapshot_name, "status"), "Reverted"
+			)
+			# The submission log records the deliberate Dry Run skip, not an error.
+			if log_name:
+				self.assertEqual(
+					frappe.db.get_value("Amazon Pricing Submission Log", log_name, "status"), "Skipped"
+				)
+
+		# Cleanup
+		frappe.delete_doc("Amazon Pricing Snapshot", snapshot_name, force=True)
 
 
 class TestCaptureSnapshot(IntegrationTestCase):
-	def test_capture_creates_capturing_record(self):
+	def test_capture_creates_pricing_snapshot(self):
 		proxy_sku_name = make_test_proxy_sku()
 		make_test_pricing(proxy_sku_name)
 
@@ -243,15 +294,17 @@ class TestCaptureSnapshot(IntegrationTestCase):
 		self.assertIn("snapshot", result)
 
 		snapshot_name = result["snapshot"]
-		self.assertTrue(frappe.db.exists("Amazon Price Snapshot", snapshot_name))
+		self.assertTrue(frappe.db.exists("Amazon Pricing Snapshot", snapshot_name))
 
-		snapshot = frappe.get_doc("Amazon Price Snapshot", snapshot_name)
-		# The background job hasn't run in tests — status should be Capturing
-		self.assertEqual(snapshot.status, "Capturing")
-		self.assertIsNotNone(snapshot.taken_at)
+		# Capture is synchronous now (reuses the JSON doctype's capture_snapshot helper),
+		# so the snapshot lands with its captured price set, not a "Capturing" placeholder.
+		snapshot = frappe.get_doc("Amazon Pricing Snapshot", snapshot_name)
+		self.assertEqual(snapshot.trigger_type, "Manual")
+		self.assertIsNotNone(snapshot.snapshot_datetime)
+		self.assertGreaterEqual(snapshot.item_count, 1)
 
 		# Cleanup
-		frappe.delete_doc("Amazon Price Snapshot", snapshot_name, force=True)
+		frappe.delete_doc("Amazon Pricing Snapshot", snapshot_name, force=True)
 
 
 class TestOrderAnalytics(IntegrationTestCase):

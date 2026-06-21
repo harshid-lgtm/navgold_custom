@@ -127,7 +127,10 @@ class AmazonPricingSnapshot(Document):
 				_("No SKUs in this snapshot are in the current 'Publish Selected Prices Only' list.")
 			)
 
-		pricing_names = [row["pricing"] for row in rows]
+		# Both publishers are @frappe.whitelist() with a `pricing_names: str` annotation, so the
+		# framework's type validation rejects a raw list even on direct Python calls. Serialize to
+		# JSON (their bodies parse_json it straight back) to match that documented contract.
+		pricing_names = frappe.as_json([row["pricing"] for row in rows])
 
 		if channel == "Repricer":
 			from navgold_custom.navgold_custom.amazon_pricing.repricer_client import bulk_sync_to_repricer

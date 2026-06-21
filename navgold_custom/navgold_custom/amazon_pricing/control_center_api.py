@@ -250,75 +250,84 @@ def get_order_analytics_data(hours: int) -> dict:
 	}
 
 
-# ---------------------------------------------------------------------------
-# Background job for snapshot capture
-# ---------------------------------------------------------------------------
+@redis_cache(ttl=30)
+def get_poll_blockers() -> dict:
+	"""Count the four poll blockers in one cached helper.
 
+	get_control_center_status is polled every 30 s by any logged-in dashboard, so these
+	otherwise-uncached Count(...) queries (against Submission Log / Error Log / Sales Order)
+	would run on every poll for every viewer. Cached for the poll interval. Freeze/approval
+	flags are read live in the caller and are NOT cached here.
+	"""
+	submission_log = DocType("Amazon Pricing Submission Log")
+	stuck_cutoff = add_to_date(now_datetime(), minutes=-60)
+	stuck_feeds = (
+		frappe.qb.from_(submission_log)
+		.select(Count(submission_log.name))
+		.where((submission_log.status == "Submitted") & (submission_log.submitted_at < stuck_cutoff))
+	).run()[0][0] or 0
 
-def execute_capture_snapshot(snapshot_name: str):
-	"""Background job: populate a Capturing snapshot with current prices from all active pricings."""
-	snapshot = frappe.get_doc("Amazon Price Snapshot", snapshot_name)
-	try:
-		pricing_rows = frappe.get_all(
-			"Amazon Product Pricing",
-			filters={"is_active": 1},
-			fields=["name", "proxy_sku", "current_min_price", "current_max_price"],
-		)
+	open_failed_syncs = (
+		frappe.qb.from_(submission_log)
+		.select(Count(submission_log.name))
+		.where(submission_log.status == "Error")
+	).run()[0][0] or 0
 
-		proxy_sku_names = list({row.proxy_sku for row in pricing_rows if row.proxy_sku})
+	error_log = DocType("Error Log")
+	errors_1h_cutoff = add_to_date(now_datetime(), hours=-1)
+	errors_1h = (
+		frappe.qb.from_(error_log).select(Count(error_log.name)).where(error_log.creation > errors_1h_cutoff)
+	).run()[0][0] or 0
 
-		# Batch fetch current_selling_price to avoid N+1
-		selling_price_map = {}
-		if proxy_sku_names:
-			chunk_size = 500
-			for offset in range(0, len(proxy_sku_names), chunk_size):
-				chunk = proxy_sku_names[offset : offset + chunk_size]
-				for row in frappe.get_all(
-					"Proxy SKU",
-					filters={"name": ["in", chunk]},
-					fields=["name", "current_selling_price"],
-				):
-					selling_price_map[row.name] = flt(row.current_selling_price)
+	sales_order = DocType("Sales Order")
+	last_order_row = (
+		frappe.qb.from_(sales_order)
+		.select(sales_order.creation)
+		.where((sales_order.docstatus == 1) & (sales_order.amazon_order_id.isnotnull()))
+		.orderby(sales_order.creation, order=frappe.qb.desc)
+		.limit(1)
+	).run(as_dict=True)
 
-		items = []
-		skipped_zero_count = 0
+	if last_order_row:
+		minutes_since_last_order = cint(time_diff_in_seconds(now_datetime(), last_order_row[0].creation) / 60)
+	else:
+		minutes_since_last_order = None
 
-		for pricing in pricing_rows:
-			our_price = selling_price_map.get(pricing.proxy_sku, 0.0)
-			min_price = flt(pricing.current_min_price)
-			max_price = flt(pricing.current_max_price)
-
-			if our_price == 0 and min_price == 0 and max_price == 0:
-				skipped_zero_count += 1
-				continue
-
-			items.append(
-				{
-					"doctype": "Amazon Price Snapshot Item",
-					"proxy_sku": pricing.proxy_sku,
-					"our_price": our_price,
-					"min_price": min_price,
-					"max_price": max_price,
-				}
-			)
-
-		snapshot.items = items
-		snapshot.sku_count = len(items)
-		snapshot.status = "Captured"
-		if skipped_zero_count:
-			snapshot.notes = f"Skipped {skipped_zero_count} SKU(s) with all-zero prices."
-		snapshot.save(ignore_permissions=True)
-
-	except Exception:
-		snapshot.status = "Failed"
-		snapshot.notes = frappe.get_traceback()
-		snapshot.save(ignore_permissions=True)
-		frappe.log_error(frappe.get_traceback(), "Amazon Price Snapshot Capture Failed")
+	return {
+		"open_failed_syncs": cint(open_failed_syncs),
+		"stuck_feeds": cint(stuck_feeds),
+		"errors_1h": cint(errors_1h),
+		"minutes_since_last_order": minutes_since_last_order,
+	}
 
 
 # ---------------------------------------------------------------------------
 # Whitelisted API endpoints
 # ---------------------------------------------------------------------------
+
+
+def get_latest_usable_snapshot() -> dict | None:
+	"""Latest captured/published snapshot, mapped to the control-center payload shape.
+
+	The dashboard's PanicCard reads name/taken_at/sku_count/status, so the JSON snapshot
+	doctype's snapshot_datetime/item_count are mapped to that stable contract here.
+	"""
+	rows = frappe.get_all(
+		"Amazon Pricing Snapshot",
+		filters={"item_count": [">", 0]},
+		fields=["name", "snapshot_datetime", "item_count", "status"],
+		order_by="snapshot_datetime desc",
+		limit=1,
+	)
+	if not rows:
+		return None
+	row = rows[0]
+	return {
+		"name": row.name,
+		"taken_at": row.snapshot_datetime,
+		"sku_count": row.item_count,
+		"status": row.status,
+	}
 
 
 @frappe.whitelist()
@@ -336,53 +345,8 @@ def get_control_center_status() -> dict:
 	)
 	enable_sync = 1 if amazon_settings_list else 0
 
-	# Blocker: stuck feeds — Submitted but created more than 60 min ago
-	submission_log = DocType("Amazon Pricing Submission Log")
-	stuck_cutoff = add_to_date(now_datetime(), minutes=-60)
-	stuck_feeds = (
-		frappe.qb.from_(submission_log)
-		.select(Count(submission_log.name))
-		.where((submission_log.status == "Submitted") & (submission_log.submitted_at < stuck_cutoff))
-	).run()[0][0] or 0
-
-	# Blocker: open failed syncs
-	open_failed_syncs = (
-		frappe.qb.from_(submission_log)
-		.select(Count(submission_log.name))
-		.where(submission_log.status == "Error")
-	).run()[0][0] or 0
-
-	# Blocker: errors in the last hour
-	error_log = DocType("Error Log")
-	errors_1h_cutoff = add_to_date(now_datetime(), hours=-1)
-	errors_1h = (
-		frappe.qb.from_(error_log).select(Count(error_log.name)).where(error_log.creation > errors_1h_cutoff)
-	).run()[0][0] or 0
-
-	# Blocker: minutes since last Amazon order
-	sales_order = DocType("Sales Order")
-	last_order_row = (
-		frappe.qb.from_(sales_order)
-		.select(sales_order.creation)
-		.where((sales_order.docstatus == 1) & (sales_order.amazon_order_id.isnotnull()))
-		.orderby(sales_order.creation, order=frappe.qb.desc)
-		.limit(1)
-	).run(as_dict=True)
-
-	if last_order_row:
-		minutes_since_last_order = cint(time_diff_in_seconds(now_datetime(), last_order_row[0].creation) / 60)
-	else:
-		minutes_since_last_order = None
-
-	# Latest usable snapshot (Captured or Restored)
-	latest_snapshot_rows = frappe.get_all(
-		"Amazon Price Snapshot",
-		filters={"status": ["in", ["Captured", "Restored"]]},
-		fields=["name", "taken_at", "sku_count", "status"],
-		order_by="creation desc",
-		limit=1,
-	)
-	snapshot = latest_snapshot_rows[0] if latest_snapshot_rows else None
+	poll_blockers = get_poll_blockers()
+	snapshot = get_latest_usable_snapshot()
 
 	return {
 		"flags": {
@@ -397,10 +361,10 @@ def get_control_center_status() -> dict:
 		"blockers": {
 			"readiness_blocked": get_readiness_blocked_count(),
 			"below_min_24h": get_below_min_24h_count(),
-			"open_failed_syncs": cint(open_failed_syncs),
-			"stuck_feeds": cint(stuck_feeds),
-			"errors_1h": cint(errors_1h),
-			"minutes_since_last_order": minutes_since_last_order,
+			"open_failed_syncs": poll_blockers["open_failed_syncs"],
+			"stuck_feeds": poll_blockers["stuck_feeds"],
+			"errors_1h": poll_blockers["errors_1h"],
+			"minutes_since_last_order": poll_blockers["minutes_since_last_order"],
 		},
 		"snapshot": snapshot,
 	}
@@ -414,24 +378,19 @@ def get_order_analytics(hours: int = 24) -> dict:
 
 @frappe.whitelist()
 def capture_price_snapshot() -> dict:
-	"""Kick off a background snapshot of all active pricing min/max/selling prices.
+	"""Capture a known-good price set via the Amazon Pricing Snapshot doctype.
 
-	Operators should run bulk_fetch_selling_prices (Navgold Settings) first so that
-	current_selling_price on Proxy SKU is up to date before capturing.
+	Reuses the JSON snapshot's capture_snapshot helper (one get_all, no per-row work),
+	so there is no background job or duplicated capture logic.
 	"""
-	snapshot = frappe.new_doc("Amazon Price Snapshot")
-	snapshot.taken_at = now_datetime()
-	snapshot.status = "Capturing"
-	snapshot.insert(ignore_permissions=True)
+	frappe.only_for("System Manager")
 
-	frappe.enqueue(
-		"navgold_custom.navgold_custom.amazon_pricing.control_center_api.execute_capture_snapshot",
-		snapshot_name=snapshot.name,
-		queue="long",
-		is_async=True,
+	from navgold_custom.navgold_custom.doctype.amazon_pricing_snapshot.amazon_pricing_snapshot import (
+		capture_snapshot,
 	)
 
-	return {"snapshot": snapshot.name}
+	snapshot_name = capture_snapshot(trigger="Manual", notes="Control center capture")
+	return {"snapshot": snapshot_name}
 
 
 @frappe.whitelist()
@@ -440,8 +399,8 @@ def panic_button(restore: int = 0) -> dict:
 
 	ORDER IS CRITICAL:
 	1. Disable sync flags immediately.
-	2. If restore requested, submit a restore feed from the latest Captured snapshot BEFORE
-	   setting the freeze flag (because freeze blocks feed submission).
+	2. If restore requested, revert ERP prices from the latest snapshot and publish that
+	   restore feed BEFORE setting the freeze flag (freeze blocks feed submission).
 	3. Set freeze LAST, in a finally block so it always lands even if restore fails.
 	"""
 	frappe.only_for("System Manager")
@@ -450,9 +409,9 @@ def panic_button(restore: int = 0) -> dict:
 	stopped_flags = []
 	restored_skus = 0
 	log_name = None
-	restore_error = None
 
-	# Step 1 — disable sync flags
+	# Step 1 — disable sync flags. set_single_value invalidates the single's cache itself,
+	# so no extra fetch-then-clear_cache is needed here.
 	for fieldname, value in [
 		("enable_pricing_sync", 0),
 		("repricer_enabled", 0),
@@ -461,7 +420,6 @@ def panic_button(restore: int = 0) -> dict:
 		frappe.db.set_single_value("Navgold Settings", fieldname, value)
 		stopped_flags.append(fieldname)
 
-	frappe.get_doc("Navgold Settings").clear_cache()
 	frappe.log_error(
 		f"PANIC: stopped flags {stopped_flags} by {frappe.session.user}",
 		"Amazon Panic Button",
@@ -470,10 +428,10 @@ def panic_button(restore: int = 0) -> dict:
 	try:
 		if restore:
 			latest_snapshot_rows = frappe.get_all(
-				"Amazon Price Snapshot",
-				filters={"status": "Captured"},
+				"Amazon Pricing Snapshot",
+				filters={"item_count": [">", 0]},
 				fields=["name"],
-				order_by="creation desc",
+				order_by="snapshot_datetime desc",
 				limit=1,
 			)
 
@@ -481,24 +439,22 @@ def panic_button(restore: int = 0) -> dict:
 				snapshot_name = latest_snapshot_rows[0].name
 				log_name, restored_skus = submit_restore_feed_from_snapshot(snapshot_name)
 				frappe.log_error(
-					f"PANIC RESTORE: submitted {restored_skus} SKUs from snapshot {snapshot_name}, log={log_name}",
+					f"PANIC RESTORE: published {restored_skus} SKUs from snapshot {snapshot_name}, log={log_name}",
 					"Amazon Panic Button",
 				)
 			else:
 				frappe.log_error(
-					"PANIC RESTORE requested but no Captured snapshot found",
+					"PANIC RESTORE requested but no snapshot with captured prices found",
 					"Amazon Panic Button",
 				)
 
 	except Exception:
-		restore_error = frappe.get_traceback()
-		frappe.log_error(restore_error, "Amazon Panic Restore Failed")
+		frappe.log_error(frappe.get_traceback(), "Amazon Panic Restore Failed")
 		# Do not re-raise — freeze must always land
 
 	finally:
-		# Step 3 — freeze last so restore feed above can slip through
+		# Step 3 — freeze last so the restore feed above can slip through.
 		frappe.db.set_single_value("Navgold Settings", "freeze_amazon_outbound", 1)
-		frappe.get_doc("Navgold Settings").clear_cache()
 		frappe.log_error(
 			f"PANIC: freeze_amazon_outbound set to 1 by {frappe.session.user}",
 			"Amazon Panic Button",
@@ -512,125 +468,26 @@ def panic_button(restore: int = 0) -> dict:
 	}
 
 
-def submit_restore_feed_from_snapshot(snapshot_name: str) -> tuple[str, int]:
-	"""Build and submit a JSON_LISTINGS_FEED to restore prices from a snapshot.
+def submit_restore_feed_from_snapshot(snapshot_name: str) -> tuple[str | None, int]:
+	"""Restore prices from an Amazon Pricing Snapshot and publish them to Amazon.
 
-	Returns (log_name, sku_count). Raises on submission error so panic_button
-	can catch it without masking the freeze step.
+	Reuses the snapshot doctype's revert_prices (writes the captured min/max/strategy back
+	to the ERP pricing records) followed by publish("Amazon"), which goes through the
+	canonical amazon_feed_submitter / amazon_feed_builder path. This guarantees the restore
+	feed is byte-for-byte the same shape as a normal scheduled pricing feed.
+
+	Returns (log_name, sku_count). log_name may be None when nothing was eligible to publish.
+	Raises on submission error so panic_button can catch it without masking the freeze step.
 	"""
-	from frappe.utils import now_datetime as _now
+	snapshot = frappe.get_doc("Amazon Pricing Snapshot", snapshot_name)
 
-	from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_submitter import (
-		PRICING_FEED_TYPE,
-		get_feeds_client,
-	)
+	revert_result = snapshot.revert_prices() or {}
+	publish_result = snapshot.publish("Amazon") or {}
 
-	snapshot = frappe.get_doc("Amazon Price Snapshot", snapshot_name)
-	settings = frappe.get_single("Amazon SP API Settings")
-	marketplace_id = settings.get_marketplace_id()
-	seller_id = settings.merchant_id
+	restored_skus = cint(revert_result.get("reverted"))
+	log_name = publish_result.get("log_name")
 
-	patches = []
-	for item in snapshot.items:
-		if not item.proxy_sku:
-			continue
-
-		# Look up the ASIN for this proxy SKU — needed for the JSON_LISTINGS_FEED patch
-		asin_row = frappe.get_all(
-			"Proxy SKU",
-			filters={"name": item.proxy_sku},
-			fields=["name", "asin"],
-			limit=1,
-		)
-		if not asin_row or not asin_row[0].asin:
-			continue
-
-		listing_patch: dict = {
-			"sku": item.proxy_sku,
-			"productType": "PRODUCT",
-			"patches": [
-				{
-					"op": "replace",
-					"path": "/attributes/purchasable_offer",
-					"value": [
-						{
-							"marketplace_id": marketplace_id,
-							"currency": "GBP",
-							"our_price": [{"schedule": [{"value_with_tax": flt(item.our_price)}]}],
-							"minimum_seller_allowed_price": [
-								{"schedule": [{"value_with_tax": flt(item.min_price)}]}
-							],
-							"maximum_seller_allowed_price": [
-								{"schedule": [{"value_with_tax": flt(item.max_price)}]}
-							],
-						}
-					],
-				}
-			],
-		}
-		patches.append(listing_patch)
-
-	if not patches:
-		frappe.log_error(
-			f"Snapshot {snapshot_name} has no restorable items",
-			"Amazon Panic Restore",
-		)
-		return None, 0
-
-	feed_content = frappe.utils.data.orjson_dumps(
-		{
-			"header": {
-				"sellerId": seller_id,
-				"version": "2.0",
-				"issueLocale": "en_GB",
-			},
-			"messages": [
-				{
-					"messageId": idx + 1,
-					"sku": patch["sku"],
-					"operationType": "PATCH",
-					"productType": patch["productType"],
-					"patches": patch["patches"],
-				}
-				for idx, patch in enumerate(patches)
-			],
-		}
-	)
-
-	if isinstance(feed_content, bytes):
-		feed_content = feed_content.decode("utf-8")
-
-	log = frappe.new_doc("Amazon Pricing Submission Log")
-	log.submission_type = "Amazon"
-	log.status = "Pending"
-	log.pricing_records = ""
-	log.feed_content = feed_content
-	log.notes = "PANIC RESTORE"
-	log.insert(ignore_permissions=True)
-
-	feeds_client = get_feeds_client(settings)
-
-	doc_result = feeds_client.create_feed_document()
-	feed_document_id = doc_result.get("feedDocumentId")
-	upload_url = doc_result.get("url")
-
-	log.feed_document_id = feed_document_id
-	log.save(ignore_permissions=True)
-
-	feeds_client.upload_feed_content(upload_url, feed_content)
-
-	feed_result = feeds_client.create_feed(feed_type=PRICING_FEED_TYPE, feed_document_id=feed_document_id)
-	feed_id = feed_result.get("feedId")
-
-	log.feed_id = feed_id
-	log.status = "Submitted"
-	log.submitted_at = _now()
-	log.save(ignore_permissions=True)
-
-	# Mark snapshot as Restored
-	frappe.db.set_value("Amazon Price Snapshot", snapshot_name, "status", "Restored")
-
-	return log.name, len(patches)
+	return log_name, restored_skus
 
 
 @frappe.whitelist()
@@ -650,8 +507,9 @@ def toggle_flag(fieldname: str, value: int) -> dict:
 		)
 
 	value = cint(value)
+	# set_single_value invalidates the single's cache itself — no extra clear_cache needed,
+	# matching the panic_button path.
 	frappe.db.set_single_value("Navgold Settings", fieldname, value)
-	frappe.get_doc("Navgold Settings").clear_cache()
 
 	# Re-read to confirm the DB write landed
 	confirmed_value = cint(frappe.db.get_single_value("Navgold Settings", fieldname))

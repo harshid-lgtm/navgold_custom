@@ -28,9 +28,16 @@ def get_reports_client():
 	return Reports.from_amazon_settings(settings)
 
 
-def recent_window(days_back):
+def recent_window(days):
+	"""Window covering `days` calendar days ending yesterday inclusive.
+
+	Returns (start_date, end_date) where end_date is exclusive on the Amazon side (the day
+	after the last included day, i.e. today). So recent_window(1) is just yesterday, and the
+	number of included days always equals `days`. Both the nightly re-pull and the manual
+	backfill use this single contract so their windows never drift apart by a day.
+	"""
 	end_date = getdate(add_days(today(), 1))
-	start_date = getdate(add_days(end_date, -days_back))
+	start_date = getdate(add_days(end_date, -days))
 	return start_date, end_date
 
 
@@ -40,7 +47,10 @@ def aggregate_daily_stats(report_text):
 		frappe.throw("Amazon order report is missing expected columns; the report schema may have changed.")
 
 	# An order spans multiple item lines; status/date are consistent across them, so each
-	# order is counted once while gross sums every line.
+	# order is counted once. gross_amount is revenue of NON-cancelled orders only — a
+	# cancelled/refunded order contributes nothing to gross but is still counted separately
+	# in cancelled_orders. (Amazon leaves item-price populated on cancelled lines, so summing
+	# it unconditionally would inflate revenue with sales that never happened.)
 	stats_by_day = {}
 	seen_orders = set()
 
@@ -62,18 +72,22 @@ def aggregate_daily_stats(report_text):
 				"currency": None,
 			},
 		)
-		stat["gross_amount"] = flt(stat["gross_amount"]) + flt(row.get("item-price"))
 		if not stat["currency"]:
 			stat["currency"] = row.get("currency") or DEFAULT_CURRENCY
+
+		status = (row.get("order-status") or "").strip().lower()
+		is_cancelled = status.startswith("cancel")
+
+		if not is_cancelled:
+			stat["gross_amount"] = flt(stat["gross_amount"]) + flt(row.get("item-price"))
 
 		if order_id in seen_orders:
 			continue
 		seen_orders.add(order_id)
 		stat["total_orders"] += 1
-		status = (row.get("order-status") or "").strip().lower()
 		if status.startswith("shipped"):
 			stat["shipped_orders"] += 1
-		elif status.startswith("cancel"):
+		elif is_cancelled:
 			stat["cancelled_orders"] += 1
 
 	return stats_by_day
@@ -125,7 +139,7 @@ def backfill(start_date=None, end_date=None):
 def enqueue_backfill(days=30):
 	frappe.only_for("System Manager")
 	days = cint(days) or 30
-	start_date, end_date = recent_window(days + 1)
+	start_date, end_date = recent_window(days)
 	frappe.enqueue(
 		"navgold_custom.navgold_custom.amazon_pricing.daily_order_stats.backfill",
 		queue="long",
@@ -138,6 +152,6 @@ def enqueue_backfill(days=30):
 
 def sync_daily_order_stats():
 	# Re-pull the last few days each night so late cancellations / status changes
-	# correct already-saved rows.
+	# correct already-saved rows. recent_window(4) = the 4 calendar days ending yesterday.
 	start_date, end_date = recent_window(4)
 	backfill(start_date=str(start_date), end_date=str(end_date))
