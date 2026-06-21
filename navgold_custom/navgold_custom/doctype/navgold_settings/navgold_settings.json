@@ -54,12 +54,18 @@
 		"published_pricing_items",
 		"send_min_price_to_amazon",
 		"pricing_sync_section",
+		"pricing_sync_mode",
 		"enable_pricing_sync",
 		"freeze_amazon_outbound",
 		"pause_strategy_refresh",
 		"sync_pricing_now",
 		"column_break_pricing_sync",
+		"pricing_sync_approved_by",
+		"pricing_sync_approved_at",
 		"last_pricing_synced_at",
+		"last_strategy_refresh_at",
+		"last_pricing_submit_at",
+		"last_repricer_submit_at",
 		"price_deviation_guard_section",
 		"price_change_threshold_percent",
 		"price_change_block_direction",
@@ -374,6 +380,15 @@
 			"label": "Pricing Sync"
 		},
 		{
+			"default": "Dry Run",
+			"description": "Approval gate. In Dry Run mode every push to Amazon and Repricer is blocked at the transport layer. Use the Approve & Go Live button to switch to Live.",
+			"fieldname": "pricing_sync_mode",
+			"fieldtype": "Select",
+			"label": "Pricing Sync Mode",
+			"options": "Dry Run\nLive",
+			"read_only": 1
+		},
+		{
 			"default": "0",
 			"description": "Run pricing feed submission on a scheduled cadence (every 30 minutes).",
 			"fieldname": "enable_pricing_sync",
@@ -407,9 +422,42 @@
 			"fieldtype": "Column Break"
 		},
 		{
+			"fieldname": "pricing_sync_approved_by",
+			"fieldtype": "Link",
+			"label": "Pricing Sync Approved By",
+			"options": "User",
+			"read_only": 1
+		},
+		{
+			"fieldname": "pricing_sync_approved_at",
+			"fieldtype": "Datetime",
+			"label": "Pricing Sync Approved At",
+			"read_only": 1
+		},
+		{
 			"fieldname": "last_pricing_synced_at",
 			"fieldtype": "Datetime",
 			"label": "Last Pricing Synced At",
+			"read_only": 1
+		},
+		{
+			"description": "Set when the scheduled strategy refresh completes. The scheduled pricing submit defers if a refresh has not completed since the last submit window.",
+			"fieldname": "last_strategy_refresh_at",
+			"fieldtype": "Datetime",
+			"label": "Last Strategy Refresh At",
+			"read_only": 1
+		},
+		{
+			"fieldname": "last_pricing_submit_at",
+			"fieldtype": "Datetime",
+			"label": "Last Pricing Submit At",
+			"read_only": 1
+		},
+		{
+			"description": "Set when the scheduled Repricer submit runs. The scheduled Repricer submit defers if a strategy refresh has not completed since the last submit window.",
+			"fieldname": "last_repricer_submit_at",
+			"fieldtype": "Datetime",
+			"label": "Last Repricer Submit At",
 			"read_only": 1
 		},
 		{

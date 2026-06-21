@@ -17,7 +17,11 @@ from navgold_custom.navgold_custom.amazon_pricing.pricing_validators import (
 	merge_blocked_reasons,
 )
 from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import Feeds
-from navgold_custom.navgold_custom.utils import bulk_set_value
+from navgold_custom.navgold_custom.utils import (
+	AmazonOutboundFrozenError,
+	PricingPushNotApprovedError,
+	bulk_set_value,
+)
 
 PRICING_FEED_TYPE = "JSON_LISTINGS_FEED"
 
@@ -108,6 +112,24 @@ def submit_pricing(pricing_names: list, test_mode: bool = False) -> dict:
 			"feed_id": feed_id,
 			"feed_document_id": feed_document_id,
 			"message_count": validation["message_count"],
+			"log_name": log.name,
+			"blocked_price_deviation": blocked_price_deviation,
+			"blocked_validation": blocked_validation,
+		}
+
+	except (AmazonOutboundFrozenError, PricingPushNotApprovedError) as e:
+		# Intentional gate (kill switch or Dry Run), not a transport failure. Mark the records
+		# "Skipped" so they stay out of the failed-sync triage queue and don't read as real errors.
+		log.status = "Skipped"
+		log.error_message = str(e)
+		log.save()
+
+		bulk_set_value("Amazon Product Pricing", pricing_names, "amazon_sync_status", "Skipped")
+
+		return {
+			"success": False,
+			"skipped": True,
+			"error": str(e),
 			"log_name": log.name,
 			"blocked_price_deviation": blocked_price_deviation,
 			"blocked_validation": blocked_validation,

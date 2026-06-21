@@ -15,7 +15,10 @@ from frappe.utils import cstr, flt, get_request_session
 from frappe.utils.caching import redis_cache
 from requests.exceptions import HTTPError
 
-from navgold_custom.navgold_custom.utils import assert_amazon_outbound_not_frozen
+from navgold_custom.navgold_custom.utils import (
+	assert_amazon_outbound_not_frozen,
+	assert_pricing_push_approved,
+)
 
 MAX_RETRIES = 3
 # Amazon Feeds (createFeed/createFeedDocument) restore throttle tokens at ~1 per 2 min, so a 429
@@ -691,7 +694,6 @@ class Feeds(SPAPI):
 		)
 
 	def create_feed_document(self, content_type: str = "application/json") -> dict:
-		assert_amazon_outbound_not_frozen()
 		"""
 		Create a feed document and get a pre-signed URL for upload.
 
@@ -703,6 +705,8 @@ class Feeds(SPAPI):
 			- feedDocumentId: The feed document identifier
 			- url: Pre-signed URL for uploading content
 		"""
+		assert_amazon_outbound_not_frozen()
+		assert_pricing_push_approved()
 		url = self.endpoint + self.BASE_URI + "documents"
 
 		return self.post_feed_json(
@@ -736,7 +740,6 @@ class Feeds(SPAPI):
 			)
 
 	def create_feed(self, feed_type: str, feed_document_id: str, marketplace_ids: list | None = None) -> dict:
-		assert_amazon_outbound_not_frozen()
 		"""
 		Submit the feed for processing.
 
@@ -749,6 +752,8 @@ class Feeds(SPAPI):
 			Dictionary containing:
 			- feedId: The feed identifier for tracking
 		"""
+		assert_amazon_outbound_not_frozen()
+		assert_pricing_push_approved()
 		if not marketplace_ids:
 			marketplace_ids = [self.marketplace_id]
 
