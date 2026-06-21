@@ -20,7 +20,7 @@ Many SKUs from a CSV (columns: sku, min, max, our_price):
 import frappe
 from frappe.utils import now_datetime
 from frappe.utils.csvutils import read_csv_content
-from frappe.utils.data import cstr, flt, orjson_dumps
+from frappe.utils.data import cint, cstr, flt, orjson_dumps
 
 from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_submitter import (
 	PRICING_FEED_TYPE,
@@ -29,9 +29,23 @@ from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_submitter import (
 
 # Default inline updates (used when no csv_path is passed).
 # Each row: {"sku": <seller sku>, "min": <float>, "max": <float>, "our_price": <float>}
+# NOTE: keep the default band tight. A placeholder max of 1000 against an 8.86 min is a
+# ~113x ratio that the ratio guard now (correctly) rejects, so set a realistic ceiling.
 DEFAULT_PRICE_UPDATES = [
-	{"sku": "CLS-CS462", "min": 8.86, "max": 1000.0, "our_price": 8.86},
+	{"sku": "CLS-CS462", "min": 8.86, "max": 14.99, "our_price": 8.86},
 ]
+
+# Absolute fat-finger ceiling: no manual SKU price is expected anywhere near this.
+# A typo like 886.0 for 8.86, or a stray wrong max, gets blocked before it reaches Amazon.
+SANE_MAX_PRICE = 5000.0
+
+# Reject suspiciously wide bands (e.g. min=8.86 with a default max=1000 is a 112x band).
+# A legitimate min/max spread is small; a huge ratio signals a placeholder or typo.
+MAX_PRICE_RATIO = 100.0
+
+# Amazon feed values are rounded to 2 dp; validate against the same rounded numbers
+# so a sub-cent min (e.g. 0.004) that rounds to 0.0 in the feed is caught here.
+PRICE_PRECISION = 2
 
 
 def load_updates_from_csv(csv_path: str) -> list:
@@ -161,19 +175,42 @@ def load_updates(csv_path: str | None, xlsx_path: str | None) -> list:
 def validate_updates(updates: list) -> None:
 	problems = []
 	for update in updates:
-		minimum = flt(update.get("min"))
-		maximum = flt(update.get("max"))
-		our_price = flt(update.get("our_price"))
+		sku = cstr(update.get("sku")).strip() or "<missing sku>"
+
+		# Distinguish a missing/blank CSV column from a genuine zero value so a
+		# malformed file is debuggable instead of reporting a misleading "min=0.0".
+		missing = [field for field in ("min", "max", "our_price") if update.get(field) in (None, "")]
+		if missing:
+			problems.append(f"{sku}: missing field(s): {', '.join(missing)}")
+			continue
+
+		# Validate against the same rounded values the feed actually carries, so a
+		# sub-cent min (0.004 -> 0.0) is caught here rather than slipping through.
+		minimum = flt(update.get("min"), precision=PRICE_PRECISION)
+		maximum = flt(update.get("max"), precision=PRICE_PRECISION)
+		our_price = flt(update.get("our_price"), precision=PRICE_PRECISION)
+
 		if minimum <= 0 or maximum <= 0 or our_price <= 0:
-			problems.append(
-				f"{update.get('sku')}: non-positive price (min={minimum} max={maximum} our={our_price})"
-			)
+			problems.append(f"{sku}: non-positive price (min={minimum} max={maximum} our={our_price})")
 		elif minimum > maximum:
-			problems.append(f"{update.get('sku')}: min {minimum} above max {maximum}")
+			problems.append(f"{sku}: min {minimum} above max {maximum}")
 		elif not (minimum <= our_price <= maximum):
-			problems.append(f"{update.get('sku')}: our_price {our_price} outside [{minimum}, {maximum}]")
+			problems.append(f"{sku}: our_price {our_price} outside [{minimum}, {maximum}]")
+		elif maximum > SANE_MAX_PRICE or our_price > SANE_MAX_PRICE:
+			problems.append(
+				f"{sku}: price above sane ceiling {SANE_MAX_PRICE} (max={maximum} our={our_price})"
+			)
+		elif maximum / minimum > MAX_PRICE_RATIO:
+			problems.append(
+				f"{sku}: max/min ratio {flt(maximum / minimum, precision=PRICE_PRECISION)} "
+				f"exceeds {MAX_PRICE_RATIO} (min={minimum} max={maximum})"
+			)
+
 	if problems:
-		frappe.throw("Manual price push blocked:\n" + "\n".join(problems[:50]))
+		message = "Manual price push blocked:\n" + "\n".join(problems[:50])
+		if len(problems) > 50:
+			message += f"\n… and {len(problems) - 50} more"
+		frappe.throw(message)
 
 
 def submit_feed(updates: list, settings) -> dict:
@@ -215,6 +252,10 @@ def push_manual_prices(updates: str | list, live: bool = False) -> dict:
 	# dry run so a reviewed preview always precedes a real push, per the June-10 incident rules.
 	frappe.only_for("System Manager")
 
+	# `live` arrives from the web as a string ("true"/"false"); bool("false") is truthy, so
+	# coerce explicitly — this is the switch that decides whether real prices reach Amazon.
+	live = cint(live)
+
 	updates = frappe.parse_json(updates) if isinstance(updates, str) else updates
 	normalised = [
 		{
@@ -245,14 +286,14 @@ def push_manual_prices(updates: str | list, live: bool = False) -> dict:
 def run(
 	csv_path: str | None = None,
 	xlsx_path: str | None = None,
-	dry_run: bool = True,
 	live: bool = False,
 	preview_path: str | None = None,
 ) -> dict:
-	# dry_run is the default: this tool was used during the June 10 incident and must
-	# never push without an explicit live=True after a reviewed dry run.
-	if live:
-		dry_run = False
+	# `live` is the SOLE switch. This tool was used during the June 10 incident and must
+	# never submit without an explicit live=True after a reviewed dry run. We derive
+	# dry_run from live unconditionally so no stray kwarg (e.g. a leftover dry_run=False)
+	# can ever bypass the gate.
+	dry_run = not live
 
 	updates = load_updates(csv_path, xlsx_path)
 	if not updates:
