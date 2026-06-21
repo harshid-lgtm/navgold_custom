@@ -7,15 +7,11 @@
       :default_filters="{ only_issues: 1 }"
     >
       <template #filters>
-        <label class="flex items-center gap-1.5 text-sm text-ink-gray-7 cursor-pointer">
-          <input
-            type="checkbox"
-            v-model="only_issues"
-            @change="on_filter_change"
-            class="rounded border-outline-gray-1"
-          />
-          Issues only
-        </label>
+        <Checkbox
+          v-model="only_issues"
+          label="Issues only"
+          @update:model-value="on_filter_change"
+        />
       </template>
     </ReportPanel>
   </div>
@@ -23,6 +19,7 @@
 
 <script setup>
 import { ref } from 'vue'
+import { Checkbox } from 'frappe-ui'
 import ReportPanel from '../../components/ReportPanel.vue'
 
 const panel_ref = ref(null)

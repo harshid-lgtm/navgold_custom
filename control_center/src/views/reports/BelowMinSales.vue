@@ -10,21 +10,17 @@
         <div class="flex items-center gap-2">
           <FormControl
             v-model="days_back_str"
-            type="text"
+            type="number"
             placeholder="7"
             class="w-16"
             @change="on_filter_change"
           />
           <span class="text-sm text-ink-gray-5">days</span>
-          <label class="flex items-center gap-1.5 text-sm text-ink-gray-7 cursor-pointer">
-            <input
-              type="checkbox"
-              v-model="only_below_min"
-              @change="on_filter_change"
-              class="rounded border-outline-gray-1"
-            />
-            Below min only
-          </label>
+          <Checkbox
+            v-model="only_below_min"
+            label="Below min only"
+            @update:model-value="on_filter_change"
+          />
         </div>
       </template>
     </ReportPanel>
@@ -33,8 +29,9 @@
 
 <script setup>
 import { ref } from 'vue'
-import { FormControl } from 'frappe-ui'
+import { Checkbox, FormControl } from 'frappe-ui'
 import ReportPanel from '../../components/ReportPanel.vue'
+import { to_int } from '../../utils/format'
 
 const panel_ref = ref(null)
 const days_back_str = ref('7')
@@ -42,7 +39,7 @@ const only_below_min = ref(true)
 
 function on_filter_change() {
   if (panel_ref.value) {
-    panel_ref.value.filters.days_back = parseInt(days_back_str.value) || 7
+    panel_ref.value.filters.days_back = to_int(days_back_str.value, 7)
     panel_ref.value.filters.only_below_min = only_below_min.value ? 1 : 0
     panel_ref.value.fetch_report()
   }

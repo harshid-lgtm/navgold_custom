@@ -75,7 +75,7 @@ function is_alarm(card) {
 
 function navigate_to(card) {
   if (card.external_link) {
-    window.open(card.external_link, '_blank')
+    window.open(card.external_link, '_blank', 'noopener,noreferrer')
     return
   }
   if (card.route) {

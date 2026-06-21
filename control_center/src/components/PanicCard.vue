@@ -51,7 +51,7 @@
     </div>
 
     <!-- Freeze dialog with typed confirm -->
-    <Dialog v-model:open="freeze_dialog_open" :options="{ title: 'Freeze all outbound', size: 'sm' }">
+    <Dialog v-model:open="freeze_dialog_open" title="Freeze all outbound" size="sm">
       <template #body-content>
         <p class="text-p-sm text-ink-gray-7 mb-4">
           This stops all outbound writes to Amazon and Repricer. Type <strong>FREEZE</strong> to confirm.
@@ -78,7 +78,7 @@
     </Dialog>
 
     <!-- Restore dialog with typed confirm -->
-    <Dialog v-model:open="restore_dialog_open" :options="{ title: 'Restore snapshot + freeze', size: 'sm' }">
+    <Dialog v-model:open="restore_dialog_open" title="Restore snapshot + freeze" size="sm">
       <template #body-content>
         <p class="text-p-sm text-ink-gray-7 mb-4">
           Restores the last price snapshot and freezes all Amazon outbound. Type <strong>RESTORE</strong> to confirm.

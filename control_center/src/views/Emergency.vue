@@ -48,7 +48,7 @@
     </div>
 
     <!-- Flag toggle confirm dialog -->
-    <Dialog v-model:open="flag_dialog_open" :options="{ title: 'Confirm flag change', size: 'sm' }">
+    <Dialog v-model:open="flag_dialog_open" title="Confirm flag change" size="sm">
       <template #body-content>
         <p class="text-p-sm text-ink-gray-7 mb-4">
           Are you sure you want to
@@ -75,6 +75,7 @@
 import { ref, inject } from 'vue'
 import { Badge, Button, Dialog, toast } from 'frappe-ui'
 import PanicCard from '../components/PanicCard.vue'
+import { FLAG_DEFINITIONS } from '../constants'
 
 const status_data = inject('status_data')
 const refetch_status = inject('refetch_status')
@@ -84,15 +85,7 @@ const flag_dialog_open = ref(false)
 const flag_loading = ref(false)
 const pending_flag = ref(null)
 
-const flag_definitions = [
-  { key: 'enable_pricing_sync', label: 'Pricing Sync' },
-  { key: 'repricer_enabled', label: 'Repricer' },
-  { key: 'freeze_amazon_outbound', label: 'Freeze Amazon outbound' },
-  { key: 'pause_strategy_refresh', label: 'Strategy Refresh' },
-  { key: 'enable_afn_stock_sync', label: 'AFN Stock Sync' },
-  { key: 'amazon_publishing_mode', label: 'Publishing Mode' },
-  { key: 'enable_sync', label: 'Sync' },
-]
+const flag_definitions = FLAG_DEFINITIONS
 
 function is_flag_active(key) {
   return !!status_data.value?.flags?.[key]

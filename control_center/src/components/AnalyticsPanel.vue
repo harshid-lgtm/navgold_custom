@@ -56,6 +56,8 @@
 import { ref, inject, onMounted, onUnmounted, watch } from 'vue'
 import { TabButtons } from 'frappe-ui'
 import { Chart } from 'frappe-charts'
+import { format_currency } from '../utils/format'
+import { CHART_COLORS, CHART_PALETTE } from '../constants'
 
 const call = inject('$call')
 
@@ -75,11 +77,6 @@ const period_buttons = [
   { label: '24h', value: 24 },
   { label: '1w', value: 168 },
 ]
-
-function format_currency(value) {
-  if (value === null || value === undefined) return '£0.00'
-  return '£' + Number(value).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
 
 async function on_period_change(hours) {
   await load_analytics(hours)
@@ -107,7 +104,7 @@ function render_charts() {
         labels: pie_data.map((d) => d.label),
         datasets: [{ values: pie_data.map((d) => d.value) }],
       },
-      colors: ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6'],
+      colors: CHART_PALETTE,
       height: 180,
     })
   }
@@ -122,7 +119,7 @@ function render_charts() {
         labels: top_categories.map((d) => d.label),
         datasets: [{ name: 'Qty', values: top_categories.map((d) => d.qty) }],
       },
-      colors: ['#3b82f6'],
+      colors: [CHART_COLORS.blue],
       height: 180,
     })
   }
@@ -140,7 +137,7 @@ function render_charts() {
           { name: 'Sales', values: hourly_series.map((d) => d.sales) },
         ],
       },
-      colors: ['#10b981', '#f59e0b'],
+      colors: [CHART_COLORS.green, CHART_COLORS.amber],
       height: 180,
     })
   }
@@ -148,7 +145,7 @@ function render_charts() {
 
 watch(analytics_data, () => {
   render_charts()
-}, { deep: true })
+})
 
 onMounted(() => {
   load_analytics(selected_hours.value)

@@ -13,18 +13,11 @@
 
 <script setup>
 import { Badge } from 'frappe-ui'
+import { FLAG_DEFINITIONS } from '../constants'
 
 defineProps({
   flags: { type: Object, default: () => ({}) },
 })
 
-const flag_definitions = [
-  { key: 'enable_pricing_sync', label: 'Pricing Sync' },
-  { key: 'repricer_enabled', label: 'Repricer' },
-  { key: 'freeze_amazon_outbound', label: 'Freeze' },
-  { key: 'pause_strategy_refresh', label: 'Strategy Refresh' },
-  { key: 'enable_afn_stock_sync', label: 'AFN Stock' },
-  { key: 'amazon_publishing_mode', label: 'Publishing Mode' },
-  { key: 'enable_sync', label: 'Sync' },
-]
+const flag_definitions = FLAG_DEFINITIONS
 </script>

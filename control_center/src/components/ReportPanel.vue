@@ -47,7 +47,8 @@
 
 <script setup>
 import { ref, computed, onMounted, inject } from 'vue'
-import { Badge, Button, ListView } from 'frappe-ui'
+import { Badge, Button, ListView, toast } from 'frappe-ui'
+import { format_currency } from '../utils/format'
 
 const props = defineProps({
   report_name: { type: String, required: true },
@@ -83,7 +84,7 @@ const list_rows = computed(() =>
     for (const col of columns.value) {
       const raw_value = row[col.fieldname]
       if (col.fieldtype === 'Currency') {
-        formatted[col.fieldname] = raw_value != null ? `£${Number(raw_value).toFixed(2)}` : '—'
+        formatted[col.fieldname] = raw_value != null ? format_currency(raw_value) : '—'
       } else if (col.fieldtype === 'Check') {
         formatted[col.fieldname] = raw_value ? '✓' : '—'
       } else {
@@ -107,13 +108,14 @@ async function fetch_report() {
     fetched_once = true
   } catch (e) {
     console.error('ReportPanel fetch failed', e)
+    toast.error(`Failed to load ${props.report_name}: ` + (e?.message || 'Unknown error'))
   } finally {
     loading.value = false
   }
 }
 
 function open_in_desk() {
-  window.open(`/app/query-report/${encodeURIComponent(props.report_name)}`, '_blank')
+  window.open(`/app/query-report/${encodeURIComponent(props.report_name)}`, '_blank', 'noopener,noreferrer')
 }
 
 onMounted(() => {

@@ -10,7 +10,7 @@
         <div class="flex items-center gap-2">
           <FormControl
             v-model="hours_back_str"
-            type="text"
+            type="number"
             placeholder="24"
             class="w-16"
             @change="on_filter_change"
@@ -33,6 +33,7 @@
 import { ref } from 'vue'
 import { FormControl } from 'frappe-ui'
 import ReportPanel from '../../components/ReportPanel.vue'
+import { to_int } from '../../utils/format'
 
 const panel_ref = ref(null)
 const hours_back = ref(24)
@@ -48,7 +49,7 @@ const status_options = [
 ]
 
 function on_filter_change() {
-  hours_back.value = parseInt(hours_back_str.value) || 24
+  hours_back.value = to_int(hours_back_str.value, 24)
   if (panel_ref.value) {
     panel_ref.value.filters.hours_back = hours_back.value
     panel_ref.value.filters.status = status_filter.value

@@ -10,7 +10,7 @@
         <div class="flex items-center gap-2">
           <FormControl
             v-model="staleness_days_str"
-            type="text"
+            type="number"
             placeholder="14"
             class="w-16"
             @change="on_filter_change"
@@ -26,13 +26,14 @@
 import { ref } from 'vue'
 import { FormControl } from 'frappe-ui'
 import ReportPanel from '../../components/ReportPanel.vue'
+import { to_int } from '../../utils/format'
 
 const panel_ref = ref(null)
 const staleness_days_str = ref('14')
 
 function on_filter_change() {
   if (panel_ref.value) {
-    panel_ref.value.filters.staleness_days = parseInt(staleness_days_str.value) || 14
+    panel_ref.value.filters.staleness_days = to_int(staleness_days_str.value, 14)
     panel_ref.value.fetch_report()
   }
 }
