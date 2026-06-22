@@ -328,6 +328,9 @@ before_uninstall = "navgold_custom.setup.before_uninstall"
 
 scheduler_events = {
 	"cron": {
+		"*/15 * * * *": [
+			"navgold_custom.navgold_custom.amazon_pricing.feed_status_poller.poll_pending_feed_submissions",
+		],
 		"*/30 * * * *": [
 			"navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api_settings.schedule_get_order_details",
 			"navgold_custom.navgold_custom.doctype.navgold_settings.navgold_settings.schedule_bulk_fetch_afn_stock",

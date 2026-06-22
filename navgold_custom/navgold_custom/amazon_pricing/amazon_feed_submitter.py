@@ -4,6 +4,7 @@
 import frappe
 from frappe import _
 from frappe.utils import now_datetime
+from frappe.utils.data import convert_utc_to_system_timezone, cstr, get_datetime
 
 from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import (
 	build_pricing_feed,
@@ -11,7 +12,12 @@ from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import (
 	get_allowed_pricing_proxy_skus,
 	validate_pricing_feed,
 )
-from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import Feeds
+from navgold_custom.navgold_custom.amazon_pricing.price_guard import notify_price_deviation_blocks
+from navgold_custom.navgold_custom.amazon_pricing.pricing_validators import (
+	format_blocked_records,
+	merge_blocked_reasons,
+)
+from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import Feeds, SPAPIError
 from navgold_custom.navgold_custom.utils import bulk_set_value
 
 PRICING_FEED_TYPE = "JSON_LISTINGS_FEED"
@@ -37,10 +43,21 @@ def submit_pricing(pricing_names: list, test_mode: bool = False) -> dict:
 	feed_result = build_pricing_feed(pricing_names, seller_id, settings.get_marketplace_id())
 	json_content = feed_result["feed_content"]
 	fallback_repricings = feed_result["fallback_repricings"]
+	blocked_price_deviation = feed_result.get("blocked_price_deviation") or []
+	blocked_validation = feed_result.get("blocked_validation") or []
+	blocked_reasons = merge_blocked_reasons(blocked_validation, blocked_price_deviation)
 
-	validation = validate_pricing_feed(json_content)
+	validation = validate_pricing_feed(
+		json_content, require_pricing_patches=feed_result.get("publishing_mode") != "Stock Only"
+	)
 	if not validation["valid"]:
-		return {"success": False, "error": "Feed validation failed", "errors": validation["errors"]}
+		return {
+			"success": False,
+			"error": "Feed validation failed",
+			"errors": validation["errors"],
+			"blocked_price_deviation": blocked_price_deviation,
+			"blocked_validation": blocked_validation,
+		}
 
 	if test_mode:
 		return {
@@ -49,6 +66,8 @@ def submit_pricing(pricing_names: list, test_mode: bool = False) -> dict:
 			"message_count": validation["message_count"],
 			"json_preview": json_content[:2000],
 			"fallback_repricings": fallback_repricings,
+			"blocked_price_deviation": blocked_price_deviation,
+			"blocked_validation": blocked_validation,
 		}
 
 	log = frappe.new_doc("Amazon Pricing Submission Log")
@@ -58,6 +77,9 @@ def submit_pricing(pricing_names: list, test_mode: bool = False) -> dict:
 	log.feed_content = json_content
 	if fallback_repricings:
 		log.supplier_swap_notes = format_supplier_fallback_notes(fallback_repricings)
+	if blocked_reasons:
+		log.blocked_records = format_blocked_records(blocked_reasons)
+		log.blocked_count = len(blocked_reasons)
 	log.insert()
 	try:
 		feeds_client = get_feeds_client(settings)
@@ -88,6 +110,8 @@ def submit_pricing(pricing_names: list, test_mode: bool = False) -> dict:
 			"feed_document_id": feed_document_id,
 			"message_count": validation["message_count"],
 			"log_name": log.name,
+			"blocked_price_deviation": blocked_price_deviation,
+			"blocked_validation": blocked_validation,
 		}
 
 	except Exception as e:
@@ -99,7 +123,35 @@ def submit_pricing(pricing_names: list, test_mode: bool = False) -> dict:
 
 		frappe.log_error(f"Amazon feed submission error: {e!s}", "Amazon Pricing Submission")
 
-		return {"success": False, "error": str(e), "log_name": log.name}
+		return {
+			"success": False,
+			"error": str(e),
+			"log_name": log.name,
+			"blocked_price_deviation": blocked_price_deviation,
+			"blocked_validation": blocked_validation,
+		}
+
+
+def is_feed_not_found_error(error: Exception) -> bool:
+	if not isinstance(error, SPAPIError):
+		return False
+
+	description = cstr(error.error_description).lower().replace(" ", "")
+	return "404" in cstr(error.error) or "notfound" in description
+
+
+def get_feed_completed_at(feed_status: dict):
+	# Client ask: completed_at should reflect when Amazon finished processing, not when the
+	# status check happened. Amazon returns UTC ISO 8601; store naive system-local like every
+	# other Datetime field.
+	processing_end_time = get_datetime(feed_status.get("processingEndTime"))
+	if not processing_end_time:
+		return now_datetime()
+
+	if processing_end_time.tzinfo:
+		processing_end_time = convert_utc_to_system_timezone(processing_end_time).replace(tzinfo=None)
+
+	return processing_end_time
 
 
 def check_feed_status(log_name: str) -> dict:
@@ -121,7 +173,7 @@ def check_feed_status(log_name: str) -> dict:
 
 		if processing_status == "DONE":
 			log.status = "Completed"
-			log.completed_at = now_datetime()
+			log.completed_at = get_feed_completed_at(feed_status)
 
 			result_doc_id = feed_status.get("resultFeedDocumentId")
 			if result_doc_id:
@@ -153,6 +205,14 @@ def check_feed_status(log_name: str) -> dict:
 		return {"status": processing_status, "feed_status": feed_status}
 
 	except Exception as e:
+		if is_feed_not_found_error(e):
+			# Amazon eventually drops old feed ids; leaving the log "Submitted" would make the
+			# scheduled poller retry a feed that can never resolve.
+			log.status = "Error"
+			log.error_message = f"Feed {log.feed_id} not found on Amazon: {e.error_description}"
+			log.save()
+			return {"status": "NOT_FOUND", "feed_status": None}
+
 		frappe.log_error(f"Feed status check error for {log_name}: {e!s}", "Amazon Pricing")
 		frappe.throw(_("Failed to check feed status: {0}").format(str(e)))
 
@@ -188,6 +248,8 @@ def submit_active_pricing() -> dict:
 		return {"success": True, "message": "No eligible pricing records to submit", "submitted_count": 0}
 
 	result = submit_pricing(pricing_names) or {}
+
+	notify_price_deviation_blocks(result.get("blocked_price_deviation") or [], "Amazon")
 
 	frappe.db.set_single_value(
 		"Navgold Settings",
