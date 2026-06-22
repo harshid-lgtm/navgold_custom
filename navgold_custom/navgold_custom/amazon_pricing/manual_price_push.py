@@ -27,11 +27,15 @@ from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_submitter import (
 	get_feeds_client,
 )
 
-# Default inline updates (used when no csv_path is passed).
-# Each row: {"sku": <seller sku>, "min": <float>, "max": <float>, "our_price": <float>}
 DEFAULT_PRICE_UPDATES = [
-	{"sku": "CLS-CS462", "min": 8.86, "max": 1000.0, "our_price": 8.86},
+	{"sku": "CLS-CS462", "min": 8.86, "max": 14.99, "our_price": 8.86},
 ]
+
+SANE_MAX_PRICE = 5000.0
+MAX_PRICE_RATIO = 100.0
+# Feed values are rounded to 2 dp; validate against the same rounding so a sub-cent
+# min that rounds to 0.0 in the feed is caught here.
+PRICE_PRECISION = 2
 
 
 def load_updates_from_csv(csv_path: str) -> list:
@@ -158,15 +162,58 @@ def load_updates(csv_path: str | None, xlsx_path: str | None) -> list:
 	return DEFAULT_PRICE_UPDATES
 
 
+def validate_updates(updates: list) -> None:
+	problems = []
+	for update in updates:
+		sku = cstr(update.get("sku")).strip() or "<missing sku>"
+
+		# A blank column is a malformed-file problem, not a genuine zero — report it as such.
+		missing = [field for field in ("min", "max", "our_price") if update.get(field) in (None, "")]
+		if missing:
+			problems.append(f"{sku}: missing field(s): {', '.join(missing)}")
+			continue
+
+		minimum = flt(update.get("min"), precision=PRICE_PRECISION)
+		maximum = flt(update.get("max"), precision=PRICE_PRECISION)
+		our_price = flt(update.get("our_price"), precision=PRICE_PRECISION)
+
+		if minimum <= 0 or maximum <= 0 or our_price <= 0:
+			problems.append(f"{sku}: non-positive price (min={minimum} max={maximum} our={our_price})")
+		elif minimum > maximum:
+			problems.append(f"{sku}: min {minimum} above max {maximum}")
+		elif not (minimum <= our_price <= maximum):
+			problems.append(f"{sku}: our_price {our_price} outside [{minimum}, {maximum}]")
+		elif maximum > SANE_MAX_PRICE or our_price > SANE_MAX_PRICE:
+			problems.append(
+				f"{sku}: price above sane ceiling {SANE_MAX_PRICE} (max={maximum} our={our_price})"
+			)
+		elif maximum / minimum > MAX_PRICE_RATIO:
+			problems.append(
+				f"{sku}: max/min ratio {flt(maximum / minimum, precision=PRICE_PRECISION)} "
+				f"exceeds {MAX_PRICE_RATIO} (min={minimum} max={maximum})"
+			)
+
+	if problems:
+		message = "Manual price push blocked:\n" + "\n".join(problems[:50])
+		if len(problems) > 50:
+			message += f"\n… and {len(problems) - 50} more"
+		frappe.throw(message)
+
+
 def run(
 	csv_path: str | None = None,
 	xlsx_path: str | None = None,
-	dry_run: bool = False,
+	live: bool = False,
 	preview_path: str | None = None,
 ) -> dict:
+	# `live` is the only switch — no dry_run param to accidentally override.
+	dry_run = not live
+
 	updates = load_updates(csv_path, xlsx_path)
 	if not updates:
 		frappe.throw("No price updates to submit")
+
+	validate_updates(updates)
 
 	settings = frappe.get_single("Amazon SP API Settings")
 	skus = [update["sku"] for update in updates]
