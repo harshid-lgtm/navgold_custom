@@ -1,4 +1,4 @@
-frappe.pages['amazon-control-center'].on_page_load = function (wrapper) {
+frappe.pages['amazon-control-center'].on_page_load = (wrapper) => {
 	const page = frappe.ui.make_app_page({
 		parent: wrapper,
 		title: 'Amazon Control Center',
@@ -37,15 +37,20 @@ class AmazonControlCenter {
 	}
 
 	async refresh(silent) {
-		if (!silent) this.body.html('<div class="text-muted" style="padding:2rem">Loading control center…</div>');
+		if (!silent)
+			this.body.html(
+				'<div class="text-muted" style="padding:2rem">Loading control center…</div>',
+			);
 		try {
 			const { message } = await frappe.call(
-				'navgold_custom.navgold_custom.amazon_pricing.control_center.get_control_center_data'
+				'navgold_custom.navgold_custom.amazon_pricing.control_center.get_control_center_data',
 			);
 			this.data = message;
 			this.render();
 		} catch (e) {
-			this.body.html('<div class="text-danger" style="padding:2rem">Failed to load control center.</div>');
+			this.body.html(
+				'<div class="text-danger" style="padding:2rem">Failed to load control center.</div>',
+			);
 		}
 	}
 
@@ -79,7 +84,7 @@ class AmazonControlCenter {
 		this.body.append(this.nav_panel());
 
 		this.body.append(
-			`<div class="text-muted small" style="margin-top:1rem">Generated: ${d.generated_on}</div>`
+			`<div class="text-muted small" style="margin-top:1rem">Generated: ${d.generated_on}</div>`,
 		);
 	}
 
@@ -90,7 +95,9 @@ class AmazonControlCenter {
 		if (blockers) reasons.push(`${blockers} SKUs would be blocked`);
 		if (below) reasons.push(`${below} below-min sales`);
 		if (feed_errors) reasons.push(`${feed_errors} feed errors`);
-		const sub = reasons.length ? reasons.join(' · ') : 'No SKU blocked, no below-min sales, no feed errors';
+		const sub = reasons.length
+			? reasons.join(' · ')
+			: 'No SKU blocked, no below-min sales, no feed errors';
 
 		const freeze_btn = frozen
 			? `<button class="btn btn-sm btn-success acc-freeze" data-freeze="0">Outbound is FROZEN — click to release</button>`
@@ -106,21 +113,34 @@ class AmazonControlCenter {
 			</div>
 		`);
 
-		wrap.find('.acc-freeze').on('click', (e) => this.toggle_freeze($(e.currentTarget).data('freeze')));
+		wrap
+			.find('.acc-freeze')
+			.on('click', (e) =>
+				this.toggle_freeze($(e.currentTarget).data('freeze')),
+			);
 		return wrap;
 	}
 
 	async toggle_freeze(freeze) {
-		const verb = freeze ? 'FREEZE all outbound writes to Amazon and Repricer' : 'RELEASE the outbound freeze';
+		const verb = freeze
+			? 'FREEZE all outbound writes to Amazon and Repricer'
+			: 'RELEASE the outbound freeze';
 		const ok = await new Promise((res) =>
-			frappe.confirm(`Are you sure you want to ${verb}?`, () => res(true), () => res(false))
+			frappe.confirm(
+				`Are you sure you want to ${verb}?`,
+				() => res(true),
+				() => res(false),
+			),
 		);
 		if (!ok) return;
 		await frappe.call(
 			'navgold_custom.navgold_custom.amazon_pricing.control_center.set_outbound_freeze',
-			{ freeze }
+			{ freeze },
 		);
-		frappe.show_alert({ message: freeze ? 'Outbound frozen' : 'Outbound released', indicator: freeze ? 'red' : 'green' });
+		frappe.show_alert({
+			message: freeze ? 'Outbound frozen' : 'Outbound released',
+			indicator: freeze ? 'red' : 'green',
+		});
 		this.refresh();
 	}
 
@@ -141,10 +161,13 @@ class AmazonControlCenter {
 				<div class="acc-fire-snap">last good: ${snap.name} (${snap.item_count} SKUs)</div>`
 			: `<div class="acc-fire-snap text-muted">No snapshot to roll back to — take one.</div>`;
 
-		const on_fire = (v['15m'] && v['15m'].loss > 0) || (v['1h'] && v['1h'].loss > 0);
+		const on_fire =
+			(v['15m'] && v['15m'].loss > 0) || (v['1h'] && v['1h'].loss > 0);
 		const wrap = $(`
 			<div class="acc-fire ${on_fire ? 'burning' : ''}">
-				<div class="acc-fire-title">💷 Loss velocity ${on_fire ? '— BLEEDING NOW' : '— quiet'}</div>
+				<div class="acc-fire-title">💷 Loss velocity ${
+					on_fire ? '— BLEEDING NOW' : '— quiet'
+				}</div>
 				<div class="acc-fire-grid">
 					${cell('last 15 min', v['15m'])}
 					${cell('last 1 hour', v['1h'])}
@@ -161,28 +184,36 @@ class AmazonControlCenter {
 		const ok = await new Promise((res) =>
 			frappe.confirm(
 				`EMERGENCY ROLLBACK: restore prices from <b>${snap.name}</b> (${snap.item_count} SKUs) and re-publish to Repricer? Guards still apply.`,
-				() => res(true), () => res(false))
+				() => res(true),
+				() => res(false),
+			),
 		);
 		if (!ok) return;
 		frappe.show_alert({ message: 'Rolling back…', indicator: 'orange' });
 		try {
 			const { message } = await frappe.call({
-				method: 'navgold_custom.navgold_custom.amazon_pricing.control_center.emergency_rollback',
+				method:
+					'navgold_custom.navgold_custom.amazon_pricing.control_center.emergency_rollback',
 				args: { channel: 'Repricer' },
 			});
 			frappe.msgprint(
-				`Rolled back ${message.revert.reverted} SKUs from ${message.snapshot} and published to Repricer.`
+				`Rolled back ${message.revert.reverted} SKUs from ${message.snapshot} and published to Repricer.`,
 			);
 			this.refresh();
 		} catch (e) {
-			frappe.show_alert({ message: 'Rollback failed — check Error Log', indicator: 'red' });
+			frappe.show_alert({
+				message: 'Rollback failed — check Error Log',
+				indicator: 'red',
+			});
 		}
 	}
 
 	push_status_strip(ps) {
 		if (!ps) return $('');
 		const pill = (label, on, on_text, off_text) =>
-			`<span class="acc-pill ${on ? 'live' : 'off'}">${label}: <b>${on ? (on_text || 'YES') : (off_text || 'NO')}</b></span>`;
+			`<span class="acc-pill ${on ? 'live' : 'off'}">${label}: <b>${
+				on ? on_text || 'YES' : off_text || 'NO'
+			}</b></span>`;
 
 		// Prices-to-Amazon is the money-risk line: green when NOT sending, amber when live.
 		const amazon_prices = ps.amazon_prices_live
@@ -192,12 +223,16 @@ class AmazonControlCenter {
 		const tone = ps.frozen ? 'frozen' : ps.amazon_prices_live ? 'warn' : 'safe';
 		return $(`
 			<div class="acc-push ${tone}">
-				<div class="acc-push-headline">Outbound: ${frappe.utils.escape_html(ps.headline)}</div>
+				<div class="acc-push-headline">Outbound: ${frappe.utils.escape_html(
+					ps.headline,
+				)}</div>
 				<div class="acc-pills">
 					${amazon_prices}
 					${pill('Stock → Amazon', ps.amazon_stock_live, 'SENDING', 'OFF')}
 					${pill('Min/Max → Repricer', ps.repricer_live, 'LIVE', 'OFF')}
-					<span class="acc-pill neutral">Amazon mode: <b>${frappe.utils.escape_html(ps.amazon_mode)}</b></span>
+					<span class="acc-pill neutral">Amazon mode: <b>${frappe.utils.escape_html(
+						ps.amazon_mode,
+					)}</b></span>
 					${pill('Auto-push', ps.auto_on, 'ON', 'OFF')}
 				</div>
 			</div>
@@ -206,41 +241,88 @@ class AmazonControlCenter {
 
 	switches_bar(s) {
 		const chip = (label, on, on_text, off_text) =>
-			`<span class="acc-chip ${on ? 'on' : 'off'}">${label}: <b>${on ? (on_text || 'On') : (off_text || 'Off')}</b></span>`;
+			`<span class="acc-chip ${on ? 'on' : 'off'}">${label}: <b>${
+				on ? on_text || 'On' : off_text || 'Off'
+			}</b></span>`;
 		return $(`
 			<div class="acc-chips">
-				${chip('Amazon mode', s.amazon_publishing_mode === 'Stock Only', s.amazon_publishing_mode, s.amazon_publishing_mode)}
-				${chip('Pricing rollout', s.pricing_publishing_mode !== 'Publish All Prices', s.pricing_publishing_mode, s.pricing_publishing_mode)}
+				${chip(
+					'Amazon mode',
+					s.amazon_publishing_mode === 'Stock Only',
+					s.amazon_publishing_mode,
+					s.amazon_publishing_mode,
+				)}
+				${chip(
+					'Pricing rollout',
+					s.pricing_publishing_mode !== 'Publish All Prices',
+					s.pricing_publishing_mode,
+					s.pricing_publishing_mode,
+				)}
 				${chip('Order sync', s.order_sync_enabled)}
 				${chip('AFN stock sync', s.enable_afn_stock_sync)}
 				${chip('Repricer', s.repricer_enabled)}
 				${chip('Send min to Amazon', s.send_min_price_to_amazon)}
-				<span class="acc-chip neutral">Deviation guard: <b>${s.price_change_threshold_percent || 0}% / ${s.price_change_block_direction}</b></span>
-				<span class="acc-chip neutral">Last price sync: <b>${s.last_pricing_synced_at || '—'}</b></span>
+				<span class="acc-chip neutral">Deviation guard: <b>${
+					s.price_change_threshold_percent || 0
+				}% / ${s.price_change_block_direction}</b></span>
+				<span class="acc-chip neutral">Last price sync: <b>${
+					s.last_pricing_synced_at || '—'
+				}</b></span>
 			</div>
 		`);
 	}
 
 	stat_cards(d) {
 		const r = d.readiness;
-		const orders = (d.orders.summary || []).reduce((m, x) => ((m[x.label] = x), m), {});
+		const orders = (d.orders.summary || []).reduce(
+			(m, x) => ((m[x.label] = x), m),
+			{},
+		);
 		const open_failed = orders['Open Failed Syncs'];
 		const mins = orders['Minutes Since Last Amazon Order'];
 
 		const cards = [
 			this.card('Active SKUs', r.total_active, 'neutral'),
-			this.card('Ready to push', r.ok_total, r.ok_total === r.total_active ? 'good' : 'neutral'),
-			this.card('Would be BLOCKED', r.blocked_total, r.blocked_total ? 'bad' : 'good'),
-			this.card(`Below-min sales (${d.below_min.days_back}d)`, d.below_min.count, d.below_min.count ? 'bad' : 'good',
-				d.below_min.estimated_loss ? `≈ ${format_currency(d.below_min.estimated_loss, 'GBP')} loss` : ''),
-			this.card('Feed errors', d.feeds.status_counts.Error, d.feeds.status_counts.Error ? 'bad' : 'good',
-				`${d.feeds.status_counts.Pending} pending`),
-			this.card('Open failed order syncs', open_failed ? open_failed.value : 0,
-				(open_failed && open_failed.indicator === 'Red') ? 'bad' : 'good'),
-			this.card('Mins since last order', mins ? mins.value : '—',
-				(mins && mins.indicator === 'Red') ? 'bad' : 'good'),
-			this.card('Stale suppliers', d.suppliers.stale_count, d.suppliers.stale_count ? 'warn' : 'good',
-				`of ${d.suppliers.total}`),
+			this.card(
+				'Ready to push',
+				r.ok_total,
+				r.ok_total === r.total_active ? 'good' : 'neutral',
+			),
+			this.card(
+				'Would be BLOCKED',
+				r.blocked_total,
+				r.blocked_total ? 'bad' : 'good',
+			),
+			this.card(
+				`Below-min sales (${d.below_min.days_back}d)`,
+				d.below_min.count,
+				d.below_min.count ? 'bad' : 'good',
+				d.below_min.estimated_loss
+					? `≈ ${format_currency(d.below_min.estimated_loss, 'GBP')} loss`
+					: '',
+			),
+			this.card(
+				'Feed errors',
+				d.feeds.status_counts.Error,
+				d.feeds.status_counts.Error ? 'bad' : 'good',
+				`${d.feeds.status_counts.Pending} pending`,
+			),
+			this.card(
+				'Open failed order syncs',
+				open_failed ? open_failed.value : 0,
+				open_failed && open_failed.indicator === 'Red' ? 'bad' : 'good',
+			),
+			this.card(
+				'Mins since last order',
+				mins ? mins.value : '—',
+				mins && mins.indicator === 'Red' ? 'bad' : 'good',
+			),
+			this.card(
+				'Stale suppliers',
+				d.suppliers.stale_count,
+				d.suppliers.stale_count ? 'warn' : 'good',
+				`of ${d.suppliers.total}`,
+			),
 		];
 		return $('<div class="acc-cards">').append(cards);
 	}
@@ -259,67 +341,124 @@ class AmazonControlCenter {
 		if (!r.blocked_total) return $('');
 		const items = Object.keys(r.categories)
 			.filter((k) => r.categories[k] > 0)
-			.map((k) => `<span class="acc-chip bad">${r.category_labels[k]}: <b>${r.categories[k]}</b></span>`)
+			.map(
+				(k) =>
+					`<span class="acc-chip bad">${r.category_labels[k]}: <b>${r.categories[k]}</b></span>`,
+			)
 			.join('');
-		return $(`<div class="acc-section"><div class="acc-section-title">Why SKUs are blocked</div><div class="acc-chips">${items}</div></div>`);
+		return $(
+			`<div class="acc-section"><div class="acc-section-title">Why SKUs are blocked</div><div class="acc-chips">${items}</div></div>`,
+		);
 	}
 
 	offenders_table(rows) {
-		const body = rows.map((row) => `
+		const body = rows
+			.map(
+				(row) => `
 			<tr>
 				<td>${frappe.utils.escape_html(row.proxy_sku || '')}</td>
 				<td>${frappe.utils.escape_html(row.active_strategy || '')}</td>
 				<td class="text-right">${format_currency(row.min_price || 0, 'GBP')}</td>
 				<td class="text-right">${format_currency(row.max_price || 0, 'GBP')}</td>
-				<td class="text-right ${flt(row.purchase_cost) <= 0 ? 'text-danger' : ''}">${format_currency(row.purchase_cost || 0, 'GBP')}</td>
-				<td class="text-danger small">${frappe.utils.escape_html(row.violations || '')}</td>
-			</tr>`).join('');
-		return this.table_block('Top blocked SKUs', ['SKU', 'Strategy', 'Min', 'Max', 'Purchase Cost', 'Violations'], body,
-			'Amazon Pricing Push Readiness');
+				<td class="text-right ${
+					flt(row.purchase_cost) <= 0 ? 'text-danger' : ''
+				}">${format_currency(row.purchase_cost || 0, 'GBP')}</td>
+				<td class="text-danger small">${frappe.utils.escape_html(
+					row.violations || '',
+				)}</td>
+			</tr>`,
+			)
+			.join('');
+		return this.table_block(
+			'Top blocked SKUs',
+			['SKU', 'Strategy', 'Min', 'Max', 'Purchase Cost', 'Violations'],
+			body,
+			'Amazon Pricing Push Readiness',
+		);
 	}
 
 	below_min_table(below) {
-		const body = below.rows.map((row) => `
+		const body = below.rows
+			.map(
+				(row) => `
 			<tr>
 				<td>${frappe.utils.escape_html(row.proxy_sku || row.item_code || '')}</td>
-				<td><a href="/app/sales-order/${encodeURIComponent(row.sales_order)}">${frappe.utils.escape_html(row.sales_order || '')}</a></td>
+				<td><a href="/app/sales-order/${encodeURIComponent(
+					row.sales_order,
+				)}">${frappe.utils.escape_html(row.sales_order || '')}</a></td>
 				<td class="text-right">${flt(row.qty)}</td>
 				<td class="text-right">${format_currency(row.rate || 0, 'GBP')}</td>
 				<td class="text-right">${format_currency(row.min_price || 0, 'GBP')}</td>
-				<td class="text-right text-danger">${format_currency(row.estimated_loss || 0, 'GBP')}</td>
-			</tr>`).join('');
-		return this.table_block(`Below-min sales (${below.days_back}d)`, ['SKU', 'Sales Order', 'Qty', 'Sold At', 'Min', 'Est. Loss'], body,
-			'Below Min Price Sales');
+				<td class="text-right text-danger">${format_currency(
+					row.estimated_loss || 0,
+					'GBP',
+				)}</td>
+			</tr>`,
+			)
+			.join('');
+		return this.table_block(
+			`Below-min sales (${below.days_back}d)`,
+			['SKU', 'Sales Order', 'Qty', 'Sold At', 'Min', 'Est. Loss'],
+			body,
+			'Below Min Price Sales',
+		);
 	}
 
 	feeds_table(rows) {
-		const ind = (s) => (s === 'Error' ? 'text-danger' : s === 'Completed' || s === 'Submitted' ? 'text-success' : '');
-		const body = rows.map((row) => `
+		const ind = (s) =>
+			s === 'Error'
+				? 'text-danger'
+				: s === 'Completed' || s === 'Submitted'
+				  ? 'text-success'
+				  : '';
+		const body = rows
+			.map(
+				(row) => `
 			<tr>
 				<td>${frappe.utils.escape_html(row.submission_type || '')}</td>
-				<td class="${ind(row.status)}">${frappe.utils.escape_html(row.status || '')}</td>
+				<td class="${ind(row.status)}">${frappe.utils.escape_html(
+					row.status || '',
+				)}</td>
 				<td>${frappe.utils.escape_html(row.amazon_status || '')}</td>
 				<td class="text-right">${row.blocked_count || 0}</td>
-				<td class="small text-muted">${frappe.datetime.str_to_user(row.creation)}</td>
-			</tr>`).join('');
-		return this.table_block('Recent feed submissions', ['Type', 'Status', 'Amazon', 'Blocked', 'When'], body,
-			'Amazon Pricing Push Monitor');
+				<td class="small text-muted">${frappe.datetime.str_to_user(
+					row.creation,
+				)}</td>
+			</tr>`,
+			)
+			.join('');
+		return this.table_block(
+			'Recent feed submissions',
+			['Type', 'Status', 'Amazon', 'Blocked', 'When'],
+			body,
+			'Amazon Pricing Push Monitor',
+		);
 	}
 
 	suppliers_table(suppliers) {
-		const body = suppliers.rows.map((row) => `
+		const body = suppliers.rows
+			.map(
+				(row) => `
 			<tr>
 				<td>${frappe.utils.escape_html(row.supplier || '')}</td>
 				<td class="text-right">${row.item_count || 0}</td>
 				<td class="text-right">${row.in_stock_count || 0}</td>
 				<td class="text-right text-warning">${row.days_stale}</td>
-			</tr>`).join('');
-		return this.table_block('Stale suppliers (>7d)', ['Supplier', 'Items', 'In stock', 'Days stale'], body,
-			'Supplier Data Readiness');
+			</tr>`,
+			)
+			.join('');
+		return this.table_block(
+			'Stale suppliers (>7d)',
+			['Supplier', 'Items', 'In stock', 'Days stale'],
+			body,
+			'Supplier Data Readiness',
+		);
 	}
 
 	quick_actions(d) {
-		const wrap = $('<div class="acc-section"><div class="acc-section-title">Quick actions</div><div class="acc-actions"></div></div>');
+		const wrap = $(
+			'<div class="acc-section"><div class="acc-section-title">Quick actions</div><div class="acc-actions"></div></div>',
+		);
 		const row = wrap.find('.acc-actions');
 		const btn = (label, cls, fn) => {
 			const b = $(`<button class="btn btn-sm ${cls}">${label}</button>`);
@@ -331,45 +470,83 @@ class AmazonControlCenter {
 		const alert_state = !alerts.telegram_enabled
 			? '🔕 Alerts OFF'
 			: alerts.telegram_configured
-				? '🔔 Alerts ON'
-				: '⚠️ Alerts: chat not set';
+			  ? '🔔 Alerts ON'
+			  : '⚠️ Alerts: chat not set';
 
 		btn('📸 Take pricing snapshot', 'btn-primary', () => this.take_snapshot());
 		btn('↻ Refresh strategies', 'btn-default', () =>
-			this.run_action('navgold_custom.navgold_custom.amazon_pricing.strategy_selector.bulk_refresh_strategies',
-				{}, 'Re-select active strategy for all SKUs from current stock?'));
+			this.run_action(
+				'navgold_custom.navgold_custom.amazon_pricing.strategy_selector.bulk_refresh_strategies',
+				{},
+				'Re-select active strategy for all SKUs from current stock?',
+			),
+		);
 		btn('⬇ Fetch AFN stock', 'btn-default', () =>
-			this.run_action('navgold_custom.navgold_custom.amazon_pricing.afn_stock_fetcher.bulk_fetch_afn_stock',
-				{}, 'Pull FBA fulfillable stock from Amazon into ERP now?'));
+			this.run_action(
+				'navgold_custom.navgold_custom.amazon_pricing.afn_stock_fetcher.bulk_fetch_afn_stock',
+				{},
+				'Pull FBA fulfillable stock from Amazon into ERP now?',
+			),
+		);
 		btn('📨 Send digest now', 'btn-default', () =>
-			this.run_action('navgold_custom.navgold_custom.amazon_pricing.alerts.send_digest', {},
-				'Send the rollup digest to Telegram now?'));
+			this.run_action(
+				'navgold_custom.navgold_custom.amazon_pricing.alerts.send_digest',
+				{},
+				'Send the rollup digest to Telegram now?',
+			),
+		);
 		btn('🧪 Test alert', 'btn-default', () =>
-			this.run_action('navgold_custom.navgold_custom.amazon_pricing.alerts.send_test', {},
-				'Send a Telegram test message?'));
+			this.run_action(
+				'navgold_custom.navgold_custom.amazon_pricing.alerts.send_test',
+				{},
+				'Send a Telegram test message?',
+			),
+		);
 
-		row.append(`<a class="btn btn-sm btn-default" href="/app/navgold-settings">⚙ Navgold Settings</a>`);
-		row.append(`<a class="btn btn-sm btn-default" href="/app/amazon-sp-api-settings">🔌 SP-API Settings</a>`);
-		row.append(`<a class="btn btn-sm btn-default" href="/app/amazon-pricing-control">🗂 Reports Workspace</a>`);
-		row.append(`<span class="acc-chip neutral" style="align-self:center">${alert_state}</span>`);
+		row.append(
+			`<a class="btn btn-sm btn-default" href="/app/navgold-settings">⚙ Navgold Settings</a>`,
+		);
+		row.append(
+			`<a class="btn btn-sm btn-default" href="/app/amazon-sp-api-settings">🔌 SP-API Settings</a>`,
+		);
+		row.append(
+			`<a class="btn btn-sm btn-default" href="/app/amazon-pricing-control">🗂 Reports Workspace</a>`,
+		);
+		row.append(
+			`<span class="acc-chip neutral" style="align-self:center">${alert_state}</span>`,
+		);
 		return wrap;
 	}
 
 	async take_snapshot() {
 		const ok = await new Promise((res) =>
-			frappe.confirm('Capture a pricing snapshot of all active SKUs now?', () => res(true), () => res(false))
+			frappe.confirm(
+				'Capture a pricing snapshot of all active SKUs now?',
+				() => res(true),
+				() => res(false),
+			),
 		);
 		if (!ok) return;
 		const { message } = await frappe.call({
-			method: 'navgold_custom.navgold_custom.doctype.amazon_pricing_snapshot.amazon_pricing_snapshot.take_snapshot_now',
+			method:
+				'navgold_custom.navgold_custom.doctype.amazon_pricing_snapshot.amazon_pricing_snapshot.take_snapshot_now',
 		});
-		frappe.show_alert({ message: `Snapshot ${message.name} captured`, indicator: 'green' });
+		frappe.show_alert({
+			message: `Snapshot ${message.name} captured`,
+			indicator: 'green',
+		});
 		frappe.set_route('Form', 'Amazon Pricing Snapshot', message.name);
 	}
 
 	async run_action(method, args, confirm_text) {
 		if (confirm_text) {
-			const ok = await new Promise((res) => frappe.confirm(confirm_text, () => res(true), () => res(false)));
+			const ok = await new Promise((res) =>
+				frappe.confirm(
+					confirm_text,
+					() => res(true),
+					() => res(false),
+				),
+			);
 			if (!ok) return;
 		}
 		try {
@@ -389,16 +566,49 @@ class AmazonControlCenter {
 				<span class="acc-guard-detail">${detail}</span></div>`;
 
 		const rows = [
-			guard('Zero-cost / invalid push block', true, 'Active — validates every push'),
-			guard('Price-deviation guard', s.price_change_threshold_percent > 0,
-				`${s.price_change_threshold_percent || 0}% / ${s.price_change_block_direction}`),
-			guard('Amazon Stock-Only mode', s.amazon_publishing_mode === 'Stock Only', s.amazon_publishing_mode),
-			guard('Phased rollout (canary)', s.pricing_publishing_mode !== 'Publish All Prices', s.pricing_publishing_mode),
-			guard('Outbound freeze switch', true, s.freeze_amazon_outbound ? 'FROZEN' : 'armed (not frozen)'),
-			guard('AFN stock sync', s.enable_afn_stock_sync, s.enable_afn_stock_sync ? 'On' : 'Off'),
+			guard(
+				'Zero-cost / invalid push block',
+				true,
+				'Active — validates every push',
+			),
+			guard(
+				'Price-deviation guard',
+				s.price_change_threshold_percent > 0,
+				`${s.price_change_threshold_percent || 0}% / ${
+					s.price_change_block_direction
+				}`,
+			),
+			guard(
+				'Amazon Stock-Only mode',
+				s.amazon_publishing_mode === 'Stock Only',
+				s.amazon_publishing_mode,
+			),
+			guard(
+				'Phased rollout (canary)',
+				s.pricing_publishing_mode !== 'Publish All Prices',
+				s.pricing_publishing_mode,
+			),
+			guard(
+				'Outbound freeze switch',
+				true,
+				s.freeze_amazon_outbound ? 'FROZEN' : 'armed (not frozen)',
+			),
+			guard(
+				'AFN stock sync',
+				s.enable_afn_stock_sync,
+				s.enable_afn_stock_sync ? 'On' : 'Off',
+			),
 			guard('Feed-status poller', true, 'every 15 min'),
-			guard('Telegram alerts', (d.alerts || {}).telegram_enabled && (d.alerts || {}).telegram_configured,
-				!(d.alerts || {}).telegram_enabled ? 'Off' : (d.alerts || {}).telegram_configured ? 'On' : 'chat not set'),
+			guard(
+				'Telegram alerts',
+				(d.alerts || {}).telegram_enabled &&
+					(d.alerts || {}).telegram_configured,
+				!(d.alerts || {}).telegram_enabled
+					? 'Off'
+					: (d.alerts || {}).telegram_configured
+					  ? 'On'
+					  : 'chat not set',
+			),
 		];
 		return $(`<div class="acc-section"><div class="acc-section-title">Safeguards &amp; fallbacks</div>
 			<div class="acc-guards">${rows.join('')}</div></div>`);
@@ -406,44 +616,67 @@ class AmazonControlCenter {
 
 	nav_panel() {
 		const report = (name) =>
-			`<a class="acc-link" href="/app/query-report/${encodeURIComponent(name)}">${name}</a>`;
-		const doc = (label, route) => `<a class="acc-link" href="/app/${route}">${label}</a>`;
+			`<a class="acc-link" href="/app/query-report/${encodeURIComponent(
+				name,
+			)}">${name}</a>`;
+		const doc = (label, route) =>
+			`<a class="acc-link" href="/app/${route}">${label}</a>`;
 
 		const groups = [
-			['Go-live readiness reports', [
-				report('Amazon Go-Live Data Readiness'),
-				report('Amazon Pricing Push Readiness'),
-				report('Supplier Data Readiness'),
-				report('Amazon Strategy Price Comparison'),
-			]],
-			['Live monitoring reports', [
-				report('Below Min Price Sales'),
-				report('Amazon Pricing Push Monitor'),
-				report('Amazon Order Sync Health'),
-			]],
-			['Pricing & cost reports', [
-				report('Amazon Purchase Cost Overview'),
-				report('Amazon Min Max Report'),
-			]],
-			['Operational reports', [
-				report('To Purchase'),
-				report('Navgold Forecast Report'),
-				report('Navgold Stock Summary'),
-				report('FBA Transfer Tracker'),
-			]],
-			['Key records', [
-				doc('Amazon Product Pricing', 'amazon-product-pricing'),
-				doc('Amazon Product Strategy', 'amazon-product-strategy'),
-				doc('Proxy SKU', 'proxy-sku'),
-				doc('Pricing Submission Log', 'amazon-pricing-submission-log'),
-				doc('Failed Sync Records', 'amazon-failed-sync-record'),
-				doc('Supplier Item Price and Stock', 'supplier-item-price-and-stock'),
-			]],
+			[
+				'Go-live readiness reports',
+				[
+					report('Amazon Go-Live Data Readiness'),
+					report('Amazon Pricing Push Readiness'),
+					report('Supplier Data Readiness'),
+					report('Amazon Strategy Price Comparison'),
+				],
+			],
+			[
+				'Live monitoring reports',
+				[
+					report('Below Min Price Sales'),
+					report('Amazon Pricing Push Monitor'),
+					report('Amazon Order Sync Health'),
+				],
+			],
+			[
+				'Pricing & cost reports',
+				[
+					report('Amazon Purchase Cost Overview'),
+					report('Amazon Min Max Report'),
+				],
+			],
+			[
+				'Operational reports',
+				[
+					report('To Purchase'),
+					report('Navgold Forecast Report'),
+					report('Navgold Stock Summary'),
+					report('FBA Transfer Tracker'),
+				],
+			],
+			[
+				'Key records',
+				[
+					doc('Amazon Product Pricing', 'amazon-product-pricing'),
+					doc('Amazon Product Strategy', 'amazon-product-strategy'),
+					doc('Proxy SKU', 'proxy-sku'),
+					doc('Pricing Submission Log', 'amazon-pricing-submission-log'),
+					doc('Failed Sync Records', 'amazon-failed-sync-record'),
+					doc('Supplier Item Price and Stock', 'supplier-item-price-and-stock'),
+				],
+			],
 		];
 
-		const cols = groups.map(([title, links]) =>
-			`<div class="acc-nav-col"><div class="acc-nav-title">${title}</div>${links.join('')}</div>`
-		).join('');
+		const cols = groups
+			.map(
+				([title, links]) =>
+					`<div class="acc-nav-col"><div class="acc-nav-title">${title}</div>${links.join(
+						'',
+					)}</div>`,
+			)
+			.join('');
 		return $(`<div class="acc-section"><div class="acc-section-title">Jump to everything</div>
 			<div class="acc-nav">${cols}</div></div>`);
 	}
@@ -451,7 +684,9 @@ class AmazonControlCenter {
 	table_block(title, headers, body_html, report_name) {
 		const head = headers.map((h) => `<th>${h}</th>`).join('');
 		const link = report_name
-			? `<a class="acc-open" href="/app/query-report/${encodeURIComponent(report_name)}">Open full report →</a>`
+			? `<a class="acc-open" href="/app/query-report/${encodeURIComponent(
+					report_name,
+			  )}">Open full report →</a>`
 			: '';
 		return $(`
 			<div class="acc-table-card">
@@ -459,7 +694,10 @@ class AmazonControlCenter {
 				<div class="acc-table-scroll">
 					<table class="table table-bordered acc-table">
 						<thead><tr>${head}</tr></thead>
-						<tbody>${body_html || `<tr><td colspan="${headers.length}" class="text-muted text-center">None 🎉</td></tr>`}</tbody>
+						<tbody>${
+							body_html ||
+							`<tr><td colspan="${headers.length}" class="text-muted text-center">None 🎉</td></tr>`
+						}</tbody>
 					</table>
 				</div>
 			</div>

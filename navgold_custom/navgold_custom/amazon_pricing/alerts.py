@@ -51,8 +51,13 @@ def send_telegram(text: str, config: dict | None = None) -> dict | None:
 		return None
 
 
-def notify(title: str, lines: list[str], severity: str = "critical", dedupe_key: str | None = None,
-		dedupe_seconds: int = 600) -> None:
+def notify(
+	title: str,
+	lines: list[str],
+	severity: str = "critical",
+	dedupe_key: str | None = None,
+	dedupe_seconds: int = 600,
+) -> None:
 	config = get_alert_config()
 	# Require a fully-wired channel before touching the dedupe cache — otherwise a key set
 	# while the chat id is missing would silently suppress the alert once it is connected.
@@ -106,11 +111,21 @@ def alert_blocked_skus(channel: str, blocked_count: int, sample: list[str] | Non
 
 def alert_freeze_toggled(frozen: int) -> None:
 	if frozen:
-		notify("Amazon outbound FROZEN", ["All Amazon/Repricer writes are halted."], severity="critical",
-			dedupe_key="freeze:on", dedupe_seconds=60)
+		notify(
+			"Amazon outbound FROZEN",
+			["All Amazon/Repricer writes are halted."],
+			severity="critical",
+			dedupe_key="freeze:on",
+			dedupe_seconds=60,
+		)
 	else:
-		notify("Amazon outbound released", ["Outbound writes are live again."], severity="ok",
-			dedupe_key="freeze:off", dedupe_seconds=60)
+		notify(
+			"Amazon outbound released",
+			["Outbound writes are live again."],
+			severity="ok",
+			dedupe_key="freeze:off",
+			dedupe_seconds=60,
+		)
 
 
 def alert_below_min_sale(sales_order: str, proxy_sku: str, rate, min_price, qty) -> None:
@@ -270,22 +285,39 @@ def safety_sweep() -> None:
 
 	error_feeds = frappe.db.count("Amazon Pricing Submission Log", {"status": "Error"})
 	if error_feeds:
-		notify("Feed errors present", [f"{error_feeds} submission log(s) in Error."], severity="warning",
-			dedupe_key=f"sweep:feed_errors:{error_feeds}", dedupe_seconds=900)
+		notify(
+			"Feed errors present",
+			[f"{error_feeds} submission log(s) in Error."],
+			severity="warning",
+			dedupe_key=f"sweep:feed_errors:{error_feeds}",
+			dedupe_seconds=900,
+		)
 
 	open_failed = frappe.db.count("Amazon Failed Sync Record", {"status": "Failed"})
 	if open_failed:
-		notify("Open failed order syncs", [f"{open_failed} unresolved failed Amazon order sync(s)."],
-			severity="warning", dedupe_key=f"sweep:failed_sync:{open_failed}", dedupe_seconds=1800)
+		notify(
+			"Open failed order syncs",
+			[f"{open_failed} unresolved failed Amazon order sync(s)."],
+			severity="warning",
+			dedupe_key=f"sweep:failed_sync:{open_failed}",
+			dedupe_seconds=1800,
+		)
 
 	last_order = frappe.db.get_value(
 		"Sales Order", {"amazon_order_id": ("is", "set")}, "creation", order_by="creation desc"
 	)
 	if last_order:
-		mins = cint((frappe.utils.now_datetime() - frappe.utils.get_datetime(last_order)).total_seconds() / 60)
+		mins = cint(
+			(frappe.utils.now_datetime() - frappe.utils.get_datetime(last_order)).total_seconds() / 60
+		)
 		if mins > 120:
-			notify("Amazon orders stalled", [f"No Amazon order synced for {mins} minutes."], severity="warning",
-				dedupe_key="sweep:orders_stalled", dedupe_seconds=1800)
+			notify(
+				"Amazon orders stalled",
+				[f"No Amazon order synced for {mins} minutes."],
+				severity="warning",
+				dedupe_key="sweep:orders_stalled",
+				dedupe_seconds=1800,
+			)
 
 
 # ---------------------------------------------------------------------------
@@ -304,18 +336,11 @@ def detect_chat_id() -> dict:
 	response = make_get_request(url)
 	results = (response or {}).get("result") or []
 	if not results:
-		frappe.throw(
-			"No messages found. Add the bot to your group and send any message there, then retry."
-		)
+		frappe.throw("No messages found. Add the bot to your group and send any message there, then retry.")
 
 	chats = []
 	for update in results:
-		container = (
-			update.get("message")
-			or update.get("channel_post")
-			or update.get("my_chat_member")
-			or {}
-		)
+		container = update.get("message") or update.get("channel_post") or update.get("my_chat_member") or {}
 		chat = container.get("chat")
 		if chat:
 			chats.append(chat)

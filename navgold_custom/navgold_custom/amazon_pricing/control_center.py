@@ -43,8 +43,11 @@ def compute_loss_velocity(below_min_rows: list) -> dict:
 	# Rate of bleed is the fire gauge: a count over 3 days is calm, the same loss in 15 minutes
 	# is an evacuation. Bucket the below-min sales by how recently they happened.
 	now = now_datetime()
-	windows = {"15m": add_to_date(now, minutes=-15), "1h": add_to_date(now, hours=-1),
-		"24h": add_to_date(now, hours=-24)}
+	windows = {
+		"15m": add_to_date(now, minutes=-15),
+		"1h": add_to_date(now, hours=-1),
+		"24h": add_to_date(now, hours=-24),
+	}
 	result = {key: {"count": 0, "loss": 0.0} for key in windows}
 
 	for row in below_min_rows:
@@ -169,7 +172,9 @@ def get_control_center_data(below_min_days: int = 3, top_n: int = 30) -> dict:
 	below_min_rows = get_below_min_data({"days_back": below_min_days, "only_below_min": 1})
 	below_min_loss = sum(flt(row.get("estimated_loss")) for row in below_min_rows)
 	loss_velocity = compute_loss_velocity(below_min_rows)
-	worst_losses = sorted(below_min_rows, key=lambda row: flt(row.get("estimated_loss")), reverse=True)[:top_n]
+	worst_losses = sorted(below_min_rows, key=lambda row: flt(row.get("estimated_loss")), reverse=True)[
+		:top_n
+	]
 
 	feed_status_counts = {
 		"Pending": frappe.db.count("Amazon Pricing Submission Log", {"status": "Pending"}),
