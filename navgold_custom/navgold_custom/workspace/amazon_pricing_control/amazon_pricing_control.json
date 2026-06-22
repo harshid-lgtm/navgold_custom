@@ -1,0 +1,165 @@
+{
+ "app": "navgold_custom",
+ "charts": [],
+ "content": "[{\"id\": \"hdr0\", \"type\": \"header\", \"data\": {\"text\": \"<span class='h4'>Go-Live &amp; Pricing Safety</span>\", \"col\": 12}}, {\"id\": \"sc1\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Pricing Push Readiness\", \"col\": 3}}, {\"id\": \"sc2\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Below Min Price Sales\", \"col\": 3}}, {\"id\": \"spacer\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"card0\", \"type\": \"card\", \"data\": {\"card_name\": \"Go-Live Readiness (check BEFORE pushing)\", \"col\": 4}}, {\"id\": \"card1\", \"type\": \"card\", \"data\": {\"card_name\": \"Live Monitoring (watch DURING/AFTER)\", \"col\": 4}}, {\"id\": \"card2\", \"type\": \"card\", \"data\": {\"card_name\": \"Pricing & Cost\", \"col\": 4}}]",
+ "creation": "2026-06-12 08:36:11.217730",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "hide_custom": 0,
+ "icon": "dashboard",
+ "idx": 0,
+ "indicator_color": "green",
+ "is_hidden": 0,
+ "label": "Amazon Pricing Control",
+ "link_type": "DocType",
+ "links": [
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Go-Live Readiness (check BEFORE pushing)",
+   "link_count": 0,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "Amazon Go-Live Data Readiness",
+   "link_count": 0,
+   "link_to": "Amazon Go-Live Data Readiness",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "Amazon Pricing Push Readiness",
+   "link_count": 0,
+   "link_to": "Amazon Pricing Push Readiness",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "Supplier Data Readiness",
+   "link_count": 0,
+   "link_to": "Supplier Data Readiness",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "Amazon Strategy Price Comparison",
+   "link_count": 0,
+   "link_to": "Amazon Strategy Price Comparison",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Live Monitoring (watch DURING/AFTER)",
+   "link_count": 0,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "Below Min Price Sales",
+   "link_count": 0,
+   "link_to": "Below Min Price Sales",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "Amazon Pricing Push Monitor",
+   "link_count": 0,
+   "link_to": "Amazon Pricing Push Monitor",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "Amazon Order Sync Health",
+   "link_count": 0,
+   "link_to": "Amazon Order Sync Health",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Pricing & Cost",
+   "link_count": 0,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "Amazon Purchase Cost Overview",
+   "link_count": 0,
+   "link_to": "Amazon Purchase Cost Overview",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "Amazon Min Max Report",
+   "link_count": 0,
+   "link_to": "Amazon Min Max Report",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2026-06-12 08:36:11.217730",
+ "modified_by": "Administrator",
+ "module": "Navgold Custom",
+ "name": "Amazon Pricing Control",
+ "number_cards": [],
+ "owner": "Administrator",
+ "public": 1,
+ "quick_lists": [],
+ "roles": [],
+ "sequence_id": 0.0,
+ "shortcuts": [
+  {
+   "color": "Blue",
+   "doc_view": "",
+   "label": "Pricing Push Readiness",
+   "link_to": "Amazon Pricing Push Readiness",
+   "report_ref_doctype": "Amazon Product Pricing",
+   "type": "Report"
+  },
+  {
+   "color": "Red",
+   "doc_view": "",
+   "label": "Below Min Price Sales",
+   "link_to": "Below Min Price Sales",
+   "report_ref_doctype": "Sales Order",
+   "type": "Report"
+  }
+ ],
+ "title": "Amazon Pricing Control",
+ "type": "Workspace"
+}

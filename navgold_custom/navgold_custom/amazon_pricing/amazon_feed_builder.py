@@ -6,7 +6,6 @@ import math
 from functools import partial
 
 import frappe
-from erpnext.stock.doctype.packed_item.packed_item import get_product_bundle_items
 from frappe.query_builder import DocType
 from frappe.query_builder.functions import Count
 from frappe.utils import add_days, fmt_money, getdate, now_datetime, today
@@ -25,6 +24,7 @@ from navgold_custom.navgold_custom.amazon_pricing.pricing_validators import (
 from navgold_custom.navgold_custom.amazon_pricing.purchase_cost_sources import (
 	calculate_bundle_cost,
 	get_bundle_components,
+	get_product_bundle_items,
 )
 from navgold_custom.navgold_custom.amazon_pricing.strategy_selector import (
 	get_stock_info,
