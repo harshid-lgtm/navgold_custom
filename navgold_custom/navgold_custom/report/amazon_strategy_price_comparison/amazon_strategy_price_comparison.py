@@ -24,7 +24,8 @@ STRATEGY_PRICES = [
 
 
 def execute(filters: dict | None = None):
-	# Each rebuild refreshes listing prices from Amazon first, hence the Prepared-report flag.
+	# Prepared report: each rebuild first refreshes listing prices from Amazon,
+	# then builds the strategy comparison off the freshly-fetched current_selling_price.
 	refresh_amazon_listing_prices()
 	return get_columns(), get_data(filters)
 
@@ -67,6 +68,7 @@ def get_columns() -> list[dict]:
 		}
 	)
 
+	# Variance of each strategy price against the current Amazon price (red > 5% in JS).
 	for fieldname, label in STRATEGY_PRICES:
 		columns.append(
 			{

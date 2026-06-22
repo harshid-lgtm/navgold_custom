@@ -58,6 +58,7 @@
 		"enable_pricing_sync",
 		"freeze_amazon_outbound",
 		"pause_strategy_refresh",
+		"enable_afn_stock_sync",
 		"sync_pricing_now",
 		"column_break_pricing_sync",
 		"pricing_sync_approved_by",
@@ -409,6 +410,14 @@
 			"fieldname": "pause_strategy_refresh",
 			"fieldtype": "Check",
 			"label": "Pause Strategy Refresh"
+		},
+		{
+			"default": "0",
+			"description": "Fetch FBA fulfillable stock from Amazon every 30 minutes and use it to drive FBA strategy selection.",
+			"fieldname": "enable_afn_stock_sync",
+			"fieldtype": "Check",
+			"label": "Enable Scheduled AFN Stock Sync",
+			"read_only_depends_on": "eval:frappe.session.user != \"Administrator\""
 		},
 		{
 			"description": "Submit a pricing feed to Amazon and sync prices to Repricer (if enabled) for all active Amazon Product Pricing records. Honors the Pricing Publishing Mode selection above.",

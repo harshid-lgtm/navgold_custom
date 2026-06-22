@@ -6,7 +6,6 @@ import math
 from functools import partial
 
 import frappe
-from erpnext.stock.doctype.packed_item.packed_item import get_product_bundle_items
 from frappe.query_builder import DocType
 from frappe.query_builder.functions import Count
 from frappe.utils import add_days, fmt_money, getdate, now_datetime, today
@@ -25,6 +24,7 @@ from navgold_custom.navgold_custom.amazon_pricing.pricing_validators import (
 from navgold_custom.navgold_custom.amazon_pricing.purchase_cost_sources import (
 	calculate_bundle_cost,
 	get_bundle_components,
+	get_product_bundle_items,
 )
 from navgold_custom.navgold_custom.amazon_pricing.strategy_selector import (
 	get_stock_info,
@@ -456,7 +456,8 @@ def get_sku_inventory_data(
 		if bundle_buildable_map is None:
 			bundle_buildable_map = get_bundle_buildable_map([item_code])
 		buildable_bundles = bundle_buildable_map.get(item_code)
-		# A bundle whose components cannot cover the promised quantity must go out as zero.
+		# A bundle whose components cannot cover the promised quantity must go out as zero,
+		# never as the parent item's warehouse quantity.
 		if buildable_bundles is not None and buildable_bundles < warehouse_qty * pack_size:
 			warehouse_qty = 0
 

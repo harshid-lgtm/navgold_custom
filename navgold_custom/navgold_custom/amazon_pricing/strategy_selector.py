@@ -9,7 +9,7 @@ from frappe.utils.data import flt
 
 from navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku import get_proxy_sku_map
 from navgold_custom.navgold_custom.utils import (
-	get_afn_warehouse_stock_map,
+	get_fba_stock_map,
 	get_free_qty_map,
 	get_restock_data_map,
 )
@@ -66,7 +66,7 @@ def select_strategy(pricing_doc, active_strategies=None, stock_info=None) -> str
 def get_stock_info(proxy_sku: str) -> dict:
 	"""
 	This function checks:
-	- FBA warehouse stock (AFN warehouse)
+	- FBA stock (AFN warehouse Bin, merged with Amazon-fetched stock when AFN stock sync is on)
 	- MFN warehouse stock
 	- Restock date information
 	"""
@@ -74,20 +74,8 @@ def get_stock_info(proxy_sku: str) -> dict:
 
 	sp_api_settings = frappe.get_single("Amazon SP API Settings")
 
-	fba_stock = 0
-	mfn_stock = 0
-
-	if sp_api_settings.afn_warehouse:
-		afn_qty = (
-			frappe.db.get_value(
-				"Bin", {"item_code": proxy.item, "warehouse": sp_api_settings.afn_warehouse}, "actual_qty"
-			)
-			or 0
-		)
-		fba_stock += afn_qty
-
-	mfn_qty = get_free_qty_map([proxy.item]).get(proxy.item, {}).get("free_qty", 0)
-	mfn_stock += mfn_qty
+	fba_stock = get_fba_stock_map([proxy.item], sp_api_settings.afn_warehouse).get(proxy.item, 0)
+	mfn_stock = get_free_qty_map([proxy.item]).get(proxy.item, {}).get("free_qty", 0)
 
 	restock_info = check_pending_restock(proxy.item)
 
@@ -120,7 +108,7 @@ def get_stock_info_batch(proxy_sku_names: list) -> dict:
 		return {name: dict(empty) for name in proxy_sku_names}
 
 	sp_api_settings = frappe.get_cached_doc("Amazon SP API Settings")
-	afn_stock_map = get_afn_warehouse_stock_map(all_item_codes, sp_api_settings.afn_warehouse)
+	afn_stock_map = get_fba_stock_map(all_item_codes, sp_api_settings.afn_warehouse)
 	mfn_stock_data = get_free_qty_map(all_item_codes)
 	restock_map = get_restock_data_map(all_item_codes)
 

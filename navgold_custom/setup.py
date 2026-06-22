@@ -33,8 +33,10 @@ def after_migrate():
 
 
 def enable_prepared_report_for_strategy_price_comparison():
-	# prepared_report is a per-site runtime flag that Frappe always exports as 0 (Report.before_export),
-	# so it has to be enforced on every migrate rather than in the report JSON.
+	# This report downloads the Amazon listings report on every build, so it must run
+	# as a Prepared (generated) report. prepared_report is a per-site runtime flag that
+	# Frappe always exports as 0 in standard JSON (Report.before_export), so we enforce
+	# it here on every migrate instead of in the report definition.
 	report = "Amazon Strategy Price Comparison"
 	if frappe.db.exists("Report", report):
 		frappe.db.set_value("Report", report, "prepared_report", 1)

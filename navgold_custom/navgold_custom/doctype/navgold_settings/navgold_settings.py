@@ -39,6 +39,7 @@ class NavgoldSettings(Document):
 		default_prep_owner: DF.Literal["AMAZON", "SELLER", "NONE"]
 		default_stock_allocation_warehouse: DF.Link | None
 		default_strategy_template: DF.Link | None
+		enable_afn_stock_sync: DF.Check
 		enable_pricing_sync: DF.Check
 		freeze_amazon_outbound: DF.Check
 		pause_strategy_refresh: DF.Check
@@ -273,6 +274,22 @@ def schedule_bulk_refresh_strategies():
 		deduplicate=True,
 		method="navgold_custom.navgold_custom.amazon_pricing.strategy_selector.bulk_refresh_strategies",
 		timeout=6000,
+	)
+
+
+def schedule_bulk_fetch_afn_stock():
+	settings = frappe.get_cached_doc("Navgold Settings")
+	if not settings.enable_afn_stock_sync:
+		return
+
+	# Same job_id as the manual entry in afn_stock_fetcher.bulk_fetch_afn_stock so a manual
+	# click during a scheduled run never double-pulls from Amazon.
+	frappe.enqueue(
+		job_id="navgold.scheduled_bulk_fetch_afn_stock",
+		deduplicate=True,
+		method="navgold_custom.navgold_custom.amazon_pricing.afn_stock_fetcher.process_afn_stock_fetch",
+		queue="long",
+		timeout=1800,
 	)
 
 
