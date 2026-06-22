@@ -19,7 +19,6 @@ GOOD_ROW = {"sku": "TEST-SKU", "min": 8.86, "max": 12.0, "our_price": 9.5}
 
 class TestManualPricePushValidation(IntegrationTestCase):
 	def test_good_row_passes(self):
-		# Should not throw.
 		validate_updates([GOOD_ROW])
 
 	def test_non_positive_min_blocked(self):

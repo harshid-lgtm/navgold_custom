@@ -215,10 +215,9 @@ class NavgoldSettings(Document):
 
 
 def should_defer_scheduled_submit(settings, submit_stamp_field: str) -> bool:
-	# Stagger guard: the refresh job runs at :00/:30 and the submit at :15/:45, assuming the
-	# refresh finishes within 15 min. If it overran (or never ran), submitting now would build a
-	# feed/payload from half-refreshed prices. Require a refresh to have completed since this
-	# channel's last submit window before pushing again. First-ever run (no submit stamp) is allowed.
+	# Stagger guard: refresh runs at :00/:30, submit at :15/:45. If a refresh overran or never ran,
+	# submitting now would build a feed from half-refreshed prices, so require a refresh to have
+	# completed since this channel's last submit. First-ever run (no submit stamp) is allowed.
 	last_refresh = settings.last_strategy_refresh_at
 	last_submit = settings.get(submit_stamp_field)
 	return bool(last_submit and (not last_refresh or last_refresh <= last_submit))

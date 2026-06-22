@@ -155,14 +155,12 @@ class TestToggleFlag(IntegrationTestCase):
 			toggle_flag("some_bad_field", 1)
 
 	def test_toggle_rejects_sensitive_field(self):
-		# repricer_api_password must not be toggleable via this endpoint
 		with self.assertRaises(frappe.exceptions.ValidationError):
 			toggle_flag("repricer_api_password", 1)
 
 
 class TestPanicButton(IntegrationTestCase):
 	def test_panic_without_restore_stops_and_freezes(self):
-		# Reset flags first so we know the before-state
 		with change_settings(
 			"Navgold Settings",
 			{
@@ -189,7 +187,6 @@ class TestPanicButton(IntegrationTestCase):
 			self.assertEqual(cint(frappe.db.get_single_value("Navgold Settings", "repricer_enabled")), 0)
 
 	def test_panic_with_restore_and_no_snapshot_still_freezes(self):
-		# When restore=1 but there is no Captured snapshot, the freeze must still land
 		with change_settings(
 			"Navgold Settings",
 			{
@@ -199,7 +196,6 @@ class TestPanicButton(IntegrationTestCase):
 				"freeze_amazon_outbound": 0,
 			},
 		):
-			# Mock submit_restore_feed_from_snapshot so it never runs (no snapshot available)
 			with patch(
 				"navgold_custom.navgold_custom.amazon_pricing.control_center_api.submit_restore_feed_from_snapshot"
 			) as mock_restore:
@@ -208,7 +204,6 @@ class TestPanicButton(IntegrationTestCase):
 
 		self.assertEqual(result["frozen"], 1)
 
-		# Cleanup
 		frappe.db.set_single_value("Navgold Settings", "freeze_amazon_outbound", 0)
 
 	def test_panic_freeze_survives_restore_exception(self):
@@ -236,7 +231,6 @@ class TestPanicButton(IntegrationTestCase):
 			freeze_value = cint(frappe.db.get_single_value("Navgold Settings", "freeze_amazon_outbound"))
 			self.assertEqual(freeze_value, 1)
 
-		# Cleanup
 		frappe.db.set_single_value("Navgold Settings", "freeze_amazon_outbound", 0)
 		frappe.delete_doc("Amazon Pricing Snapshot", snapshot_name, force=True)
 
@@ -281,7 +275,6 @@ class TestPanicButton(IntegrationTestCase):
 					frappe.db.get_value("Amazon Pricing Submission Log", log_name, "status"), "Skipped"
 				)
 
-		# Cleanup
 		frappe.delete_doc("Amazon Pricing Snapshot", snapshot_name, force=True)
 
 
@@ -296,14 +289,13 @@ class TestCaptureSnapshot(IntegrationTestCase):
 		snapshot_name = result["snapshot"]
 		self.assertTrue(frappe.db.exists("Amazon Pricing Snapshot", snapshot_name))
 
-		# Capture is synchronous now (reuses the JSON doctype's capture_snapshot helper),
-		# so the snapshot lands with its captured price set, not a "Capturing" placeholder.
+		# Capture is synchronous (reuses the JSON doctype's capture_snapshot helper), so the
+		# snapshot lands with its captured price set, not a "Capturing" placeholder.
 		snapshot = frappe.get_doc("Amazon Pricing Snapshot", snapshot_name)
 		self.assertEqual(snapshot.trigger_type, "Manual")
 		self.assertIsNotNone(snapshot.snapshot_datetime)
 		self.assertGreaterEqual(snapshot.item_count, 1)
 
-		# Cleanup
 		frappe.delete_doc("Amazon Pricing Snapshot", snapshot_name, force=True)
 
 

@@ -25,11 +25,6 @@ _TOGGLEABLE_FLAGS = frozenset(
 )
 
 
-# ---------------------------------------------------------------------------
-# Heavy helpers — cached so the dashboard can be polled every 30 s safely
-# ---------------------------------------------------------------------------
-
-
 @redis_cache(ttl=120)
 def get_readiness_blocked_count() -> int:
 	"""Count active Amazon Product Pricing records that have at least one violation.
@@ -88,7 +83,6 @@ def get_below_min_24h_count() -> int:
 
 	min_price_map = get_min_price_map({(row.item_code, row.uom) for row in so_rows})
 	below_min_rows = build_below_min_rows(so_rows, min_price_map)
-	# Only count rows that actually sold below min (deficit > 0)
 	return sum(1 for row in below_min_rows if row["deficit"] > 0)
 
 
@@ -105,7 +99,6 @@ def get_order_analytics_data(hours: int) -> dict:
 	sales_order_item = DocType("Sales Order Item")
 	item_table = DocType("Item")
 
-	# Card totals — two window queries, one round-trip each
 	period_rows = (
 		frappe.qb.from_(sales_order)
 		.select(sales_order.name, sales_order.grand_total, sales_order.creation)
@@ -125,7 +118,6 @@ def get_order_analytics_data(hours: int) -> dict:
 
 	period_so_names = [row.name for row in period_rows]
 
-	# Order type pie — one query
 	order_type_rows = (
 		frappe.qb.from_(sales_order)
 		.select(
@@ -160,7 +152,6 @@ def get_order_analytics_data(hours: int) -> dict:
 
 	order_type_pie = [{"label": label, "value": value} for label, value in order_type_buckets.items()]
 
-	# Top categories and top items — only meaningful if there are orders in window
 	top_categories: list[dict] = []
 	top_items: list[dict] = []
 
@@ -218,7 +209,7 @@ def get_order_analytics_data(hours: int) -> dict:
 		top_categories = sorted(category_accum.values(), key=lambda r: r["amount"], reverse=True)[:10]
 		top_items = sorted(item_accum.values(), key=lambda r: r["amount"], reverse=True)[:10]
 
-	# Hourly series — bucket by hour using Python to avoid fragile SQL date_format differences
+	# Bucket by hour in Python to avoid fragile SQL date_format dialect differences.
 	hourly_buckets: dict[str, dict] = {}
 	# Pre-build all hour slots so the chart has a continuous x-axis even in empty windows
 	for hour_offset in range(hours):
@@ -299,11 +290,6 @@ def get_poll_blockers() -> dict:
 		"errors_1h": cint(errors_1h),
 		"minutes_since_last_order": minutes_since_last_order,
 	}
-
-
-# ---------------------------------------------------------------------------
-# Whitelisted API endpoints
-# ---------------------------------------------------------------------------
 
 
 def get_latest_usable_snapshot() -> dict | None:
@@ -410,8 +396,7 @@ def panic_button(restore: int = 0) -> dict:
 	restored_skus = 0
 	log_name = None
 
-	# Step 1 — disable sync flags. set_single_value invalidates the single's cache itself,
-	# so no extra fetch-then-clear_cache is needed here.
+	# set_single_value invalidates the single's cache itself, so no extra clear_cache is needed.
 	for fieldname, value in [
 		("enable_pricing_sync", 0),
 		("repricer_enabled", 0),
@@ -453,7 +438,7 @@ def panic_button(restore: int = 0) -> dict:
 		# Do not re-raise — freeze must always land
 
 	finally:
-		# Step 3 — freeze last so the restore feed above can slip through.
+		# Freeze last so the restore feed above can slip through.
 		frappe.db.set_single_value("Navgold Settings", "freeze_amazon_outbound", 1)
 		frappe.log_error(
 			f"PANIC: freeze_amazon_outbound set to 1 by {frappe.session.user}",
@@ -507,10 +492,7 @@ def toggle_flag(fieldname: str, value: int) -> dict:
 		)
 
 	value = cint(value)
-	# set_single_value invalidates the single's cache itself — no extra clear_cache needed,
-	# matching the panic_button path.
 	frappe.db.set_single_value("Navgold Settings", fieldname, value)
 
-	# Re-read to confirm the DB write landed
 	confirmed_value = cint(frappe.db.get_single_value("Navgold Settings", fieldname))
 	return {fieldname: confirmed_value}

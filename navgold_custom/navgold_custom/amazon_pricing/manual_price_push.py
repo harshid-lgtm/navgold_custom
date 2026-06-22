@@ -27,20 +27,17 @@ from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_submitter import (
 	get_feeds_client,
 )
 
-# Default inline updates (used when no csv_path is passed).
-# Each row: {"sku": <seller sku>, "min": <float>, "max": <float>, "our_price": <float>}
-# NOTE: keep the default band tight. A placeholder max of 1000 against an 8.86 min is a
-# ~113x ratio that the ratio guard now (correctly) rejects, so set a realistic ceiling.
+# Default inline updates (used when no csv_path is passed). Keep the band tight: a placeholder
+# max far above the min trips the ratio guard below, so use a realistic ceiling.
+# Row shape: {"sku": <seller sku>, "min": <float>, "max": <float>, "our_price": <float>}
 DEFAULT_PRICE_UPDATES = [
 	{"sku": "CLS-CS462", "min": 8.86, "max": 14.99, "our_price": 8.86},
 ]
 
-# Absolute fat-finger ceiling: no manual SKU price is expected anywhere near this.
-# A typo like 886.0 for 8.86, or a stray wrong max, gets blocked before it reaches Amazon.
+# Absolute fat-finger ceiling: a typo like 886.0 for 8.86 gets blocked before it reaches Amazon.
 SANE_MAX_PRICE = 5000.0
 
-# Reject suspiciously wide bands (e.g. min=8.86 with a default max=1000 is a 112x band).
-# A legitimate min/max spread is small; a huge ratio signals a placeholder or typo.
+# A huge min/max ratio signals a placeholder or typo, not a legitimate band.
 MAX_PRICE_RATIO = 100.0
 
 # Amazon feed values are rounded to 2 dp; validate against the same rounded numbers
@@ -184,8 +181,7 @@ def validate_updates(updates: list) -> None:
 			problems.append(f"{sku}: missing field(s): {', '.join(missing)}")
 			continue
 
-		# Validate against the same rounded values the feed actually carries, so a
-		# sub-cent min (0.004 -> 0.0) is caught here rather than slipping through.
+		# Validate against the rounded values the feed actually carries (see PRICE_PRECISION).
 		minimum = flt(update.get("min"), precision=PRICE_PRECISION)
 		maximum = flt(update.get("max"), precision=PRICE_PRECISION)
 		our_price = flt(update.get("our_price"), precision=PRICE_PRECISION)
@@ -248,8 +244,7 @@ def submit_feed(updates: list, settings) -> dict:
 
 @frappe.whitelist()
 def push_manual_prices(updates: str | list, live: bool = False) -> dict:
-	# Desk entry point for the manual hotfix path. Same guards as the CLI tool; defaults to a
-	# dry run so a reviewed preview always precedes a real push, per the June-10 incident rules.
+	# Defaults to a dry run so a reviewed preview always precedes a real push.
 	frappe.only_for("System Manager")
 
 	# `live` arrives from the web as a string ("true"/"false"); bool("false") is truthy, so
@@ -289,10 +284,8 @@ def run(
 	live: bool = False,
 	preview_path: str | None = None,
 ) -> dict:
-	# `live` is the SOLE switch. This tool was used during the June 10 incident and must
-	# never submit without an explicit live=True after a reviewed dry run. We derive
-	# dry_run from live unconditionally so no stray kwarg (e.g. a leftover dry_run=False)
-	# can ever bypass the gate.
+	# `live` is the sole switch: derive dry_run from it unconditionally so no stray kwarg
+	# (e.g. a leftover dry_run=False) can ever bypass the gate.
 	dry_run = not live
 
 	updates = load_updates(csv_path, xlsx_path)

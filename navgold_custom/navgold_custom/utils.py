@@ -141,8 +141,6 @@ def assert_amazon_outbound_not_frozen():
 def assert_pricing_push_approved():
 	# Read uncached for the same reason as the freeze guard: the Dry Run / Live approval
 	# state must take effect immediately on long-running workers without a cache clear.
-	# This is the belt-and-suspenders gate that keeps every push blocked until a System
-	# Manager explicitly goes live, regardless of which caller reaches the transport layer.
 	if frappe.db.get_single_value("Navgold Settings", "pricing_sync_mode") != "Live":
 		raise PricingPushNotApprovedError(
 			frappe._(

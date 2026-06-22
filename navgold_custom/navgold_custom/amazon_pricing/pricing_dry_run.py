@@ -124,10 +124,8 @@ def dry_run_pricing(refresh_first: bool = False) -> dict:
 
 	settings = frappe.get_single("Amazon SP API Settings")
 
-	# A dry run is typically run pre-go-live when SP-API config may be half-filled. The feed
-	# builder needs both a seller id and a marketplace id, so fail loud here (mirrors the
-	# order-report client's "no active settings" guard) rather than rendering a feed with
-	# missing header fields that would silently differ from a real one.
+	# Fail loud on half-filled pre-go-live config: a feed missing seller/marketplace id would
+	# silently differ from a real one rather than error.
 	marketplace_id = settings.get_marketplace_id()
 	if not settings.merchant_id or not marketplace_id:
 		frappe.throw(
@@ -158,8 +156,6 @@ def dry_run_pricing(refresh_first: bool = False) -> dict:
 		json_content, require_pricing_patches=feed_result.get("publishing_mode") != "Stock Only"
 	)
 
-	# Capture the current calculated prices as a Dry Run snapshot and diff them against the
-	# previous snapshot, so the operator sees both the rendered feed and what moved.
 	snapshot = frappe.new_doc("Amazon Pricing Snapshot")
 	snapshot.trigger_type = "Dry Run"
 	snapshot.status = "Dry Run"
@@ -169,7 +165,6 @@ def dry_run_pricing(refresh_first: bool = False) -> dict:
 	snapshot.variance_data = frappe.as_json(variance)
 	snapshot.insert(ignore_permissions=True)
 
-	# Persist the rendered feed as a never-submitted log so it can be downloaded and audited.
 	log = frappe.new_doc("Amazon Pricing Submission Log")
 	log.submission_type = "Amazon"
 	log.status = "Dry Run"
