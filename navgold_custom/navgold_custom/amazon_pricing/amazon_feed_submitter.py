@@ -19,8 +19,8 @@ from navgold_custom.navgold_custom.amazon_pricing.pricing_validators import (
 )
 from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import Feeds, SPAPIError
 from navgold_custom.navgold_custom.utils import (
-	AmazonOutboundFrozenError,
-	PricingPushNotApprovedError,
+	AmazonFrozenError,
+	PricingNotApprovedError,
 	bulk_set_value,
 )
 
@@ -118,7 +118,7 @@ def submit_pricing(pricing_names: list, test_mode: bool = False) -> dict:
 			"blocked_validation": blocked_validation,
 		}
 
-	except (AmazonOutboundFrozenError, PricingPushNotApprovedError) as e:
+	except (AmazonFrozenError, PricingNotApprovedError) as e:
 		# Intentional gate (kill switch or Dry Run), not a transport failure. Mark the records
 		# "Skipped" so they stay out of the failed-sync triage queue and don't read as real errors.
 		log.status = "Skipped"

@@ -25,10 +25,10 @@ from navgold_custom.navgold_custom.amazon_pricing.pricing_validators import (
 	format_blocked_records,
 )
 from navgold_custom.navgold_custom.utils import (
-	AmazonOutboundFrozenError,
-	PricingPushNotApprovedError,
-	assert_amazon_outbound_not_frozen,
-	assert_pricing_push_approved,
+	AmazonFrozenError,
+	PricingNotApprovedError,
+	block_if_amazon_frozen,
+	block_if_pricing_not_approved,
 	bulk_set_value,
 )
 
@@ -55,8 +55,8 @@ class RepricerClient:
 		return {"Authorization": f"Basic {encoded}", "Content-Type": "application/json"}
 
 	def post_repricer_data(self, products) -> dict:
-		assert_amazon_outbound_not_frozen()
-		assert_pricing_push_approved()
+		block_if_amazon_frozen()
+		block_if_pricing_not_approved()
 		headers = self.get_auth_headers()
 		return make_post_request(url=REPRICER_API_BASE, data=products, headers=headers)
 
@@ -204,7 +204,7 @@ def sync_to_repricer(pricing_names: list) -> dict:
 	try:
 		csv_data = dict_list_to_csv(products_to_update)
 		response = client.post_repricer_data(csv_data)
-	except (AmazonOutboundFrozenError, PricingPushNotApprovedError) as e:
+	except (AmazonFrozenError, PricingNotApprovedError) as e:
 		# Intentional gate (kill switch or Dry Run), not a transport failure. Mark the log
 		# "Skipped" so it stays out of the failed-sync triage queue and doesn't read as a real error.
 		log.status = "Skipped"

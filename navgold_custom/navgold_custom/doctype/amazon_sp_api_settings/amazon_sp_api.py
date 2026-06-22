@@ -16,8 +16,8 @@ from frappe.utils.caching import redis_cache
 from requests.exceptions import HTTPError
 
 from navgold_custom.navgold_custom.utils import (
-	assert_amazon_outbound_not_frozen,
-	assert_pricing_push_approved,
+	block_if_amazon_frozen,
+	block_if_pricing_not_approved,
 )
 
 MAX_RETRIES = 3
@@ -713,8 +713,8 @@ class Feeds(SPAPI):
 			- feedDocumentId: The feed document identifier
 			- url: Pre-signed URL for uploading content
 		"""
-		assert_amazon_outbound_not_frozen()
-		assert_pricing_push_approved()
+		block_if_amazon_frozen()
+		block_if_pricing_not_approved()
 		url = self.endpoint + self.BASE_URI + "documents"
 
 		return self.post_feed_json(
@@ -760,8 +760,8 @@ class Feeds(SPAPI):
 			Dictionary containing:
 			- feedId: The feed identifier for tracking
 		"""
-		assert_amazon_outbound_not_frozen()
-		assert_pricing_push_approved()
+		block_if_amazon_frozen()
+		block_if_pricing_not_approved()
 		if not marketplace_ids:
 			marketplace_ids = [self.marketplace_id]
 

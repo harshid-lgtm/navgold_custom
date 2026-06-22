@@ -238,7 +238,7 @@ class TestPanicButton(IntegrationTestCase):
 		"""Dry Run must block the restore feed at the chokepoint gate before any HTTP call.
 
 		Uses the REAL submit_restore_feed_from_snapshot so revert -> publish("Amazon") ->
-		bulk_submit_pricing -> Feeds.create_feed_document runs the real assert_pricing_push_approved
+		bulk_submit_pricing -> Feeds.create_feed_document runs the real block_if_pricing_not_approved
 		gate. Only the lowest HTTP seam (Feeds.post_feed_json) is patched, so if any push slipped
 		past the gate the assertion would catch a would-be Amazon call. freeze_amazon_outbound is 0
 		so the ONLY thing standing between the restore and Amazon is the Dry Run gate.

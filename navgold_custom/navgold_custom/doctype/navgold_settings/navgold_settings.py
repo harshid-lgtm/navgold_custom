@@ -214,7 +214,7 @@ class NavgoldSettings(Document):
 		frappe.msgprint(_("Pricing sync reverted to Dry Run. All outbound pushes are blocked."))
 
 
-def should_defer_scheduled_submit(settings, submit_stamp_field: str) -> bool:
+def prices_not_refreshed_since_last_submit(settings, submit_stamp_field: str) -> bool:
 	# Stagger guard: refresh runs at :00/:30, submit at :15/:45. If a refresh overran or never ran,
 	# submitting now would build a feed from half-refreshed prices, so require a refresh to have
 	# completed since this channel's last submit. First-ever run (no submit stamp) is allowed.
@@ -231,10 +231,7 @@ def schedule_submit_active_pricing():
 	if not settings.amazon_pricing_enabled:
 		return
 
-	if should_defer_scheduled_submit(settings, "last_pricing_submit_at"):
-		frappe.logger().info(
-			"Skipping scheduled pricing submit: no strategy refresh completed since last submit window."
-		)
+	if prices_not_refreshed_since_last_submit(settings, "last_pricing_submit_at"):
 		return
 
 	frappe.db.set_single_value("Navgold Settings", "last_pricing_submit_at", frappe.utils.now_datetime())
@@ -271,13 +268,9 @@ def schedule_submit_active_repricer():
 	# so the Repricer push has nothing extra to preview — skip it rather than enqueue a job that
 	# only exists to be blocked at the approval gate.
 	if settings.pricing_sync_mode == "Dry Run":
-		frappe.logger().info("Skipping scheduled Repricer submit: Dry Run mode (preview already rendered).")
 		return
 
-	if should_defer_scheduled_submit(settings, "last_repricer_submit_at"):
-		frappe.logger().info(
-			"Skipping scheduled Repricer submit: no strategy refresh completed since last submit window."
-		)
+	if prices_not_refreshed_since_last_submit(settings, "last_repricer_submit_at"):
 		return
 
 	frappe.db.set_single_value("Navgold Settings", "last_repricer_submit_at", frappe.utils.now_datetime())
