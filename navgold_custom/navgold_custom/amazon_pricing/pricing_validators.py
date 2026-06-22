@@ -82,8 +82,6 @@ def collect_pricing_violations(
 			if purchase_cost is None:
 				add_violation(pricing.name, "No active purchase cost row on the active strategy")
 			elif purchase_cost["value"] <= 0:
-				# THE June 10 disaster condition: a synced cost source silently resolved to 0
-				# and prices were calculated from a zero purchase cost.
 				add_violation(
 					pricing.name,
 					f"Purchase cost is {purchase_cost['value']:g} (source: {purchase_cost['source']})",

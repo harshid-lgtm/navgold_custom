@@ -152,8 +152,7 @@ class TestPricingValidators(IntegrationTestCase):
 		)
 
 	def test_po_sync_without_history_resolves_to_zero_and_is_flagged(self):
-		# Reproduces the June 10 disaster: PO-Sync with no purchase history silently
-		# resolves to flt(None) == 0 and prices get computed from a zero cost.
+		# PO-Sync with no purchase history resolves to flt(None) == 0, so prices compute from a zero cost.
 		proxy_sku = create_proxy_sku()
 		strategy = create_strategy(proxy_sku, purchase_cost_value=999, cost_source="PO-Sync")
 		pricing_name = create_pricing(proxy_sku, strategy)
