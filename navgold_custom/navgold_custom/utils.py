@@ -118,3 +118,32 @@ def get_conversion_factor(item_code: str, uom: str):
 		"UOM Conversion Detail", {"parent": item_code, "uom": uom}, "conversion_factor"
 	)
 	return flt(conversion_factor) or 1.0
+
+
+class AmazonFrozenError(frappe.ValidationError):
+	# Distinct from a transport failure so callers can mark records "Skipped", not failed-sync.
+	pass
+
+
+class PricingNotApprovedError(frappe.ValidationError):
+	# A Dry Run block is an intentional gate, not a failure (see AmazonFrozenError).
+	pass
+
+
+def block_if_amazon_frozen():
+	# Deliberately uncached: this is the emergency kill switch and must take effect
+	# on long-running workers without a cache clear.
+	if frappe.db.get_single_value("Navgold Settings", "freeze_amazon_outbound"):
+		raise AmazonFrozenError(frappe._("Amazon outbound writes are frozen via Navgold Settings."))
+
+
+def block_if_pricing_not_approved():
+	# Read uncached for the same reason as the freeze guard: the Dry Run / Live approval
+	# state must take effect immediately on long-running workers without a cache clear.
+	if frappe.db.get_single_value("Navgold Settings", "pricing_sync_mode") != "Live":
+		raise PricingNotApprovedError(
+			frappe._(
+				"Pricing sync is in Dry Run mode — push blocked until approved "
+				"(Navgold Settings → Approve & Go Live)."
+			)
+		)

@@ -256,4 +256,7 @@ def bulk_refresh_strategies():
 			update_modified=False,
 		)
 
+	# Stamp completion so the scheduled submit's stagger guard can confirm a fresh refresh ran.
+	frappe.db.set_single_value("Navgold Settings", "last_strategy_refresh_at", frappe.utils.now_datetime())
+
 	return {"total": len(pricing_records), "updated": len(updates)}

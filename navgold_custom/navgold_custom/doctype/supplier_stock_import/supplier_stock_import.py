@@ -127,7 +127,7 @@ class SupplierStockImport(Document):
 				self.successful_imports += 1
 			except Exception as e:
 				self.failed_imports += 1
-				self.append_log(f"Row {row_idx-1}: {e!s}")
+				self.append_log(f"Row {row_idx - 1}: {e!s}")
 				errored_rows_data.append([*list(row), str(e)])
 
 			if self.total_rows > 5:
@@ -201,7 +201,7 @@ class SupplierStockImport(Document):
 				)
 
 			self.update_record(existing_record, stock_qty, price, supplier_part_number)
-			self.append_log(f"Row {row_idx-1}: Updated {existing_record}")
+			self.append_log(f"Row {row_idx - 1}: Updated {existing_record}")
 			return
 
 		if not barcode:
@@ -215,14 +215,14 @@ class SupplierStockImport(Document):
 
 		if existing_record:
 			self.update_record(existing_record, stock_qty, price, supplier_part_number)
-			self.append_log(f"Row {row_idx-1}: Updated {existing_record}")
+			self.append_log(f"Row {row_idx - 1}: Updated {existing_record}")
 		else:
 			item = self.get_item_from_barcode(barcode)
 			if not item:
 				raise ValueError(f"No item found for barcode: {barcode}")
 
 			new_name = self.create_record(item, uom, stock_qty, price, supplier_part_number, barcode)
-			self.append_log(f"Row {row_idx-1}: Created {new_name}")
+			self.append_log(f"Row {row_idx - 1}: Created {new_name}")
 
 	def get_existing_record_from_spn(self, supplier_part_number):
 		return frappe.db.get_value(

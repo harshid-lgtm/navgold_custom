@@ -24,7 +24,13 @@ from navgold_custom.navgold_custom.amazon_pricing.pricing_validators import (
 	collect_pricing_violations,
 	format_blocked_records,
 )
-from navgold_custom.navgold_custom.utils import bulk_set_value
+from navgold_custom.navgold_custom.utils import (
+	AmazonFrozenError,
+	PricingNotApprovedError,
+	block_if_amazon_frozen,
+	block_if_pricing_not_approved,
+	bulk_set_value,
+)
 
 REPRICER_API_BASE = "https://api.repricer.com/v1/repricers"
 
@@ -49,6 +55,8 @@ class RepricerClient:
 		return {"Authorization": f"Basic {encoded}", "Content-Type": "application/json"}
 
 	def post_repricer_data(self, products) -> dict:
+		block_if_amazon_frozen()
+		block_if_pricing_not_approved()
 		headers = self.get_auth_headers()
 		return make_post_request(url=REPRICER_API_BASE, data=products, headers=headers)
 
@@ -196,6 +204,20 @@ def sync_to_repricer(pricing_names: list) -> dict:
 	try:
 		csv_data = dict_list_to_csv(products_to_update)
 		response = client.post_repricer_data(csv_data)
+	except (AmazonFrozenError, PricingNotApprovedError) as e:
+		# Intentional gate, not a transport failure: mark "Skipped" to keep it out of the failed-sync triage queue.
+		log.status = "Skipped"
+		log.error_message = str(e)
+		log.save()
+		return {
+			"synced": 0,
+			"skipped": True,
+			"error": str(e),
+			"errors": errors,
+			"log_name": log.name,
+			"blocked_price_deviation": blocked_price_deviation,
+			"blocked_validation": violations_by_pricing,
+		}
 	except Exception as e:
 		log.status = "Error"
 		log.error_message = str(e)

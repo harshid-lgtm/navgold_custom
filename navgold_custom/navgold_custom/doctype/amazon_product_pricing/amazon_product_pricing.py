@@ -10,6 +10,7 @@ from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_submitter import s
 from navgold_custom.navgold_custom.amazon_pricing.price_guard import (
 	partition_pricing_by_price_deviation,
 )
+from navgold_custom.navgold_custom.amazon_pricing.pricing_validators import collect_pricing_violations
 from navgold_custom.navgold_custom.amazon_pricing.repricer_client import sync_to_repricer
 from navgold_custom.navgold_custom.amazon_pricing.strategy_selector import select_strategy
 
@@ -91,6 +92,9 @@ class AmazonProductPricing(Document):
 
 	@frappe.whitelist()
 	def submit_to_amazon(self):
+		if not frappe.db.get_single_value("Navgold Settings", "enable_pricing_sync"):
+			frappe.throw(_("Pricing sync is disabled in Navgold Settings"))
+
 		if not self.is_active:
 			frappe.throw(_("Cannot submit pricing for inactive products"))
 
@@ -104,6 +108,14 @@ class AmazonProductPricing(Document):
 				frappe.throw(_("Cannot submit pricing without calculated prices"))
 
 			self.guard_price_deviation()
+
+			violations = collect_pricing_violations([self.name], include_deviation=False)
+			if violations.get(self.name):
+				frappe.throw(
+					_("Pricing for {0} fails validation: {1}").format(
+						self.proxy_sku, "; ".join(violations[self.name])
+					)
+				)
 
 		return submit_pricing([self.name])
 

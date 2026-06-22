@@ -41,15 +41,23 @@ class NavgoldSettings(Document):
 		default_strategy_template: DF.Link | None
 		enable_afn_stock_sync: DF.Check
 		enable_pricing_sync: DF.Check
+		freeze_amazon_outbound: DF.Check
+		pause_strategy_refresh: DF.Check
 		fba_inbound_enabled: DF.Check
 		fba_source_address: DF.Link | None
 		high_price_commission_adjustment: DF.Float
+		last_pricing_submit_at: DF.Datetime | None
 		last_pricing_synced_at: DF.Datetime | None
+		last_repricer_submit_at: DF.Datetime | None
+		last_strategy_refresh_at: DF.Datetime | None
 		min_shelf_expiry_in_days: DF.Int
 		multiple_active_item_uom: DF.Check
 		price_change_block_direction: DF.Literal["Both", "Drops Only", "Increases Only"]
 		price_change_threshold_percent: DF.Float
 		pricing_alert_recipients: DF.SmallText | None
+		pricing_sync_approved_at: DF.Datetime | None
+		pricing_sync_approved_by: DF.Link | None
+		pricing_sync_mode: DF.Literal["Dry Run", "Live"]
 		pricing_publishing_mode: DF.Literal["Publish All Prices", "Publish Selected Prices Only"]
 		published_pricing_items: DF.Table[NavgoldPublishedPricingItem]
 		repricer_api_password: DF.Password | None
@@ -183,6 +191,37 @@ class NavgoldSettings(Document):
 		if queued:
 			frappe.msgprint(_("Queued: {0}").format(", ".join(queued)))
 
+	@frappe.whitelist()
+	def approve_and_go_live(self):
+		frappe.only_for("System Manager")
+
+		self.pricing_sync_mode = "Live"
+		self.pricing_sync_approved_by = frappe.session.user
+		self.pricing_sync_approved_at = frappe.utils.now_datetime()
+		self.save()
+
+		frappe.msgprint(_("Pricing sync is now Live. Outbound pushes to Amazon and Repricer are enabled."))
+
+	@frappe.whitelist()
+	def revert_to_dry_run(self):
+		frappe.only_for("System Manager")
+
+		self.pricing_sync_mode = "Dry Run"
+		self.pricing_sync_approved_by = None
+		self.pricing_sync_approved_at = None
+		self.save()
+
+		frappe.msgprint(_("Pricing sync reverted to Dry Run. All outbound pushes are blocked."))
+
+
+def prices_not_refreshed_since_last_submit(settings, submit_stamp_field: str) -> bool:
+	# Stagger guard: the refresh runs at :00/:30 and the submit at :15/:45. If the refresh overran
+	# (or never ran), submitting now would build a feed from half-refreshed prices, so require a
+	# refresh to have completed since this channel's last submit. First-ever run is allowed.
+	last_refresh = settings.last_strategy_refresh_at
+	last_submit = settings.get(submit_stamp_field)
+	return bool(last_submit and (not last_refresh or last_refresh <= last_submit))
+
 
 def schedule_submit_active_pricing():
 	settings = frappe.get_cached_doc("Navgold Settings")
@@ -191,6 +230,11 @@ def schedule_submit_active_pricing():
 
 	if not settings.amazon_pricing_enabled:
 		return
+
+	if prices_not_refreshed_since_last_submit(settings, "last_pricing_submit_at"):
+		return
+
+	frappe.db.set_single_value("Navgold Settings", "last_pricing_submit_at", frappe.utils.now_datetime())
 
 	frappe.enqueue(
 		job_id="navgold.amazon_scheduled_pricing_sync",
@@ -208,6 +252,11 @@ def schedule_submit_active_repricer():
 	if not settings.repricer_enabled:
 		return
 
+	if prices_not_refreshed_since_last_submit(settings, "last_repricer_submit_at"):
+		return
+
+	frappe.db.set_single_value("Navgold Settings", "last_repricer_submit_at", frappe.utils.now_datetime())
+
 	frappe.enqueue(
 		job_id="navgold.repricer_scheduled_sync",
 		deduplicate=True,
@@ -217,6 +266,9 @@ def schedule_submit_active_repricer():
 
 
 def schedule_bulk_refresh_strategies():
+	if frappe.db.get_single_value("Navgold Settings", "pause_strategy_refresh"):
+		return
+
 	frappe.enqueue(
 		job_id="navgold.scheduled_bulk_refresh_strategies",
 		deduplicate=True,
