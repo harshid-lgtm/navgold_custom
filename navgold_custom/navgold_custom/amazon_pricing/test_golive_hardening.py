@@ -7,21 +7,21 @@ import frappe
 from frappe.tests import IntegrationTestCase, change_settings
 
 from navgold_custom.navgold_custom.utils import (
-	AmazonOutboundFrozenError,
-	PricingPushNotApprovedError,
-	assert_amazon_outbound_not_frozen,
-	assert_pricing_push_approved,
+	AmazonFrozenError,
+	PricingNotApprovedError,
+	block_if_amazon_frozen,
+	block_if_pricing_not_approved,
 )
 
 
 class TestGoliveHardening(IntegrationTestCase):
 	@change_settings("Navgold Settings", {"freeze_amazon_outbound": 1})
 	def test_freeze_blocks_outbound(self):
-		self.assertRaises(AmazonOutboundFrozenError, assert_amazon_outbound_not_frozen)
+		self.assertRaises(AmazonFrozenError, block_if_amazon_frozen)
 
 	@change_settings("Navgold Settings", {"freeze_amazon_outbound": 0})
 	def test_unfrozen_passes(self):
-		assert_amazon_outbound_not_frozen()
+		block_if_amazon_frozen()
 
 	@change_settings("Navgold Settings", {"pause_strategy_refresh": 1})
 	def test_pause_flag_skips_strategy_refresh(self):
@@ -137,11 +137,11 @@ class TestGoliveHardening(IntegrationTestCase):
 class TestApprovalGate(IntegrationTestCase):
 	@change_settings("Navgold Settings", {"pricing_sync_mode": "Dry Run"})
 	def test_dry_run_blocks_push(self):
-		self.assertRaises(PricingPushNotApprovedError, assert_pricing_push_approved)
+		self.assertRaises(PricingNotApprovedError, block_if_pricing_not_approved)
 
 	@change_settings("Navgold Settings", {"pricing_sync_mode": "Live"})
 	def test_live_allows_push(self):
-		assert_pricing_push_approved()
+		block_if_pricing_not_approved()
 
 	@change_settings("Navgold Settings", {"pricing_sync_mode": "Dry Run", "freeze_amazon_outbound": 0})
 	def test_feed_document_chokepoint_blocks_before_http(self):
@@ -150,7 +150,7 @@ class TestApprovalGate(IntegrationTestCase):
 		client = Feeds.__new__(Feeds)
 		# Patch the transport so a guard miss would surface as a network call instead of silently passing.
 		with patch.object(Feeds, "post_feed_json") as mock_transport:
-			self.assertRaises(PricingPushNotApprovedError, client.create_feed_document)
+			self.assertRaises(PricingNotApprovedError, client.create_feed_document)
 		mock_transport.assert_not_called()
 
 	@change_settings("Navgold Settings", {"pricing_sync_mode": "Dry Run", "freeze_amazon_outbound": 0})
@@ -160,7 +160,7 @@ class TestApprovalGate(IntegrationTestCase):
 		client = Feeds.__new__(Feeds)
 		with patch.object(Feeds, "post_feed_json") as mock_transport:
 			self.assertRaises(
-				PricingPushNotApprovedError,
+				PricingNotApprovedError,
 				client.create_feed,
 				feed_type="JSON_LISTINGS_FEED",
 				feed_document_id="doc-id",
@@ -177,7 +177,7 @@ class TestApprovalGate(IntegrationTestCase):
 		with patch(
 			"navgold_custom.navgold_custom.amazon_pricing.repricer_client.make_post_request"
 		) as mock_post:
-			self.assertRaises(PricingPushNotApprovedError, client.post_repricer_data, [])
+			self.assertRaises(PricingNotApprovedError, client.post_repricer_data, [])
 		mock_post.assert_not_called()
 
 	def test_repricer_gate_exception_marks_log_skipped(self):
@@ -198,7 +198,7 @@ class TestApprovalGate(IntegrationTestCase):
 				patch.object(
 					repricer_client.RepricerClient,
 					"post_repricer_data",
-					side_effect=PricingPushNotApprovedError("Dry Run"),
+					side_effect=PricingNotApprovedError("Dry Run"),
 				),
 				patch.object(repricer_client.RepricerClient, "__init__", return_value=None),
 				patch("frappe.log_error") as mock_log_error,

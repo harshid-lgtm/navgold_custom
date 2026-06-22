@@ -18,8 +18,8 @@ from navgold_custom.navgold_custom.amazon_pricing.pricing_validators import (
 )
 from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import Feeds
 from navgold_custom.navgold_custom.utils import (
-	AmazonOutboundFrozenError,
-	PricingPushNotApprovedError,
+	AmazonFrozenError,
+	PricingNotApprovedError,
 	bulk_set_value,
 )
 
@@ -117,7 +117,7 @@ def submit_pricing(pricing_names: list, test_mode: bool = False) -> dict:
 			"blocked_validation": blocked_validation,
 		}
 
-	except (AmazonOutboundFrozenError, PricingPushNotApprovedError) as e:
+	except (AmazonFrozenError, PricingNotApprovedError) as e:
 		# Intentional gate, not a transport failure: mark "Skipped" to keep it out of the failed-sync triage queue.
 		log.status = "Skipped"
 		log.error_message = str(e)
