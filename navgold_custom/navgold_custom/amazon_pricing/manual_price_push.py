@@ -27,24 +27,14 @@ from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_submitter import (
 	get_feeds_client,
 )
 
-# Default inline updates (used when no csv_path is passed).
-# Each row: {"sku": <seller sku>, "min": <float>, "max": <float>, "our_price": <float>}
-# NOTE: keep the default band tight. A placeholder max of 1000 against an 8.86 min is a
-# ~113x ratio that the ratio guard now (correctly) rejects, so set a realistic ceiling.
 DEFAULT_PRICE_UPDATES = [
 	{"sku": "CLS-CS462", "min": 8.86, "max": 14.99, "our_price": 8.86},
 ]
 
-# Absolute fat-finger ceiling: no manual SKU price is expected anywhere near this.
-# A typo like 886.0 for 8.86, or a stray wrong max, gets blocked before it reaches Amazon.
 SANE_MAX_PRICE = 5000.0
-
-# Reject suspiciously wide bands (e.g. min=8.86 with a default max=1000 is a 112x band).
-# A legitimate min/max spread is small; a huge ratio signals a placeholder or typo.
 MAX_PRICE_RATIO = 100.0
-
-# Amazon feed values are rounded to 2 dp; validate against the same rounded numbers
-# so a sub-cent min (e.g. 0.004) that rounds to 0.0 in the feed is caught here.
+# Feed values are rounded to 2 dp; validate against the same rounding so a sub-cent
+# min that rounds to 0.0 in the feed is caught here.
 PRICE_PRECISION = 2
 
 
@@ -177,15 +167,12 @@ def validate_updates(updates: list) -> None:
 	for update in updates:
 		sku = cstr(update.get("sku")).strip() or "<missing sku>"
 
-		# Distinguish a missing/blank CSV column from a genuine zero value so a
-		# malformed file is debuggable instead of reporting a misleading "min=0.0".
+		# A blank column is a malformed-file problem, not a genuine zero — report it as such.
 		missing = [field for field in ("min", "max", "our_price") if update.get(field) in (None, "")]
 		if missing:
 			problems.append(f"{sku}: missing field(s): {', '.join(missing)}")
 			continue
 
-		# Validate against the same rounded values the feed actually carries, so a
-		# sub-cent min (0.004 -> 0.0) is caught here rather than slipping through.
 		minimum = flt(update.get("min"), precision=PRICE_PRECISION)
 		maximum = flt(update.get("max"), precision=PRICE_PRECISION)
 		our_price = flt(update.get("our_price"), precision=PRICE_PRECISION)
@@ -219,10 +206,7 @@ def run(
 	live: bool = False,
 	preview_path: str | None = None,
 ) -> dict:
-	# `live` is the SOLE switch. This tool was used during the June 10 incident and must
-	# never submit without an explicit live=True after a reviewed dry run. We derive
-	# dry_run from live unconditionally so no stray kwarg (e.g. a leftover dry_run=False)
-	# can ever bypass the gate.
+	# `live` is the only switch — no dry_run param to accidentally override.
 	dry_run = not live
 
 	updates = load_updates(csv_path, xlsx_path)

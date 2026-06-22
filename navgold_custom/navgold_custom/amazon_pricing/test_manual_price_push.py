@@ -19,7 +19,6 @@ GOOD_ROW = {"sku": "TEST-SKU", "min": 8.86, "max": 12.0, "our_price": 9.5}
 
 class TestManualPricePushValidation(IntegrationTestCase):
 	def test_good_row_passes(self):
-		# Should not throw.
 		validate_updates([GOOD_ROW])
 
 	def test_non_positive_min_blocked(self):
@@ -44,7 +43,6 @@ class TestManualPricePushValidation(IntegrationTestCase):
 			validate_updates([{"sku": "T", "min": 5.0, "max": over, "our_price": 5.0}])
 
 	def test_ratio_too_wide_blocked(self):
-		# min=8.86 with the old default max=1000 is a ~113x band.
 		with self.assertRaises(frappe.ValidationError):
 			validate_updates([{"sku": "T", "min": 8.86, "max": 1000.0, "our_price": 8.86}])
 
@@ -88,13 +86,11 @@ class TestManualPricePushRunGate(IntegrationTestCase):
 		feeds_client.create_feed_document.assert_not_called()
 
 	def test_going_live_requires_live_true(self):
-		# live=True is the only way past the gate; verify it actually takes the submit path.
 		result, get_client, feeds_client = self.patched_run(live=True)
 		self.assertNotIn("dry_run", result)
 		get_client.assert_called()
 		feeds_client.create_feed.assert_called()
 
 	def test_dry_run_param_no_longer_exists(self):
-		# A leftover dry_run=False kwarg must NOT be accepted (gate is live-only now).
 		with self.assertRaises(TypeError):
 			run(dry_run=False)
