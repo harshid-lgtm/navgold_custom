@@ -145,7 +145,7 @@ class AmazonControlCenter {
 	}
 
 	fire_strip(d) {
-		const v = (d.below_min && d.below_min.velocity) || {};
+		const v = d.below_min?.velocity || {};
 		const cell = (label, win) => {
 			const c = win || { count: 0, loss: 0 };
 			const hot = c.loss > 0;
@@ -274,10 +274,10 @@ class AmazonControlCenter {
 
 	stat_cards(d) {
 		const r = d.readiness;
-		const orders = (d.orders.summary || []).reduce(
-			(m, x) => ((m[x.label] = x), m),
-			{},
-		);
+		const orders = (d.orders.summary || []).reduce((m, x) => {
+			m[x.label] = x;
+			return m;
+		}, {});
 		const open_failed = orders['Open Failed Syncs'];
 		const mins = orders['Minutes Since Last Amazon Order'];
 
@@ -601,11 +601,10 @@ class AmazonControlCenter {
 			guard('Feed-status poller', true, 'every 15 min'),
 			guard(
 				'Telegram alerts',
-				(d.alerts || {}).telegram_enabled &&
-					(d.alerts || {}).telegram_configured,
-				!(d.alerts || {}).telegram_enabled
+				d.alerts?.telegram_enabled && d.alerts?.telegram_configured,
+				!d.alerts?.telegram_enabled
 					? 'Off'
-					: (d.alerts || {}).telegram_configured
+					: d.alerts?.telegram_configured
 					  ? 'On'
 					  : 'chat not set',
 			),
