@@ -118,8 +118,7 @@ def submit_pricing(pricing_names: list, test_mode: bool = False) -> dict:
 		}
 
 	except (AmazonOutboundFrozenError, PricingPushNotApprovedError) as e:
-		# Intentional gate (kill switch or Dry Run), not a transport failure. Mark the records
-		# "Skipped" so they stay out of the failed-sync triage queue and don't read as real errors.
+		# Intentional gate, not a transport failure: mark "Skipped" to keep it out of the failed-sync triage queue.
 		log.status = "Skipped"
 		log.error_message = str(e)
 		log.save()

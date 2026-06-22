@@ -188,8 +188,7 @@ class TestApprovalGate(IntegrationTestCase):
 			self.skipTest("no pricing fixture available")
 
 		with change_settings("Navgold Settings", {"repricer_enabled": 1}):
-			# Drive a real product all the way to the transport, then have the gate raise there.
-			# A gate exception must mark the log "Skipped" (not "Error"), not log_error, not re-raise.
+			# A gate exception at the transport must mark the log "Skipped" (not "Error"), not log_error, not re-raise.
 			with (
 				patch.object(repricer_client, "collect_pricing_violations", return_value={}),
 				patch.object(repricer_client, "partition_pricing_by_price_deviation", return_value=([], [])),

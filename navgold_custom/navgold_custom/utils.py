@@ -95,13 +95,12 @@ def get_conversion_factor(item_code: str, uom: str):
 
 
 class AmazonOutboundFrozenError(frappe.ValidationError):
-	# Distinct from a real transport/API failure so callers can mark records "Skipped"
-	# instead of polluting the failed-sync triage queue with deliberate blocks.
+	# Distinct from a transport failure so callers can mark records "Skipped", not failed-sync.
 	pass
 
 
 class PricingPushNotApprovedError(frappe.ValidationError):
-	# Same intent as the freeze error: a Dry Run block is an intentional gate, not a failure.
+	# A Dry Run block is an intentional gate, not a failure (see AmazonOutboundFrozenError).
 	pass
 
 
@@ -115,8 +114,6 @@ def assert_amazon_outbound_not_frozen():
 def assert_pricing_push_approved():
 	# Read uncached for the same reason as the freeze guard: the Dry Run / Live approval
 	# state must take effect immediately on long-running workers without a cache clear.
-	# This is the belt-and-suspenders gate that keeps every push blocked until a System
-	# Manager explicitly goes live, regardless of which caller reaches the transport layer.
 	if frappe.db.get_single_value("Navgold Settings", "pricing_sync_mode") != "Live":
 		raise PricingPushNotApprovedError(
 			frappe._(
