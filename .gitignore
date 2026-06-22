@@ -6,11 +6,3 @@ tags
 node_modules
 __pycache__
 reference_md
-
-# control-center SPA build outputs (built by CI from control_center/, never committed)
-navgold_custom/public/control_center/
-navgold_custom/www/control_center.html
-
-# control-center SPA generated type shims (unplugin-auto-import / vue-components)
-control_center/auto-imports.d.ts
-control_center/components.d.ts
