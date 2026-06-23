@@ -1,38 +1,17 @@
 # Copyright (c) 2026, developers@buildwithhussain.com and contributors
 # For license information, please see license.txt
 
-"""
-Manual prod hotfix: push fixed min/max/our_price for one or more SKUs to Amazon.
-
-Reuses the SP-API credentials from "Amazon SP API Settings" and submits a single
-JSON_LISTINGS_FEED with one purchasable_offer PATCH per SKU.
-
-Single / inline list:
-    bench --site navgold.localhost execute \
-        navgold_custom.navgold_custom.amazon_pricing.manual_price_push.run
-
-Many SKUs from a CSV (columns: sku, min, max, our_price):
-    bench --site navgold.localhost execute \
-        navgold_custom.navgold_custom.amazon_pricing.manual_price_push.run \
-        --kwargs "{'csv_path': '/path/to/prices.csv'}"
-"""
 
 import frappe
 from frappe.utils import now_datetime
 from frappe.utils.csvutils import read_csv_content
 from frappe.utils.data import cint, cstr, flt, orjson_dumps
+from frappe.utils.xlsxutils import read_xlsx_file_from_attached_file
 
 from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_submitter import (
 	PRICING_FEED_TYPE,
 	get_feeds_client,
 )
-
-# Default inline updates (used when no csv_path is passed). Keep the band tight: a placeholder
-# max far above the min trips the ratio guard below, so use a realistic ceiling.
-# Row shape: {"sku": <seller sku>, "min": <float>, "max": <float>, "our_price": <float>}
-DEFAULT_PRICE_UPDATES = [
-	{"sku": "CLS-CS462", "min": 8.86, "max": 14.99, "our_price": 8.86},
-]
 
 # Absolute fat-finger ceiling: a typo like 886.0 for 8.86 gets blocked before it reaches Amazon.
 SANE_MAX_PRICE = 5000.0
@@ -45,33 +24,28 @@ MAX_PRICE_RATIO = 100.0
 PRICE_PRECISION = 2
 
 
-def load_updates_from_csv(csv_path: str) -> list:
-	with open(csv_path) as csv_file:
-		rows = read_csv_content(csv_file.read())
-
+def parse_csv_rows(rows: list) -> list:
 	header = [cstr(column).strip() for column in rows[0]]
 	updates = []
 	for row in rows[1:]:
 		record = dict(zip(header, row, strict=False))
+		sku = cstr(record.get("sku")).strip()
+		if not sku:
+			continue
 		updates.append(
 			{
-				"sku": cstr(record["sku"]).strip(),
-				"min": flt(record["min"]),
-				"max": flt(record["max"]),
-				"our_price": flt(record["our_price"]),
+				"sku": sku,
+				"min": flt(record.get("min")),
+				"max": flt(record.get("max")),
+				"our_price": flt(record.get("our_price")),
 			}
 		)
 	return updates
 
 
-def load_updates_from_xlsx(xlsx_path: str) -> list:
-	# Expected columns: SKU, Minimum, Maximum. our_price is set to the Minimum
+def parse_xlsx_rows(rows: list) -> list:
+	# Columns: SKU, Minimum, Maximum. our_price is set to the Minimum
 	# (the file carries no explicit selling price).
-	import openpyxl
-
-	workbook = openpyxl.load_workbook(xlsx_path, read_only=True, data_only=True)
-	rows = list(workbook.active.iter_rows(values_only=True))
-
 	header = [cstr(column).strip().lower() for column in rows[0]]
 	sku_index = header.index("sku")
 	min_index = header.index("minimum")
@@ -92,6 +66,15 @@ def load_updates_from_xlsx(xlsx_path: str) -> list:
 			}
 		)
 	return updates
+
+
+def load_updates_from_attachment(file_url: str) -> list:
+	content = frappe.get_doc("File", {"file_url": file_url}).get_content()
+	if cstr(file_url).lower().endswith(".xlsx"):
+		return parse_xlsx_rows(read_xlsx_file_from_attached_file(fcontent=content))
+	if isinstance(content, bytes):
+		content = content.decode("utf-8")
+	return parse_csv_rows(read_csv_content(content))
 
 
 def build_purchasable_offer(update: dict) -> dict:
@@ -161,14 +144,6 @@ def fetch_feed_result(log_name: str) -> dict:
 	return {"processing_status": processing_status, "result": frappe.parse_json(report)}
 
 
-def load_updates(csv_path: str | None, xlsx_path: str | None) -> list:
-	if xlsx_path:
-		return load_updates_from_xlsx(xlsx_path)
-	if csv_path:
-		return load_updates_from_csv(csv_path)
-	return DEFAULT_PRICE_UPDATES
-
-
 def validate_updates(updates: list) -> None:
 	problems = []
 	for update in updates:
@@ -209,6 +184,27 @@ def validate_updates(updates: list) -> None:
 		frappe.throw(message)
 
 
+def sync_pricing_band(updates: list) -> int:
+	# A manual push writes a band straight to Amazon, bypassing the strategy calc that normally
+	# keeps current_min/max in step. Mirror the pushed band back so the daily snapshot stays faithful.
+	by_sku = {update["sku"]: update for update in updates}
+	existing = frappe.get_all(
+		"Amazon Product Pricing",
+		filters={"name": ["in", list(by_sku)]},
+		pluck="name",
+	)
+	band_updates = {
+		name: {
+			"current_min_price": flt(by_sku[name]["min"]),
+			"current_max_price": flt(by_sku[name]["max"]),
+		}
+		for name in existing
+	}
+	if band_updates:
+		frappe.db.bulk_update("Amazon Product Pricing", band_updates)
+	return len(band_updates)
+
+
 def submit_feed(updates: list, settings) -> dict:
 	skus = [update["sku"] for update in updates]
 	json_content = build_feed(updates, settings.merchant_id, settings.get_marketplace_id())
@@ -237,9 +233,17 @@ def submit_feed(updates: list, settings) -> dict:
 	log.submitted_at = now_datetime()
 	log.save()
 
+	synced = sync_pricing_band(updates)
+
 	frappe.db.commit()
 
-	return {"feed_id": feed_id, "log_name": log.name, "sku_count": len(updates), "skus": skus}
+	return {
+		"feed_id": feed_id,
+		"log_name": log.name,
+		"sku_count": len(updates),
+		"skus": skus,
+		"band_synced": synced,
+	}
 
 
 @frappe.whitelist()
@@ -276,52 +280,3 @@ def push_manual_prices(updates: str | list, live: bool = False) -> dict:
 
 	settings = frappe.get_single("Amazon SP API Settings")
 	return submit_feed(normalised, settings)
-
-
-def run(
-	csv_path: str | None = None,
-	xlsx_path: str | None = None,
-	live: bool = False,
-	preview_path: str | None = None,
-) -> dict:
-	# `live` is the sole switch: derive dry_run from it unconditionally so no stray kwarg
-	# (e.g. a leftover dry_run=False) can ever bypass the gate.
-	dry_run = not live
-
-	updates = load_updates(csv_path, xlsx_path)
-	if not updates:
-		frappe.throw("No price updates to submit")
-
-	validate_updates(updates)
-
-	settings = frappe.get_single("Amazon SP API Settings")
-	json_content = build_feed(updates, settings.merchant_id, settings.get_marketplace_id())
-	feed_text = json_content.decode() if isinstance(json_content, bytes) else json_content
-
-	print(f"Prepared feed for {len(updates)} SKU(s).")
-	print("First 3 rows:")
-	for update in updates[:3]:
-		print(f"  {update['sku']}: min={update['min']} max={update['max']} our_price={update['our_price']}")
-	print("Last row:")
-	last = updates[-1]
-	print(f"  {last['sku']}: min={last['min']} max={last['max']} our_price={last['our_price']}")
-
-	if not preview_path:
-		preview_path = f"/tmp/manual_price_feed_{len(updates)}_skus.json"
-	with open(preview_path, "w") as preview_file:
-		preview_file.write(feed_text)
-	print(f"\nFull feed written to: {preview_path}")
-
-	if dry_run:
-		print("Dry run — nothing submitted.")
-		return {
-			"dry_run": True,
-			"sku_count": len(updates),
-			"preview_path": preview_path,
-		}
-
-	result = submit_feed(updates, settings)
-
-	print(f"\nSubmitted feed: feed_id={result['feed_id']}, log={result['log_name']}")
-	print(f"Check status with: check_feed_status('{result['log_name']}')")
-	return result
