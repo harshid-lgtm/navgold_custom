@@ -241,6 +241,7 @@ class SPAPI:
 			raise SPAPIError(
 				error=f"HTTP {e.response.status_code}",
 				error_description=description,
+				status_code=e.response.status_code,
 			) from None
 		except Exception as e:
 			raise SPAPIError(
@@ -484,6 +485,70 @@ class Listings(SPAPI):
 		if not summaries:
 			return None
 		return summaries[0]
+
+	# Used for Bulk Fetch of CUrrent Price Listing
+	def search_items(
+		self,
+		included_data: str = "summaries",
+		page_size: int = 20,
+		marketplace_id: str | None = None,
+	) -> list:
+		# Bulk pagination instead of one get_listing_item per SKU, which throttles on large catalogues.
+		if not marketplace_id:
+			marketplace_id = self.marketplace_id
+
+		append_to_base_uri = f"items/{self.seller_id}"
+		items = []
+		page_token = None
+		while True:
+			params = {
+				"marketplaceIds": marketplace_id,
+				"issueLocale": "en_US",
+				"includedData": included_data,
+				"pageSize": page_size,
+				"pageToken": page_token,
+			}
+			response = retry_with_backoff(
+				lambda params=params: self.make_request(append_to_base_uri=append_to_base_uri, params=params),
+				error_title="Listings searchItems failed",
+			)
+			items.extend(response.get("items") or [])
+			page_token = (response.get("pagination") or {}).get("nextToken")
+			if not page_token:
+				break
+		return items
+
+	BY_SKU_BATCH_SIZE = 20
+
+	def search_items_by_skus(
+		self,
+		skus: list[str],
+		included_data: str = "attributes",
+		marketplace_id: str | None = None,
+	) -> list:
+		# Unfiltered searchItems hard-caps at 1000 results; querying by explicit identifiers
+		# (max 20 per call) is the only way to cover the full catalogue.
+		if not marketplace_id:
+			marketplace_id = self.marketplace_id
+
+		append_to_base_uri = f"items/{self.seller_id}"
+		items = []
+		for start in range(0, len(skus), self.BY_SKU_BATCH_SIZE):
+			batch = skus[start : start + self.BY_SKU_BATCH_SIZE]
+			params = {
+				"marketplaceIds": marketplace_id,
+				"identifiers": ",".join(batch),
+				"identifiersType": "SKU",
+				"issueLocale": "en_US",
+				"includedData": included_data,
+				"pageSize": self.BY_SKU_BATCH_SIZE,
+			}
+			response = retry_with_backoff(
+				lambda params=params: self.make_request(append_to_base_uri=append_to_base_uri, params=params),
+				error_title="Listings searchItems by SKU failed",
+			)
+			items.extend(response.get("items") or [])
+		return items
 
 
 class FBAInventory(SPAPI):
@@ -829,19 +894,23 @@ class Feeds(SPAPI):
 		Returns:
 			Dictionary containing feeds list and pagination info
 		"""
-		data = {
-			"pageSize": page_size,
-			"nextToken": next_token,
-			"createdSince": created_since,
-			"createdUntil": created_until,
-		}
+		# Amazon rejects nextToken combined with any other query parameter, so on pagination
+		# send it alone. The array params (feedTypes/marketplaceIds/processingStatuses) must be
+		# comma-separated values — indexed notation (feedTypes[0]=…) is rejected with HTTP 400.
+		if next_token:
+			data = {"nextToken": next_token}
+		else:
+			data = {
+				"pageSize": page_size,
+				"createdSince": created_since,
+				"createdUntil": created_until,
+				"feedTypes": ",".join(feed_types) if feed_types else None,
+				"marketplaceIds": ",".join(marketplace_ids or [self.marketplace_id]),
+			}
+			if processing_statuses:
+				data["processingStatuses"] = ",".join(processing_statuses)
 
-		self.list_to_dict("feedTypes", feed_types, data)
-		self.list_to_dict("marketplaceIds", marketplace_ids or [self.marketplace_id], data)
-		self.list_to_dict("processingStatuses", processing_statuses, data)
-
-		append_to_base_uri = "feeds"
-		return self.make_request(append_to_base_uri=append_to_base_uri, params=data)
+		return self.make_request(append_to_base_uri="feeds", params=data)
 
 
 class FulfillmentInbound(SPAPI):

@@ -6,57 +6,84 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils.data import cint, flt, now_datetime
 
-SNAPSHOT_FIELDS = [
+from navgold_custom.navgold_custom.amazon_pricing.live_pricing_fetcher import fetch_live_prices
+
+PRICING_FIELDS = [
 	"name",
 	"proxy_sku",
 	"active_strategy",
-	"current_min_price",
-	"current_max_price",
+	"is_active",
 	"fixed_price",
 	"fixed_price_value",
 ]
+
+
+def resolve_system_status(pricing) -> str:
+	if pricing is None:
+		return "Not in System"
+	return "Active" if cint(pricing.is_active) else "Disabled"
+
+
+def build_snapshot_row(sku: str, live: dict, pricing) -> dict:
+	selling_price = live.get("selling_price")
+	return {
+		"pricing": pricing.name if pricing else None,
+		"proxy_sku": pricing.proxy_sku if pricing else sku,
+		"active_strategy": pricing.active_strategy if pricing else None,
+		"min_price": flt(live["min"]),
+		"max_price": flt(live["max"]),
+		"fixed_price": cint(pricing.fixed_price) if pricing else 0,
+		"fixed_price_value": flt(pricing.fixed_price_value) if pricing else 0,
+		"live_selling_price": flt(selling_price) if selling_price is not None else None,
+		"source": "Amazon",
+		"system_status": resolve_system_status(pricing),
+	}
 
 
 class AmazonPricingSnapshot(Document):
 	def get_rows(self) -> list[dict]:
 		return frappe.parse_json(self.snapshot_data or "[]")
 
-	def populate_from_current_pricing(self) -> int:
-		rows = frappe.get_all(
-			"Amazon Product Pricing",
-			filters={"is_active": 1},
-			fields=SNAPSHOT_FIELDS,
-		)
-		data = [
-			{
-				"pricing": row.name,
-				"proxy_sku": row.proxy_sku,
-				"active_strategy": row.active_strategy,
-				"min_price": flt(row.current_min_price),
-				"max_price": flt(row.current_max_price),
-				"fixed_price": cint(row.fixed_price),
-				"fixed_price_value": flt(row.fixed_price_value),
-			}
-			for row in rows
-		]
+	def populate_from_amazon_listings(self) -> int:
+		# Amazon is the source of truth. If the live pull fails there is nothing to capture, so abort.
+		live_prices = fetch_live_prices()
+
+		pricing_map = {
+			row.name: row for row in frappe.get_all("Amazon Product Pricing", fields=PRICING_FIELDS)
+		}
+
+		data = []
+		for sku, live in live_prices.items():
+			# No seller-allowed band on Amazon means no price to roll back to — skip those.
+			if not (live.get("min") and live.get("max")):
+				continue
+			data.append(build_snapshot_row(sku, live, pricing_map.get(sku)))
+
 		self.snapshot_datetime = now_datetime()
 		self.item_count = len(data)
 		self.snapshot_data = frappe.as_json(data)
+		self.amazon_sourced_count = len(data)
+		self.price_source = "Amazon Live"
 		return len(data)
 
 	@frappe.whitelist()
 	def capture_now(self) -> dict:
 		frappe.only_for("System Manager")
-		# Refuse to clobber a snapshot that already holds a captured price set — it is meant
-		# to be an immutable known-good point to roll back to.
+		# A captured snapshot is an immutable known-good point — never overwrite it.
 		if self.get_rows():
 			frappe.throw(_("This snapshot already holds captured prices. Create a new one instead."))
 		if not self.trigger_type:
 			self.trigger_type = "Manual"
-		count = self.populate_from_current_pricing()
-		self.save()
-		frappe.msgprint(_("Captured current prices for {0} SKU(s).").format(count))
-		return {"item_count": count}
+			self.save()
+		# The live pull paginates the whole catalogue — too slow to block the request.
+		frappe.enqueue(
+			"navgold_custom.navgold_custom.doctype.amazon_pricing_snapshot.amazon_pricing_snapshot.process_capture",
+			queue="long",
+			timeout=1800,
+			snapshot_name=self.name,
+			user=frappe.session.user,
+		)
+		return {"queued": True}
 
 	@frappe.whitelist()
 	def revert_prices(self) -> dict:
@@ -103,8 +130,7 @@ class AmazonPricingSnapshot(Document):
 		if not rows:
 			frappe.throw(_("This snapshot has no SKUs to publish."))
 
-		# When the user ticks a subset in the preview, narrow to it. Selection can only ever
-		# shrink the set, never widen it beyond what this snapshot already captured.
+		# A preview selection can only shrink the set, never widen it.
 		if pricing_names is not None:
 			selected = set(
 				frappe.parse_json(pricing_names) if isinstance(pricing_names, str) else pricing_names
@@ -113,8 +139,7 @@ class AmazonPricingSnapshot(Document):
 			if not rows:
 				frappe.throw(_("None of the selected SKUs are in this snapshot."))
 
-		# Honour "Publish Selected Prices Only" the same way the scheduled publishers do,
-		# so a snapshot publish can never push a wider set than a normal sync would.
+		# Honour "Publish Selected Prices Only" so a snapshot publish never pushes wider than a sync.
 		from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import (
 			get_allowed_pricing_proxy_skus,
 		)
@@ -127,9 +152,8 @@ class AmazonPricingSnapshot(Document):
 				_("No SKUs in this snapshot are in the current 'Publish Selected Prices Only' list.")
 			)
 
-		# Both publishers are @frappe.whitelist() with a `pricing_names: str` annotation, so the
-		# framework's type validation rejects a raw list even on direct Python calls. Serialize to
-		# JSON (their bodies parse_json it straight back) to match that documented contract.
+		# Both publishers are whitelisted with a `pricing_names: str` annotation, so serialize
+		# to JSON (their bodies parse_json it back) to satisfy the type validation.
 		pricing_names = frappe.as_json([row["pricing"] for row in rows])
 
 		if channel == "Repricer":
@@ -147,17 +171,41 @@ class AmazonPricingSnapshot(Document):
 		frappe.throw(_("Unknown publish channel {0}").format(channel))
 
 
+def process_capture(snapshot_name: str, user: str | None = None) -> None:
+	target_user = user or frappe.session.user
+	snapshot = frappe.get_doc("Amazon Pricing Snapshot", snapshot_name)
+	try:
+		count = snapshot.populate_from_amazon_listings()
+	except Exception as exception:
+		# The live pull is the only price source now, so a failure means there is nothing to
+		# capture — tell the waiting form instead of letting it hang on the captured event.
+		frappe.log_error(f"Live price fetch failed: {exception!s}", "Amazon Pricing Snapshot")
+		frappe.publish_realtime(
+			"amazon_snapshot_capture_failed",
+			{"name": snapshot_name, "error": str(exception)},
+			user=target_user,
+		)
+		raise
+	snapshot.save()
+	frappe.db.commit()
+	frappe.publish_realtime(
+		"amazon_snapshot_captured",
+		{"name": snapshot_name, "item_count": count, "price_source": snapshot.price_source},
+		user=target_user,
+	)
+
+
 def capture_snapshot(trigger: str = "Manual", notes: str | None = None) -> str:
 	snapshot = frappe.new_doc("Amazon Pricing Snapshot")
 	snapshot.trigger_type = trigger
 	snapshot.notes = notes
-	snapshot.populate_from_current_pricing()
+	snapshot.populate_from_amazon_listings()
 	snapshot.insert(ignore_permissions=True)
 	return snapshot.name
 
 
 @frappe.whitelist()
-def take_snapshot_now(notes: str | None = None) -> dict:
+def capture_snapshot_now(notes: str | None = None) -> dict:
 	frappe.only_for("System Manager")
 	name = capture_snapshot(trigger="Manual", notes=notes)
 	return {"name": name}

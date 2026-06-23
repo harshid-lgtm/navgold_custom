@@ -6,7 +6,7 @@ frappe.ui.form.on('Amazon Pricing Snapshot', {
 		if (frm.is_new()) {
 			frm.dashboard.set_headline(
 				__(
-					'Save this snapshot, then click <b>Capture Current Prices</b> to fill it from live pricing.',
+					'Save this snapshot, then click <b>Capture Live Prices</b> to pull the live min/max from Amazon.',
 				),
 			);
 			return;
@@ -14,22 +14,47 @@ frappe.ui.form.on('Amazon Pricing Snapshot', {
 
 		if (!cint(frm.doc.item_count)) {
 			frm
-				.add_custom_button(__('Capture Current Prices'), async () => {
+				.add_custom_button(__('Capture Live Prices'), async () => {
 					const confirmed = await navgold.confirm_dialog(
 						__(
-							'Capture the current ERP min/max/strategy for every active SKU into this snapshot?',
+							'Pull the live min/max and selling price from Amazon for every active SKU into this snapshot?',
 						),
 					);
 					if (!confirmed) return;
-					const { message } = await frm.call('capture_now');
+					await frm.call('capture_now');
 					frappe.show_alert({
-						message: __('Captured {0} SKUs', [message.item_count]),
-						indicator: 'green',
+						message: __(
+							'Live capture started from Amazon — this page refreshes when it lands.',
+						),
+						indicator: 'blue',
 					});
-					frm.reload_doc();
+					frappe.realtime.on('amazon_snapshot_captured', (data) => {
+						if (data.name !== frm.doc.name) return;
+						frappe.realtime.off('amazon_snapshot_captured');
+						frappe.realtime.off('amazon_snapshot_capture_failed');
+						frappe.msgprint(
+							__('Captured {0} SKUs ({1})', [
+								data.item_count,
+								data.price_source,
+							]),
+						);
+						frm.reload_doc();
+					});
+					frappe.realtime.on('amazon_snapshot_capture_failed', (data) => {
+						if (data.name !== frm.doc.name) return;
+						frappe.realtime.off('amazon_snapshot_captured');
+						frappe.realtime.off('amazon_snapshot_capture_failed');
+						frappe.msgprint({
+							title: __('Live capture failed'),
+							indicator: 'red',
+							message: __('Could not pull live prices from Amazon: {0}', [
+								data.error || __('unknown error'),
+							]),
+						});
+					});
 				})
 				.addClass('btn-primary');
-			render_preview(frm);
+			refresh_preview(frm);
 			return;
 		}
 
@@ -42,13 +67,12 @@ frappe.ui.form.on('Amazon Pricing Snapshot', {
 			);
 			if (!confirmed) return;
 			const { message } = await frm.call('revert_prices');
-			frappe.show_alert({
-				message: __('Reverted {0} SKUs ({1} skipped)', [
+			frappe.msgprint(
+				__('Reverted {0} SKUs ({1} skipped)', [
 					message.reverted,
 					message.skipped,
 				]),
-				indicator: 'orange',
-			});
+			);
 			frm.reload_doc();
 		});
 
@@ -73,17 +97,17 @@ frappe.ui.form.on('Amazon Pricing Snapshot', {
 			);
 		}
 
-		render_preview(frm);
-		render_variance(frm);
+		refresh_preview(frm);
+		refresh_variance(frm);
 	},
 });
 
-function render_variance(frm) {
+function refresh_variance(frm) {
 	if (!frm.doc.variance_data) return;
 	let variance = {};
 	try {
 		variance = JSON.parse(frm.doc.variance_data);
-	} catch (e) {
+	} catch {
 		return;
 	}
 	const summary = variance.summary || {};
@@ -97,11 +121,11 @@ function render_variance(frm) {
 					row.prev_min == null ? '—' : format_currency(row.prev_min, 'GBP')
 				}</td>
 				<td class="text-right">${format_currency(row.min_price || 0, 'GBP')}</td>
-				<td class="text-right" style="color:${delta_colour(
+				<td class="text-right" style="color:${get_delta_colour(
 					row.min_delta_pct,
 				)}">${format_delta(row.min_delta_pct)}</td>
 				<td class="text-right">${format_currency(row.max_price || 0, 'GBP')}</td>
-				<td class="text-right" style="color:${delta_colour(
+				<td class="text-right" style="color:${get_delta_colour(
 					row.max_delta_pct,
 				)}">${format_delta(row.max_delta_pct)}</td>
 				<td>${frappe.utils.escape_html(row.status || '')}</td>
@@ -139,7 +163,7 @@ function render_variance(frm) {
 	`);
 }
 
-function delta_colour(pct) {
+function get_delta_colour(pct) {
 	if (flt(pct) > 0) return '#b94a48';
 	if (flt(pct) < 0) return '#3c763d';
 	return 'inherit';
@@ -175,18 +199,15 @@ async function publish(frm, channel) {
 	const { message } = await frm.call('publish', { channel, pricing_names });
 	const count =
 		message.synced ?? message.message_count ?? message.submitted ?? '';
-	frappe.show_alert({
-		message: __('Published to {0}: {1}', [channel, count]),
-		indicator: 'green',
-	});
+	frappe.msgprint(__('Published to {0}: {1}', [channel, count]));
 }
 
-function render_preview(frm) {
+function refresh_preview(frm) {
 	const wrapper = frm.get_field('preview_html').$wrapper;
 	let rows = [];
 	try {
 		rows = JSON.parse(frm.doc.snapshot_data || '[]');
-	} catch (e) {
+	} catch {
 		rows = [];
 	}
 	const sample = rows.slice(0, 500);
@@ -200,7 +221,13 @@ function render_preview(frm) {
 				<td>${frappe.utils.escape_html(row.active_strategy || '')}</td>
 				<td class="text-right">${format_currency(row.min_price || 0, 'GBP')}</td>
 				<td class="text-right">${format_currency(row.max_price || 0, 'GBP')}</td>
+				<td class="text-right">${
+					is_null(row.live_selling_price)
+						? '—'
+						: format_currency(row.live_selling_price, 'GBP')
+				}</td>
 				<td class="text-center">${row.fixed_price ? '✓' : ''}</td>
+				<td>${frappe.utils.escape_html(row.system_status || '')}</td>
 			</tr>`,
 		)
 		.join('');
@@ -214,11 +241,12 @@ function render_preview(frm) {
 				<thead><tr>
 					<th class="text-center"><input type="checkbox" class="snapshot-check-all" checked></th>
 					<th>SKU</th><th>Strategy</th><th class="text-right">Min</th>
-					<th class="text-right">Max</th><th class="text-center">Fixed</th>
+					<th class="text-right">Max</th><th class="text-right">Selling</th>
+					<th class="text-center">Fixed</th><th>In System</th>
 				</tr></thead>
 				<tbody>${
 					body ||
-					'<tr><td colspan="6" class="text-center text-muted">Empty snapshot</td></tr>'
+					'<tr><td colspan="8" class="text-center text-muted">Empty snapshot</td></tr>'
 				}</tbody>
 			</table>
 		</div>
