@@ -1,7 +1,7 @@
 {
 	"actions": [],
 	"allow_rename": 1,
-	"creation": "2025-11-22 12:34:03.456420",
+	"creation": "2026-06-23 03:45:37.633192",
 	"doctype": "DocType",
 	"engine": "InnoDB",
 	"field_order": [
@@ -19,34 +19,21 @@
 		"subscribe_and_save_warehouse",
 		"stock_allocation_section",
 		"default_stock_allocation_warehouse",
+		"last_reports_section",
+		"last_listings_report",
+		"last_fba_fee_report",
+		"last_afn_stock_report",
+		"column_break_fba_fee_report",
+		"last_listings_synced_at",
+		"last_fba_fee_synced_at",
+		"pricing_tab",
 		"amazon_pricing_section",
 		"amazon_pricing_enabled",
-		"auto_sync_cogs",
+		"column_break_pricing",
 		"commission_threshold",
 		"high_price_commission_adjustment",
-		"column_break_pricing",
-		"default_strategy_template",
-		"default_cost_set_template",
-		"cogs_supplier",
-		"fba_fee_report_section",
-		"last_fba_fee_report",
-		"column_break_fba_fee_report",
-		"last_fba_fee_synced_at",
-		"repricer_section",
-		"repricer_enabled",
-		"column_break_repricer",
-		"repricer_api_username",
-		"repricer_api_password",
-		"fba_inbound_tab",
-		"fba_inbound_enabled",
-		"fba_source_address",
-		"column_break_fba_defaults",
-		"default_prep_owner",
-		"default_label_owner",
-		"pricing_tab",
 		"strategy_mapping_section",
 		"strategy_name_mapping",
-		"group_strategies_section",
 		"group_strategies_into_pricing",
 		"pricing_publishing_section",
 		"amazon_publishing_mode",
@@ -58,7 +45,6 @@
 		"enable_pricing_sync",
 		"freeze_amazon_outbound",
 		"pause_strategy_refresh",
-		"enable_afn_stock_sync",
 		"sync_pricing_now",
 		"column_break_pricing_sync",
 		"pricing_sync_approved_by",
@@ -72,54 +58,44 @@
 		"price_change_block_direction",
 		"column_break_price_guard",
 		"pricing_alert_recipients",
+		"repricer_section",
+		"repricer_enabled",
+		"column_break_repricer",
+		"repricer_api_username",
+		"repricer_api_password",
 		"stock_tab",
+		"stock_publishing_section",
 		"stock_publishing_mode",
-		"zero_stock_items"
+		"zero_stock_items",
+		"afn_stock_sync_section",
+		"enable_afn_stock_sync",
+		"last_afn_stock_synced_at",
+		"column_break_afn_stock",
+		"last_afn_stock_proxy_count",
+		"last_afn_stock_items_count",
+		"fba_inbound_tab",
+		"fba_inbound_enabled",
+		"fba_source_address",
+		"column_break_fba_defaults",
+		"default_prep_owner",
+		"default_label_owner",
+		"alerts_safety_tab",
+		"telegram_alert_section",
+		"enable_telegram_alerts",
+		"telegram_bot_token",
+		"telegram_chat_id",
+		"column_break_telegram",
+		"detect_telegram_chat_id",
+		"send_telegram_test",
+		"loss_circuit_breaker_section",
+		"enable_loss_circuit_breaker",
+		"loss_circuit_breaker_threshold"
 	],
 	"fields": [
 		{
 			"fieldname": "general_tab",
 			"fieldtype": "Tab Break",
 			"label": "General"
-		},
-		{
-			"fieldname": "fba_inbound_tab",
-			"fieldtype": "Tab Break",
-			"label": "FBA Inbound"
-		},
-		{
-			"default": "0",
-			"fieldname": "fba_inbound_enabled",
-			"fieldtype": "Check",
-			"label": "FBA Inbound Enabled"
-		},
-		{
-			"depends_on": "eval:doc.fba_inbound_enabled",
-			"fieldname": "fba_source_address",
-			"fieldtype": "Link",
-			"label": "Source Address",
-			"link_filters": "[[\"Address\",\"address_type\",\"=\",\"Warehouse\"]]",
-			"options": "Address"
-		},
-		{
-			"fieldname": "column_break_fba_defaults",
-			"fieldtype": "Column Break"
-		},
-		{
-			"default": "SELLER",
-			"depends_on": "eval:doc.fba_inbound_enabled",
-			"fieldname": "default_prep_owner",
-			"fieldtype": "Select",
-			"label": "Default Prep Owner",
-			"options": "AMAZON\nSELLER\nNONE"
-		},
-		{
-			"default": "SELLER",
-			"depends_on": "eval:doc.fba_inbound_enabled",
-			"fieldname": "default_label_owner",
-			"fieldtype": "Select",
-			"label": "Default Label Owner",
-			"options": "AMAZON\nSELLER\nNONE"
 		},
 		{
 			"fieldname": "buying_price_list",
@@ -140,14 +116,14 @@
 			"label": "Tote Weight Limit (In gram)"
 		},
 		{
-			"fieldname": "generate_proxy_skus",
-			"fieldtype": "Button",
-			"label": "Generate Proxy SKUs"
-		},
-		{
 			"fieldname": "proxy_skus_section",
 			"fieldtype": "Section Break",
 			"label": "Proxy SKUs"
+		},
+		{
+			"fieldname": "generate_proxy_skus",
+			"fieldtype": "Button",
+			"label": "Generate Proxy SKUs"
 		},
 		{
 			"fieldname": "column_break_zqvs",
@@ -175,7 +151,8 @@
 		},
 		{
 			"fieldname": "section_break_oarw",
-			"fieldtype": "Section Break"
+			"fieldtype": "Section Break",
+			"label": "Warehouses"
 		},
 		{
 			"fieldname": "subscribe_and_save_warehouse",
@@ -186,8 +163,7 @@
 		},
 		{
 			"fieldname": "stock_allocation_section",
-			"fieldtype": "Section Break",
-			"label": "Stock Allocation"
+			"fieldtype": "Column Break"
 		},
 		{
 			"description": "Fallback warehouse when stock is insufficient across all warehouses during Sales Order submission",
@@ -195,6 +171,54 @@
 			"fieldtype": "Link",
 			"label": "Default Stock Allocation Warehouse",
 			"options": "Warehouse"
+		},
+		{
+			"collapsible": 1,
+			"fieldname": "last_reports_section",
+			"fieldtype": "Section Break",
+			"label": "Last Fetched Reports"
+		},
+		{
+			"description": "Most recent GET_MERCHANT_LISTINGS_ALL_DATA report from Amazon. Replaces the previous file on every fetch.",
+			"fieldname": "last_listings_report",
+			"fieldtype": "Attach",
+			"label": "Last Listings Report",
+			"read_only": 1
+		},
+		{
+			"description": "Latest FBA fee report fetched from Amazon (GET_FBA_ESTIMATED_FBA_FEES_TXT_DATA). Replaces the previous file on every fetch.",
+			"fieldname": "last_fba_fee_report",
+			"fieldtype": "Attach",
+			"label": "Last FBA Fee Report",
+			"read_only": 1
+		},
+		{
+			"description": "Most recent FBA fulfillable inventory snapshot (JSON) from the AFN stock fetch. Replaces the previous file on every fetch.",
+			"fieldname": "last_afn_stock_report",
+			"fieldtype": "Attach",
+			"label": "Last AFN Stock Report",
+			"read_only": 1
+		},
+		{
+			"fieldname": "column_break_fba_fee_report",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "last_listings_synced_at",
+			"fieldtype": "Datetime",
+			"label": "Last Listings Synced At",
+			"read_only": 1
+		},
+		{
+			"fieldname": "last_fba_fee_synced_at",
+			"fieldtype": "Datetime",
+			"label": "Last FBA Fee Synced At",
+			"read_only": 1
+		},
+		{
+			"fieldname": "pricing_tab",
+			"fieldtype": "Tab Break",
+			"label": "Pricing"
 		},
 		{
 			"fieldname": "amazon_pricing_section",
@@ -207,95 +231,6 @@
 			"fieldname": "amazon_pricing_enabled",
 			"fieldtype": "Check",
 			"label": "Amazon Pricing Enabled"
-		},
-		{
-			"default": "0",
-			"depends_on": "eval:doc.amazon_pricing_enabled",
-			"description": "Automatically sync COGS from Supplier Item Price and Stock",
-			"fieldname": "auto_sync_cogs",
-			"fieldtype": "Check",
-			"label": "Auto Sync COGS"
-		},
-		{
-			"fieldname": "column_break_pricing",
-			"fieldtype": "Column Break"
-		},
-		{
-			"depends_on": "eval:doc.amazon_pricing_enabled",
-			"description": "Default template for pricing strategies",
-			"fieldname": "default_strategy_template",
-			"fieldtype": "Link",
-			"label": "Default Strategy Template",
-			"options": "Amazon Strategy Template"
-		},
-		{
-			"depends_on": "eval:doc.amazon_pricing_enabled",
-			"description": "Default template for cost sets",
-			"fieldname": "default_cost_set_template",
-			"fieldtype": "Link",
-			"label": "Default Cost Set Template",
-			"options": "Amazon Cost Set Template"
-		},
-		{
-			"depends_on": "eval:doc.auto_sync_cogs",
-			"description": "Supplier for COGS auto-sync",
-			"fieldname": "cogs_supplier",
-			"fieldtype": "Link",
-			"label": "COGS Supplier",
-			"options": "Supplier"
-		},
-		{
-			"collapsible": 1,
-			"depends_on": "eval:doc.amazon_pricing_enabled",
-			"fieldname": "fba_fee_report_section",
-			"fieldtype": "Section Break",
-			"label": "FBA Fee Report"
-		},
-		{
-			"description": "Latest FBA fee report fetched from Amazon (GET_FBA_ESTIMATED_FBA_FEES_TXT_DATA)",
-			"fieldname": "last_fba_fee_report",
-			"fieldtype": "Attach",
-			"label": "Last FBA Fee Report",
-			"read_only": 1
-		},
-		{
-			"fieldname": "column_break_fba_fee_report",
-			"fieldtype": "Column Break"
-		},
-		{
-			"fieldname": "last_fba_fee_synced_at",
-			"fieldtype": "Datetime",
-			"label": "Last FBA Fee Synced At",
-			"read_only": 1
-		},
-		{
-			"depends_on": "eval:doc.amazon_pricing_enabled",
-			"fieldname": "repricer_section",
-			"fieldtype": "Section Break",
-			"label": "Repricer.com Integration"
-		},
-		{
-			"default": "0",
-			"description": "Enable Repricer.com integration",
-			"fieldname": "repricer_enabled",
-			"fieldtype": "Check",
-			"label": "Repricer Enabled"
-		},
-		{
-			"fieldname": "column_break_repricer",
-			"fieldtype": "Column Break"
-		},
-		{
-			"depends_on": "eval:doc.repricer_enabled",
-			"fieldname": "repricer_api_username",
-			"fieldtype": "Data",
-			"label": "Repricer API Username"
-		},
-		{
-			"depends_on": "eval:doc.repricer_enabled",
-			"fieldname": "repricer_api_password",
-			"fieldtype": "Password",
-			"label": "Repricer API Password"
 		},
 		{
 			"default": "10",
@@ -314,9 +249,8 @@
 			"label": "High Price Commission Adjustment"
 		},
 		{
-			"fieldname": "pricing_tab",
-			"fieldtype": "Tab Break",
-			"label": "Pricing"
+			"fieldname": "column_break_pricing",
+			"fieldtype": "Column Break"
 		},
 		{
 			"description": "Map strategy names to pricing fields. These mappings are used when grouping strategies into Amazon Product Pricing records.",
@@ -329,10 +263,6 @@
 			"fieldtype": "Table",
 			"label": "Strategy Name Mapping",
 			"options": "Strategy Name Mapping"
-		},
-		{
-			"fieldname": "group_strategies_section",
-			"fieldtype": "Section Break"
 		},
 		{
 			"fieldname": "group_strategies_into_pricing",
@@ -410,14 +340,6 @@
 			"fieldname": "pause_strategy_refresh",
 			"fieldtype": "Check",
 			"label": "Pause Strategy Refresh"
-		},
-		{
-			"default": "0",
-			"description": "Fetch FBA fulfillable stock from Amazon every 30 minutes and use it to drive FBA strategy selection.",
-			"fieldname": "enable_afn_stock_sync",
-			"fieldtype": "Check",
-			"label": "Enable Scheduled AFN Stock Sync",
-			"read_only_depends_on": "eval:frappe.session.user != \"Administrator\""
 		},
 		{
 			"description": "Submit a pricing feed to Amazon and sync prices to Repricer (if enabled) for all active Amazon Product Pricing records. Honors the Pricing Publishing Mode selection above.",
@@ -500,9 +422,43 @@
 			"label": "Pricing Alert Recipients"
 		},
 		{
+			"depends_on": "eval:doc.amazon_pricing_enabled",
+			"fieldname": "repricer_section",
+			"fieldtype": "Section Break",
+			"label": "Repricer.com Integration"
+		},
+		{
+			"default": "0",
+			"description": "Enable Repricer.com integration",
+			"fieldname": "repricer_enabled",
+			"fieldtype": "Check",
+			"label": "Repricer Enabled"
+		},
+		{
+			"fieldname": "column_break_repricer",
+			"fieldtype": "Column Break"
+		},
+		{
+			"depends_on": "eval:doc.repricer_enabled",
+			"fieldname": "repricer_api_username",
+			"fieldtype": "Data",
+			"label": "Repricer API Username"
+		},
+		{
+			"depends_on": "eval:doc.repricer_enabled",
+			"fieldname": "repricer_api_password",
+			"fieldtype": "Password",
+			"label": "Repricer API Password"
+		},
+		{
 			"fieldname": "stock_tab",
 			"fieldtype": "Tab Break",
 			"label": "Stock"
+		},
+		{
+			"fieldname": "stock_publishing_section",
+			"fieldtype": "Section Break",
+			"label": "Stock Publishing"
 		},
 		{
 			"default": "Publish Actual Stock",
@@ -517,13 +473,155 @@
 			"fieldtype": "Table",
 			"label": "Zero Stock Items",
 			"options": "Navgold Zero Stock Item"
+		},
+		{
+			"fieldname": "afn_stock_sync_section",
+			"fieldtype": "Section Break",
+			"label": "AFN Stock Sync"
+		},
+		{
+			"default": "0",
+			"description": "Fetch FBA fulfillable stock from Amazon every 30 minutes and use it to drive FBA strategy selection.",
+			"fieldname": "enable_afn_stock_sync",
+			"fieldtype": "Check",
+			"label": "Enable Scheduled AFN Stock Sync",
+			"read_only_depends_on": "eval:frappe.session.user != \"Administrator\""
+		},
+		{
+			"description": "Set when the AFN (FBA fulfillable) stock fetch last completed successfully.",
+			"fieldname": "last_afn_stock_synced_at",
+			"fieldtype": "Datetime",
+			"label": "Last AFN Stock Synced At",
+			"read_only": 1
+		},
+		{
+			"fieldname": "column_break_afn_stock",
+			"fieldtype": "Column Break"
+		},
+		{
+			"description": "Proxy SKUs whose AFN stock changed on the last fetch.",
+			"fieldname": "last_afn_stock_proxy_count",
+			"fieldtype": "Int",
+			"label": "Proxy SKUs Updated (Last Sync)",
+			"read_only": 1
+		},
+		{
+			"description": "Items whose aggregated FBA stock changed on the last fetch.",
+			"fieldname": "last_afn_stock_items_count",
+			"fieldtype": "Int",
+			"label": "Items Updated (Last Sync)",
+			"read_only": 1
+		},
+		{
+			"fieldname": "fba_inbound_tab",
+			"fieldtype": "Tab Break",
+			"label": "FBA Inbound"
+		},
+		{
+			"default": "0",
+			"fieldname": "fba_inbound_enabled",
+			"fieldtype": "Check",
+			"label": "FBA Inbound Enabled"
+		},
+		{
+			"depends_on": "eval:doc.fba_inbound_enabled",
+			"fieldname": "fba_source_address",
+			"fieldtype": "Link",
+			"label": "Source Address",
+			"link_filters": "[[\"Address\",\"address_type\",\"=\",\"Warehouse\"]]",
+			"options": "Address"
+		},
+		{
+			"fieldname": "column_break_fba_defaults",
+			"fieldtype": "Column Break"
+		},
+		{
+			"default": "SELLER",
+			"depends_on": "eval:doc.fba_inbound_enabled",
+			"fieldname": "default_prep_owner",
+			"fieldtype": "Select",
+			"label": "Default Prep Owner",
+			"options": "AMAZON\nSELLER\nNONE"
+		},
+		{
+			"default": "SELLER",
+			"depends_on": "eval:doc.fba_inbound_enabled",
+			"fieldname": "default_label_owner",
+			"fieldtype": "Select",
+			"label": "Default Label Owner",
+			"options": "AMAZON\nSELLER\nNONE"
+		},
+		{
+			"fieldname": "alerts_safety_tab",
+			"fieldtype": "Tab Break",
+			"label": "Alerts & Safety"
+		},
+		{
+			"fieldname": "telegram_alert_section",
+			"fieldtype": "Section Break",
+			"label": "Real-Time Alerts (Telegram)"
+		},
+		{
+			"default": "0",
+			"description": "Master switch for instant Telegram notifications and the periodic activity digest.",
+			"fieldname": "enable_telegram_alerts",
+			"fieldtype": "Check",
+			"label": "Enable Telegram Alerts"
+		},
+		{
+			"description": "From @BotFather. Looks like 8123456:AAH...",
+			"fieldname": "telegram_bot_token",
+			"fieldtype": "Password",
+			"label": "Telegram Bot Token"
+		},
+		{
+			"description": "Group/channel chat id the bot posts to. Use 'Detect Chat ID' after messaging the bot in the group.",
+			"fieldname": "telegram_chat_id",
+			"fieldtype": "Data",
+			"label": "Telegram Chat ID"
+		},
+		{
+			"fieldname": "column_break_telegram",
+			"fieldtype": "Column Break"
+		},
+		{
+			"depends_on": "eval:doc.telegram_bot_token",
+			"fieldname": "detect_telegram_chat_id",
+			"fieldtype": "Button",
+			"label": "Detect Chat ID"
+		},
+		{
+			"depends_on": "eval:doc.telegram_bot_token",
+			"fieldname": "send_telegram_test",
+			"fieldtype": "Button",
+			"label": "Send Test Alert"
+		},
+		{
+			"fieldname": "loss_circuit_breaker_section",
+			"fieldtype": "Section Break",
+			"label": "Loss Circuit Breaker"
+		},
+		{
+			"default": "0",
+			"description": "Auto-freeze all Amazon/Repricer outbound when below-min losses cross the threshold within a 15-minute window.",
+			"fieldname": "enable_loss_circuit_breaker",
+			"fieldtype": "Check",
+			"label": "Enable Loss Circuit Breaker"
+		},
+		{
+			"depends_on": "eval:doc.enable_loss_circuit_breaker",
+			"description": "Total below-min loss in a 15-minute window that trips the auto-freeze.",
+			"fieldname": "loss_circuit_breaker_threshold",
+			"fieldtype": "Currency",
+			"label": "Loss Circuit Breaker Threshold",
+			"options": "GBP"
 		}
 	],
 	"grid_page_length": 50,
 	"index_web_pages_for_search": 1,
 	"issingle": 1,
 	"links": [],
-	"modified": "2026-06-11 10:00:00.000000",
+	"modified": "2026-06-23 03:47:59.437393",
 	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Navgold Settings",

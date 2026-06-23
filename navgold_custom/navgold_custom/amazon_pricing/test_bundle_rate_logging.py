@@ -59,7 +59,7 @@ def create_cost_sub_type():
 	if not frappe.db.exists("Cost Type", COST_TYPE_NAME):
 		cost_type = frappe.new_doc("Cost Type")
 		cost_type.cost_type_name = COST_TYPE_NAME
-		cost_type.is_absolute = 1
+		cost_type.calculation_type = "Absolute"
 		cost_type.is_purchase_cost = 1
 		cost_type.insert()
 

@@ -8,6 +8,7 @@ from frappe.query_builder import DocType
 from frappe.utils import flt, now_datetime
 from frappe.utils.xlsxutils import make_xlsx
 
+from navgold_custom.navgold_custom.amazon_pricing.report_attachments import save_last_report_attachment
 from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import (
 	FBAInventory,
 	Listings,
@@ -190,6 +191,7 @@ def process_bulk_selling_price_fetch(seller_skus):
 	# fetching the Listings API per SKU, which throttles on large catalogues.
 	reports_client = Reports.from_amazon_settings()
 	tsv_content = reports_client.request_and_download_report("GET_MERCHANT_LISTINGS_ALL_DATA")
+	save_last_listings_report(tsv_content)
 
 	rows = parse_listings_tsv(tsv_content)
 	if not rows:
@@ -237,6 +239,7 @@ def bulk_import_listings():
 def process_bulk_listing_import():
 	reports_client = Reports.from_amazon_settings()
 	tsv_content = reports_client.request_and_download_report("GET_MERCHANT_LISTINGS_ALL_DATA")
+	save_last_listings_report(tsv_content)
 
 	rows = parse_listings_tsv(tsv_content)
 	if not rows:
@@ -324,6 +327,11 @@ def process_bulk_listing_import():
 		message += f" <a href='{skipped_report_url}'>Download skipped SKUs report</a>"
 
 	frappe.publish_realtime("msgprint", message, user=frappe.session.user)
+
+
+def save_last_listings_report(tsv_content):
+	save_last_report_attachment("last_listings_report", "amazon_all_listings.tsv", tsv_content)
+	frappe.db.set_single_value("Navgold Settings", "last_listings_synced_at", now_datetime())
 
 
 def save_skipped_report(skipped_rows):

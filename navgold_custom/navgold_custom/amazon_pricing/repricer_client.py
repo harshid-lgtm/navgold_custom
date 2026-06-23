@@ -205,7 +205,8 @@ def sync_to_repricer(pricing_names: list) -> dict:
 		csv_data = dict_list_to_csv(products_to_update)
 		response = client.post_repricer_data(csv_data)
 	except (AmazonFrozenError, PricingNotApprovedError) as e:
-		# Intentional gate, not a transport failure: mark "Skipped" to keep it out of the failed-sync triage queue.
+		# Intentional gate (kill switch or Dry Run), not a transport failure. Mark the log
+		# "Skipped" so it stays out of the failed-sync triage queue and doesn't read as a real error.
 		log.status = "Skipped"
 		log.error_message = str(e)
 		log.save()

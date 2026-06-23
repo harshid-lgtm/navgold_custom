@@ -689,19 +689,22 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 				final_max_price = fallback_result["final_max_price"]
 				fallback_repricings.append(fallback_result["fallback_repricing"])
 
+			# Always send the min floor as a safety net: it caps how low any downstream
+			# repricer (Repricer.com) can drive the Amazon price. The send_min_price
+			# toggle only controls whether we also assert our_price.
 			purchasable_offer = {
 				"audience": "ALL",
 				"maximum_seller_allowed_price": [
 					{"schedule": [{"value_with_tax": round(final_max_price, 2)}]}
+				],
+				"minimum_seller_allowed_price": [
+					{"schedule": [{"value_with_tax": round(final_min_price, 2)}]}
 				],
 			}
 
 			if send_min_price:
 				purchasable_offer["our_price"] = [
 					{"schedule": [{"value_with_tax": round(final_max_price, 2)}]}
-				]
-				purchasable_offer["minimum_seller_allowed_price"] = [
-					{"schedule": [{"value_with_tax": round(final_min_price, 2)}]}
 				]
 
 			patches.append(

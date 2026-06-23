@@ -119,7 +119,8 @@ def submit_pricing(pricing_names: list, test_mode: bool = False) -> dict:
 		}
 
 	except (AmazonFrozenError, PricingNotApprovedError) as e:
-		# Intentional gate, not a transport failure: mark "Skipped" to keep it out of the failed-sync triage queue.
+		# Intentional gate (kill switch or Dry Run), not a transport failure. Mark the records
+		# "Skipped" so they stay out of the failed-sync triage queue and don't read as real errors.
 		log.status = "Skipped"
 		log.error_message = str(e)
 		log.save()
@@ -143,6 +144,10 @@ def submit_pricing(pricing_names: list, test_mode: bool = False) -> dict:
 		bulk_set_value("Amazon Product Pricing", pricing_names, "amazon_sync_status", "Error")
 
 		frappe.log_error(f"Amazon feed submission error: {e!s}", "Amazon Pricing Submission")
+
+		from navgold_custom.navgold_custom.amazon_pricing.alerts import alert_feed_error
+
+		alert_feed_error(log.name, str(e), "Amazon")
 
 		return {
 			"success": False,

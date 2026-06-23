@@ -10,6 +10,12 @@ frappe.query_reports['Amazon Pricing Push Monitor'] = {
 			default: 48,
 		},
 		{
+			fieldname: 'source',
+			label: __('Source'),
+			fieldtype: 'Select',
+			options: '\nNavgold\nExternal',
+		},
+		{
 			fieldname: 'submission_type',
 			label: __('Type'),
 			fieldtype: 'Select',
@@ -33,6 +39,12 @@ frappe.query_reports['Amazon Pricing Push Monitor'] = {
 			cint(data.minutes_pending) > 60
 		) {
 			formatted = `<span style="color: var(--orange-600)">${formatted}</span>`;
+		}
+		if (column.fieldname === 'source' && data.source === 'External') {
+			formatted = `<span style="color: var(--blue-600)">${formatted}</span>`;
+		}
+		if (column.fieldname === 'invalid' && cint(data.invalid) > 0) {
+			formatted = `<span style="color: var(--red-600)">${formatted}</span>`;
 		}
 		return formatted;
 	},

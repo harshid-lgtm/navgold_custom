@@ -2,6 +2,7 @@ import frappe
 from frappe.query_builder import DocType
 from frappe.utils.data import flt, now_datetime
 
+from navgold_custom.navgold_custom.amazon_pricing.report_attachments import save_last_report_attachment
 from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import Reports
 from navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku import parse_listings_tsv
 
@@ -25,6 +26,9 @@ def bulk_fetch_fba_fees():
 def process_fba_fee_fetch():
 	reports_client = Reports.from_amazon_settings()
 	tsv_content = reports_client.request_and_download_report(REPORT_TYPE)
+
+	save_last_report_attachment("last_fba_fee_report", "amazon_fba_fee_report.tsv", tsv_content)
+	frappe.db.set_single_value("Navgold Settings", "last_fba_fee_synced_at", now_datetime())
 
 	rows = parse_listings_tsv(tsv_content)
 	if not rows:

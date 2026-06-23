@@ -121,12 +121,13 @@ def get_conversion_factor(item_code: str, uom: str):
 
 
 class AmazonFrozenError(frappe.ValidationError):
-	# Distinct from a transport failure so callers can mark records "Skipped", not failed-sync.
+	# Distinct from a real transport/API failure so callers can mark records "Skipped"
+	# instead of polluting the failed-sync triage queue with deliberate blocks.
 	pass
 
 
 class PricingNotApprovedError(frappe.ValidationError):
-	# A Dry Run block is an intentional gate, not a failure (see AmazonFrozenError).
+	# Same intent as the freeze error: a Dry Run block is an intentional gate, not a failure.
 	pass
 
 

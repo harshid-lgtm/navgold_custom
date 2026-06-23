@@ -27,12 +27,14 @@
 		{
 			"fieldname": "item",
 			"fieldtype": "Link",
+			"in_standard_filter": 1,
 			"label": "Item",
 			"options": "Item"
 		},
 		{
 			"fieldname": "uom",
 			"fieldtype": "Link",
+			"in_standard_filter": 1,
 			"label": "UOM",
 			"options": "UOM"
 		},
@@ -52,6 +54,7 @@
 		{
 			"fieldname": "asin",
 			"fieldtype": "Link",
+			"in_standard_filter": 1,
 			"label": "ASIN",
 			"options": "Amazon ASIN"
 		},
@@ -59,6 +62,7 @@
 			"default": "1",
 			"fieldname": "is_active",
 			"fieldtype": "Check",
+			"in_standard_filter": 1,
 			"label": "Is Active?"
 		},
 		{
@@ -70,6 +74,7 @@
 			"default": "0",
 			"fieldname": "is_fba",
 			"fieldtype": "Check",
+			"in_standard_filter": 1,
 			"label": "Is FBA?"
 		},
 		{
@@ -81,12 +86,14 @@
 		{
 			"fieldname": "merchant_shipping_group",
 			"fieldtype": "Data",
+			"in_standard_filter": 1,
 			"label": "Merchant Shipping Group"
 		},
 		{
 			"description": "Live Amazon selling price, populated by Fetch Selling Prices. Used by the price-deviation guard.",
 			"fieldname": "current_selling_price",
 			"fieldtype": "Currency",
+			"in_standard_filter": 1,
 			"label": "Current Selling Price",
 			"read_only": 1
 		},

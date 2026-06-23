@@ -30,35 +30,39 @@ class NavgoldSettings(Document):
 
 		amazon_pricing_enabled: DF.Check
 		amazon_publishing_mode: DF.Literal["Stock Only", "Stock and Prices"]
-		auto_sync_cogs: DF.Check
 		buying_price_list: DF.Link
-		cogs_supplier: DF.Link | None
 		commission_threshold: DF.Float
-		default_cost_set_template: DF.Link | None
 		default_label_owner: DF.Literal["AMAZON", "SELLER", "NONE"]
 		default_prep_owner: DF.Literal["AMAZON", "SELLER", "NONE"]
 		default_stock_allocation_warehouse: DF.Link | None
-		default_strategy_template: DF.Link | None
 		enable_afn_stock_sync: DF.Check
 		enable_pricing_sync: DF.Check
-		freeze_amazon_outbound: DF.Check
-		pause_strategy_refresh: DF.Check
 		fba_inbound_enabled: DF.Check
 		fba_source_address: DF.Link | None
+		freeze_amazon_outbound: DF.Check
 		high_price_commission_adjustment: DF.Float
+		last_afn_stock_items_count: DF.Int
+		last_afn_stock_proxy_count: DF.Int
+		last_afn_stock_report: DF.Attach | None
+		last_afn_stock_synced_at: DF.Datetime | None
+		last_fba_fee_report: DF.Attach | None
+		last_fba_fee_synced_at: DF.Datetime | None
+		last_listings_report: DF.Attach | None
+		last_listings_synced_at: DF.Datetime | None
 		last_pricing_submit_at: DF.Datetime | None
 		last_pricing_synced_at: DF.Datetime | None
 		last_repricer_submit_at: DF.Datetime | None
 		last_strategy_refresh_at: DF.Datetime | None
 		min_shelf_expiry_in_days: DF.Int
 		multiple_active_item_uom: DF.Check
+		pause_strategy_refresh: DF.Check
 		price_change_block_direction: DF.Literal["Both", "Drops Only", "Increases Only"]
 		price_change_threshold_percent: DF.Float
 		pricing_alert_recipients: DF.SmallText | None
+		pricing_publishing_mode: DF.Literal["Publish All Prices", "Publish Selected Prices Only"]
 		pricing_sync_approved_at: DF.Datetime | None
 		pricing_sync_approved_by: DF.Link | None
 		pricing_sync_mode: DF.Literal["Dry Run", "Live"]
-		pricing_publishing_mode: DF.Literal["Publish All Prices", "Publish Selected Prices Only"]
 		published_pricing_items: DF.Table[NavgoldPublishedPricingItem]
 		repricer_api_password: DF.Password | None
 		repricer_api_username: DF.Data | None
@@ -215,9 +219,9 @@ class NavgoldSettings(Document):
 
 
 def prices_not_refreshed_since_last_submit(settings, submit_stamp_field: str) -> bool:
-	# Stagger guard: the refresh runs at :00/:30 and the submit at :15/:45. If the refresh overran
-	# (or never ran), submitting now would build a feed from half-refreshed prices, so require a
-	# refresh to have completed since this channel's last submit. First-ever run is allowed.
+	# Stagger guard: refresh runs at :00/:30, submit at :15/:45. If a refresh overran or never ran,
+	# submitting now would build a feed from half-refreshed prices, so require a refresh to have
+	# completed since this channel's last submit. First-ever run (no submit stamp) is allowed.
 	last_refresh = settings.last_strategy_refresh_at
 	last_submit = settings.get(submit_stamp_field)
 	return bool(last_submit and (not last_refresh or last_refresh <= last_submit))
@@ -236,6 +240,18 @@ def schedule_submit_active_pricing():
 
 	frappe.db.set_single_value("Navgold Settings", "last_pricing_submit_at", frappe.utils.now_datetime())
 
+	# In Dry Run mode the scheduled sync must still DO something useful: render the exact feed
+	# a live sync would push and persist it as a never-submitted preview + variance, instead of
+	# letting it sail into the approval gate only to be blocked. Live mode submits for real.
+	if settings.pricing_sync_mode == "Dry Run":
+		frappe.enqueue(
+			job_id="navgold.amazon_scheduled_pricing_dry_run",
+			deduplicate=True,
+			method="navgold_custom.navgold_custom.amazon_pricing.pricing_dry_run.dry_run_pricing",
+			timeout=6000,
+		)
+		return
+
 	frappe.enqueue(
 		job_id="navgold.amazon_scheduled_pricing_sync",
 		deduplicate=True,
@@ -250,6 +266,12 @@ def schedule_submit_active_repricer():
 		return
 
 	if not settings.repricer_enabled:
+		return
+
+	# In Dry Run mode the Amazon pricing schedule already renders the shared preview + variance,
+	# so the Repricer push has nothing extra to preview — skip it rather than enqueue a job that
+	# only exists to be blocked at the approval gate.
+	if settings.pricing_sync_mode == "Dry Run":
 		return
 
 	if prices_not_refreshed_since_last_submit(settings, "last_repricer_submit_at"):

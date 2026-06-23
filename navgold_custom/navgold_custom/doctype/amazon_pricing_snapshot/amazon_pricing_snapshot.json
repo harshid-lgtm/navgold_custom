@@ -1,0 +1,153 @@
+{
+	"actions": [],
+	"allow_rename": 0,
+	"autoname": "naming_series:",
+	"creation": "2026-06-12 09:30:00.000000",
+	"doctype": "DocType",
+	"engine": "InnoDB",
+	"field_order": [
+		"naming_series",
+		"snapshot_datetime",
+		"trigger_type",
+		"column_break_head",
+		"item_count",
+		"price_source",
+		"amazon_sourced_count",
+		"status",
+		"submission_log",
+		"section_break_notes",
+		"notes",
+		"section_break_data",
+		"preview_html",
+		"snapshot_data",
+		"variance_data"
+	],
+	"fields": [
+		{
+			"default": "PSNAP-.YYYY.-.MM.-.DD.-.##",
+			"fieldname": "naming_series",
+			"fieldtype": "Select",
+			"label": "Series",
+			"options": "PSNAP-.YYYY.-.MM.-.DD.-.##",
+			"reqd": 1
+		},
+		{
+			"fieldname": "snapshot_datetime",
+			"fieldtype": "Datetime",
+			"in_list_view": 1,
+			"label": "Snapshot Time",
+			"read_only": 1
+		},
+		{
+			"fieldname": "trigger_type",
+			"fieldtype": "Select",
+			"in_list_view": 1,
+			"in_standard_filter": 1,
+			"label": "Trigger",
+			"options": "Manual\nScheduled\nDry Run",
+			"read_only": 1
+		},
+		{
+			"fieldname": "column_break_head",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "item_count",
+			"fieldtype": "Int",
+			"in_list_view": 1,
+			"label": "Item Count",
+			"read_only": 1
+		},
+		{
+			"fieldname": "price_source",
+			"fieldtype": "Select",
+			"in_list_view": 1,
+			"in_standard_filter": 1,
+			"label": "Price Source",
+			"options": "Amazon Live",
+			"read_only": 1
+		},
+		{
+			"fieldname": "amazon_sourced_count",
+			"fieldtype": "Int",
+			"label": "Amazon-Sourced SKUs",
+			"read_only": 1
+		},
+		{
+			"default": "Captured",
+			"fieldname": "status",
+			"fieldtype": "Select",
+			"in_list_view": 1,
+			"in_standard_filter": 1,
+			"label": "Status",
+			"options": "Captured\nReverted\nDry Run",
+			"read_only": 1
+		},
+		{
+			"fieldname": "submission_log",
+			"fieldtype": "Link",
+			"label": "Rendered Feed (Dry Run)",
+			"options": "Amazon Pricing Submission Log",
+			"read_only": 1
+		},
+		{
+			"fieldname": "section_break_notes",
+			"fieldtype": "Section Break"
+		},
+		{
+			"fieldname": "notes",
+			"fieldtype": "Small Text",
+			"label": "Notes"
+		},
+		{
+			"fieldname": "section_break_data",
+			"fieldtype": "Section Break",
+			"label": "Snapshot Prices"
+		},
+		{
+			"fieldname": "preview_html",
+			"fieldtype": "HTML",
+			"label": "Preview"
+		},
+		{
+			"fieldname": "snapshot_data",
+			"fieldtype": "Long Text",
+			"hidden": 1,
+			"label": "Snapshot Data (JSON)",
+			"read_only": 1
+		},
+		{
+			"fieldname": "variance_data",
+			"fieldtype": "Long Text",
+			"hidden": 1,
+			"label": "Variance Data (JSON)",
+			"read_only": 1
+		}
+	],
+	"index_web_pages_for_search": 0,
+	"links": [],
+	"modified": "2026-06-12 09:30:00.000000",
+	"modified_by": "Administrator",
+	"module": "Navgold Custom",
+	"name": "Amazon Pricing Snapshot",
+	"naming_rule": "By \"Naming Series\" field",
+	"owner": "Administrator",
+	"permissions": [
+		{
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "System Manager",
+			"share": 1,
+			"write": 1
+		}
+	],
+	"sort_field": "creation",
+	"sort_order": "DESC",
+	"states": [],
+	"track_changes": 1
+}

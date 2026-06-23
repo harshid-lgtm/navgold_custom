@@ -58,6 +58,7 @@
 			"fieldname": "status",
 			"fieldtype": "Select",
 			"in_list_view": 1,
+			"in_standard_filter": 1,
 			"label": "Status",
 			"options": "Draft\nPlan Created\nPacking Options Ready\nPacking Confirmed\nPlacement Options Ready\nPlacement Confirmed\nTransport Options Ready\nTransport Confirmed\nLabels Ready\nShipped\nCancelled",
 			"read_only": 1

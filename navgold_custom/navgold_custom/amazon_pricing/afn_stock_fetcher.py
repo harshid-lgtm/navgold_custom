@@ -1,6 +1,7 @@
 import frappe
-from frappe.utils.data import flt
+from frappe.utils.data import flt, now_datetime
 
+from navgold_custom.navgold_custom.amazon_pricing.report_attachments import save_last_report_attachment
 from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import FBAInventory
 from navgold_custom.navgold_custom.utils import ITEM_AFN_FIELD, get_conversion_factor
 
@@ -48,7 +49,13 @@ def process_afn_stock_fetch():
 			"AFN stock could not be fetched from Amazon. Existing stock values were not changed.",
 			user=frappe.session.user,
 		)
+		from navgold_custom.navgold_custom.amazon_pricing.alerts import notify
+
+		notify("FBA stock pull FAILED", [f"Error: {str(e)[:300]}"], dedupe_key="fba_pull_error")
 		return
+
+	# FBA stock comes from the Inventory API, not a downloadable report
+	save_last_report_attachment("last_afn_stock_report", "amazon_afn_stock.json", frappe.as_json(inventory))
 
 	# Raw per-SKU fulfillable qty in the proxy SKU's own UOM. SKUs Amazon did not return are
 	# treated as 0 (sold out / no FBA listing) — this drives zero-missing.
@@ -88,6 +95,15 @@ def process_afn_stock_fetch():
 	item_updates = compute_afn_stock_updates(current_item_rows, item_totals, field=ITEM_AFN_FIELD)
 	if item_updates:
 		frappe.db.bulk_update("Item", item_updates, update_modified=False)
+
+	frappe.db.set_single_value(
+		"Navgold Settings",
+		{
+			"last_afn_stock_synced_at": now_datetime(),
+			"last_afn_stock_proxy_count": len(proxy_updates),
+			"last_afn_stock_items_count": len(item_updates),
+		},
+	)
 
 	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- background job, persist before notifying user
 
