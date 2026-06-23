@@ -7,6 +7,7 @@ import csv
 import io
 
 import frappe
+from frappe import _
 from frappe.utils import add_days, cint, flt, getdate, now_datetime, today
 
 from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import Reports
@@ -18,7 +19,7 @@ DEFAULT_CURRENCY = "GBP"
 def get_reports_client():
 	settings_name = frappe.get_all("Amazon SP API Settings", filters={"is_active": 1}, pluck="name", limit=1)
 	if not settings_name:
-		frappe.throw("No active Amazon SP API Settings found")
+		frappe.throw(_("No active Amazon SP API Settings found"))
 	settings = frappe.get_doc("Amazon SP API Settings", settings_name[0])
 	return Reports.from_amazon_settings(settings)
 
@@ -34,7 +35,9 @@ def get_recent_window(days):
 def aggregate_daily_stats(report_text):
 	reader = csv.DictReader(io.StringIO(report_text), delimiter="\t")
 	if reader.fieldnames and "amazon-order-id" not in reader.fieldnames:
-		frappe.throw("Amazon order report is missing expected columns; the report schema may have changed.")
+		frappe.throw(
+			_("Amazon order report is missing expected columns; the report schema may have changed.")
+		)
 
 	# An order spans multiple item lines, so each order is counted once. gross_amount sums
 	# non-cancelled lines only — Amazon leaves item-price populated on cancelled lines.
@@ -98,7 +101,8 @@ def save_daily_stats(stats_by_day):
 		doc.currency = stat["currency"] or DEFAULT_CURRENCY
 		doc.last_synced = synced_at
 		doc.save()
-	frappe.db.commit()
+	# Persist nightly stats from the scheduled job.
+	frappe.db.commit()  # nosemgrep: frappe-manual-commit
 	return len(stats_by_day)
 
 
@@ -120,7 +124,7 @@ def sync_stats_for_range(start_date=None, end_date=None):
 
 
 @frappe.whitelist()
-def enqueue_backfill(days=30):
+def enqueue_backfill(days: int = 30):
 	frappe.only_for("System Manager")
 	days = cint(days) or 30
 	start_date, end_date = get_recent_window(days)

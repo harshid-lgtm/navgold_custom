@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import frappe
+from frappe import _
 from frappe.integrations.utils import make_get_request, make_post_request
 from frappe.utils.data import add_to_date, cint, flt, fmt_money, get_datetime, now_datetime
 
@@ -198,8 +199,7 @@ def trip_circuit_breaker_if_needed(window_loss: float) -> bool:
 	notify(
 		"CIRCUIT BREAKER TRIPPED — outbound FROZEN",
 		[
-			f"Below-min loss hit {format_money(window_loss)} in {LOSS_WINDOW_MINUTES} min "
-			f"(limit {format_money(threshold)}).",
+			f"Below-min loss hit {format_money(window_loss)} in {LOSS_WINDOW_MINUTES} min (limit {format_money(threshold)}).",
 			"All Amazon/Repricer writes are halted. Investigate before releasing the freeze.",
 		],
 		severity="critical",
@@ -284,9 +284,7 @@ def send_digest() -> None:
 		f"Feed errors: <b>{feeds.get('Error', 0)}</b> · pending {feeds.get('Pending', 0)}",
 		f"Open failed syncs: {orders.get('Open Failed Syncs', {}).get('value', 0)}",
 		f"Mins since last order: {orders.get('Minutes Since Last Amazon Order', {}).get('value', '—')}",
-		f"Activity (30m): orders <b>{activity['orders_synced']}</b> · prices pushed "
-		f"<b>{activity['prices_pushed']}</b> · repricer <b>{activity['repricer_pushed']}</b> · "
-		f"FBA pull {fba_pull} ({activity['fba_proxy_count']} SKUs)",
+		f"Activity (30m): orders <b>{activity['orders_synced']}</b> · prices pushed <b>{activity['prices_pushed']}</b> · repricer <b>{activity['repricer_pushed']}</b> · FBA pull {fba_pull} ({activity['fba_proxy_count']} SKUs)",
 		f"Errors (30m): <b>{activity['errors']}</b>",
 	]
 	notify("Activity digest", lines, severity="ok" if is_go else "warning")
@@ -342,13 +340,15 @@ def detect_chat_id() -> dict:
 	settings = frappe.get_cached_doc("Navgold Settings")
 	token = settings.get_password("telegram_bot_token", raise_exception=False)
 	if not token:
-		frappe.throw("Set the Telegram Bot Token first.")
+		frappe.throw(_("Set the Telegram Bot Token first."))
 
 	url = TELEGRAM_API.format(token=token, method="getUpdates")
 	response = make_get_request(url)
 	results = (response or {}).get("result") or []
 	if not results:
-		frappe.throw("No messages found. Add the bot to your group and send any message there, then retry.")
+		frappe.throw(
+			_("No messages found. Add the bot to your group and send any message there, then retry.")
+		)
 
 	chats = []
 	for update in results:
@@ -357,7 +357,7 @@ def detect_chat_id() -> dict:
 		if chat:
 			chats.append(chat)
 	if not chats:
-		frappe.throw("Could not read a chat from the bot updates.")
+		frappe.throw(_("Could not read a chat from the bot updates."))
 
 	# Prefer a group/supergroup/channel (team alerts) over a private DM; newest wins.
 	group_chats = [chat for chat in chats if chat.get("type") in ("group", "supergroup", "channel")]
@@ -373,7 +373,7 @@ def detect_chat_id() -> dict:
 def send_test() -> None:
 	config = get_alert_config()
 	if not (config.get("token") and config.get("chat_id")):
-		frappe.throw("Set the bot token and chat id first (use Detect Chat ID).")
+		frappe.throw(_("Set the bot token and chat id first (use Detect Chat ID)."))
 	# Bypass the enabled flag for an explicit test send.
 	config["enabled"] = 1
 	result = send_telegram("<b>Navgold test alert</b>\nTelegram alerting is wired correctly.", config)

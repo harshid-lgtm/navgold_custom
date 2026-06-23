@@ -122,7 +122,8 @@ def upsert_feeds(feeds: list) -> int:
 			doc.insert(ignore_permissions=True)
 			inserted += 1
 
-	frappe.db.commit()
+	# Persist ledger rows so concurrent pollers see them immediately.
+	frappe.db.commit()  # nosemgrep: frappe-manual-commit
 	return inserted
 
 

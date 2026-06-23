@@ -3,6 +3,7 @@
 
 
 import frappe
+from frappe import _
 from frappe.utils import now_datetime
 from frappe.utils.csvutils import read_csv_content
 from frappe.utils.data import cint, cstr, flt, orjson_dumps
@@ -235,7 +236,8 @@ def submit_feed(updates: list, settings) -> dict:
 
 	synced = sync_pricing_band(updates)
 
-	frappe.db.commit()
+	# Persist the submission log + band before returning to the caller.
+	frappe.db.commit()  # nosemgrep: frappe-manual-commit
 
 	return {
 		"feed_id": feed_id,
@@ -267,7 +269,7 @@ def push_manual_prices(updates: str | list, live: bool = False) -> dict:
 		if cstr(update.get("sku")).strip()
 	]
 	if not normalised:
-		frappe.throw("No SKUs supplied for manual price push.")
+		frappe.throw(_("No SKUs supplied for manual price push."))
 
 	validate_updates(normalised)
 

@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import frappe
+from frappe import _
 from frappe.utils.data import add_to_date, cint, flt, get_datetime, now_datetime
 
 from navgold_custom.navgold_custom.amazon_pricing.alerts import alert_freeze_toggled
@@ -180,7 +181,7 @@ def get_control_center_data(below_min_days: int = 3, top_n: int = 30, top_seller
 	total_active = len(readiness_rows)
 	blocked_rows = [row for row in readiness_rows if row.get("violations")]
 
-	category_counts = {key: 0 for key, _ in VIOLATION_CATEGORIES}
+	category_counts = {key: 0 for key, _needles in VIOLATION_CATEGORIES}
 	for row in blocked_rows:
 		for category in categorize_violation(row["violations"]):
 			category_counts[category] += 1
@@ -209,7 +210,7 @@ def get_control_center_data(below_min_days: int = 3, top_n: int = 30, top_seller
 		order_by="creation desc",
 		limit=8,
 	)
-	_, order_summary = get_order_sync_health({"hours_back": 48})
+	_order_rows, order_summary = get_order_sync_health({"hours_back": 48})
 	fba_stock_rows, fba_stock_summary = get_fba_stock_sync_health({})
 	# Lowest fulfillable stock first — the out-of-stock / about-to-stock-out SKUs are the actionable ones.
 	fba_stock_rows = sorted(fba_stock_rows, key=lambda row: flt(row.get("afn_stock")))[:top_n]
@@ -257,7 +258,7 @@ def get_control_center_data(below_min_days: int = 3, top_n: int = 30, top_seller
 @frappe.whitelist()
 def set_outbound_freeze(freeze: int) -> int:
 	if "System Manager" not in frappe.get_roles():
-		frappe.throw("Only a System Manager can change the outbound freeze switch.")
+		frappe.throw(_("Only a System Manager can change the outbound freeze switch."))
 
 	freeze = cint(freeze)
 	frappe.db.set_single_value("Navgold Settings", "freeze_amazon_outbound", freeze)
@@ -272,11 +273,11 @@ def set_outbound_freeze(freeze: int) -> int:
 @frappe.whitelist()
 def emergency_rollback(channel: str = "Repricer") -> dict:
 	if "System Manager" not in frappe.get_roles():
-		frappe.throw("Only a System Manager can run an emergency rollback.")
+		frappe.throw(_("Only a System Manager can run an emergency rollback."))
 
 	snapshot = get_last_good_snapshot()
 	if not snapshot:
-		frappe.throw("No pricing snapshot exists to roll back to.")
+		frappe.throw(_("No pricing snapshot exists to roll back to."))
 
 	doc = frappe.get_doc("Amazon Pricing Snapshot", snapshot["name"])
 	revert_result = doc.revert_prices()
@@ -290,11 +291,11 @@ def contain_now() -> dict:
 	# Publish happens BEFORE the freeze so the freeze can't block the corrective push — a
 	# freeze alone only stops new prices, it never heals a bad price already live on Amazon.
 	if "System Manager" not in frappe.get_roles():
-		frappe.throw("Only a System Manager can run an emergency containment.")
+		frappe.throw(_("Only a System Manager can run an emergency containment."))
 
 	snapshot = get_last_good_snapshot()
 	if not snapshot:
-		frappe.throw("No pricing snapshot exists to roll back to.")
+		frappe.throw(_("No pricing snapshot exists to roll back to."))
 
 	doc = frappe.get_doc("Amazon Pricing Snapshot", snapshot["name"])
 	revert_result = doc.revert_prices()

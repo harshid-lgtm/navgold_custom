@@ -49,7 +49,8 @@ class TestFeedLedgerSync(IntegrationTestCase):
 	def cleanup(self):
 		frappe.db.delete("Amazon Feed Ledger", {"feed_id": ["in", FEED_IDS]})
 		frappe.db.delete("Amazon Pricing Submission Log", {"feed_id": ["in", FEED_IDS]})
-		frappe.db.commit()
+		# Test fixture cleanup needs a real commit between cases.
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit
 
 	def patched_sync(self):
 		fake_client = MagicMock()

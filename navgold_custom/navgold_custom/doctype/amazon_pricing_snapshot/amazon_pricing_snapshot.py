@@ -187,7 +187,8 @@ def process_capture(snapshot_name: str, user: str | None = None) -> None:
 		)
 		raise
 	snapshot.save()
-	frappe.db.commit()
+	# Persist the captured snapshot before notifying the user it is ready.
+	frappe.db.commit()  # nosemgrep: frappe-manual-commit
 	frappe.publish_realtime(
 		"amazon_snapshot_captured",
 		{"name": snapshot_name, "item_count": count, "price_source": snapshot.price_source},

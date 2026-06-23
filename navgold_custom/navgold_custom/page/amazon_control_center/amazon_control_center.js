@@ -227,7 +227,7 @@ class AmazonControlCenter {
 			'navgold_custom.navgold_custom.amazon_pricing.control_center.set_outbound_freeze',
 			{ freeze },
 		);
-		frappe.msgprint(freeze ? 'Outbound frozen' : 'Outbound released');
+		frappe.msgprint(freeze ? __('Outbound frozen') : __('Outbound released'));
 		this.refresh();
 	}
 
@@ -770,7 +770,7 @@ class AmazonControlCenter {
 			if (!confirmed) return;
 		}
 		await frappe.call({ method, args });
-		frappe.msgprint('Done');
+		frappe.msgprint(__('Done'));
 		this.refresh(true);
 	}
 
