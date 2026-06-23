@@ -627,6 +627,7 @@ class AmazonControlCenter {
 				[
 					report('Amazon Go-Live Data Readiness'),
 					report('Amazon Pricing Push Readiness'),
+					report('Amazon Pricing Feed Preview'),
 					report('Supplier Data Readiness'),
 					report('Amazon Strategy Price Comparison'),
 				],
