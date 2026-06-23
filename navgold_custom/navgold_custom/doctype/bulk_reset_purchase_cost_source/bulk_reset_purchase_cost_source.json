@@ -39,7 +39,7 @@
 			"fieldname": "current_source",
 			"fieldtype": "Select",
 			"label": "Current Source",
-			"options": "\nManual\nSupplier-Sync\nPO-Sync\nFBA-Transfer\nAuto-Sync\nAmazon-Sync"
+			"options": "\nManual\nSupplier-Sync\nPO-Sync\nFBA-Transfer\nAuto-Sync\nAmazon-Sync\nItem-Tax-Sync"
 		},
 		{
 			"fieldname": "col_break_filters",
@@ -74,7 +74,7 @@
 			"fieldname": "target_source",
 			"fieldtype": "Select",
 			"label": "Target Source",
-			"options": "Auto\nManual\nSupplier-Sync\nPO-Sync\nFBA-Transfer",
+			"options": "Auto\nManual\nSupplier-Sync\nPO-Sync\nFBA-Transfer\nItem-Tax-Sync",
 			"reqd": 1
 		},
 		{
