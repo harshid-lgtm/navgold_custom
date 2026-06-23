@@ -301,7 +301,11 @@ doc_events = {
 		"validate": "navgold_custom.navgold_custom.custom_script.supplier.supplier.validate_lead_time",
 	},
 	"Sales Order": {
-		"on_submit": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.sales_order_on_submit",
+		"on_submit": [
+			"navgold_custom.navgold_custom.custom_script.sales_order.sales_order.sales_order_on_submit",
+			# Real-time below-min loss detection + loss circuit breaker (auto-freeze).
+			"navgold_custom.navgold_custom.amazon_pricing.alerts.check_sales_order_below_min",
+		],
 	},
 	"Item": {
 		"validate": "navgold_custom.navgold_custom.custom_script.item.item.set_default_uom_conversion_factor"
@@ -330,6 +334,9 @@ scheduler_events = {
 	"cron": {
 		"*/15 * * * *": [
 			"navgold_custom.navgold_custom.amazon_pricing.feed_status_poller.poll_pending_feed_submissions",
+			# Proactive safety sweep: circuit-breaker re-check + alerts on feed errors,
+			# failed syncs and stalled order sync. Idempotent and dedupe-guarded.
+			"navgold_custom.navgold_custom.amazon_pricing.alerts.safety_sweep",
 		],
 		"*/30 * * * *": [
 			"navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api_settings.schedule_get_order_details",
@@ -343,6 +350,17 @@ scheduler_events = {
 		"15,45 * * * *": [
 			"navgold_custom.navgold_custom.doctype.navgold_settings.navgold_settings.schedule_submit_active_pricing",
 			"navgold_custom.navgold_custom.doctype.navgold_settings.navgold_settings.schedule_submit_active_repricer",
+		],
+		# Activity digest: routine order/price/stock/FBA rollup. Offset to run just after the
+		# :00/:30 order + AFN sync so it reports fresh counts. Problems alert in real time.
+		"5,35 * * * *": [
+			"navgold_custom.navgold_custom.amazon_pricing.alerts.send_digest",
+		],
+		# Mirror Amazon's feed history into the ledger so the push monitor can show feeds
+		# submitted directly to Amazon by external sources (e.g. Repricer), not just ours.
+		# Offset off the sync cluster to spread SP-API load.
+		"20 * * * *": [
+			"navgold_custom.navgold_custom.amazon_pricing.feed_ledger.sync_amazon_feed_ledger",
 		],
 	},
 	"daily": [

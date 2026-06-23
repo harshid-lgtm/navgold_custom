@@ -5,16 +5,21 @@ import frappe
 from frappe.integrations.utils import make_get_request, make_post_request
 from frappe.utils.data import add_to_date, cint, flt, fmt_money, get_datetime, now_datetime
 
+from navgold_custom.navgold_custom.report.below_min_price_sales.below_min_price_sales import (
+	get_min_price_map,
+)
+
 LOSS_WINDOW_CACHE_KEY = "navgold_below_min_loss_events"
 LOSS_WINDOW_MINUTES = 15
 
 TELEGRAM_API = "https://api.telegram.org/bot{token}/{method}"
 
-SEVERITY_ICON = {
-	"critical": "🔴",
-	"warning": "🟠",
-	"info": "🔵",
-	"ok": "🟢",
+# Per-severity Telegram treatment: (title prefix with colour key, send silently without a ping).
+SEVERITY_TELEGRAM = {
+	"critical": ("🔴 CRITICAL — ", False),
+	"warning": ("🟡 WARNING — ", False),
+	"info": ("🔵 ", True),
+	"ok": ("🟢 ", True),
 }
 
 
@@ -29,8 +34,7 @@ def get_alert_config() -> dict:
 	}
 
 
-def send_telegram(text: str, config: dict | None = None) -> dict | None:
-	# Build defensively: a failure to alert must never break the calling business flow.
+def send_telegram(text: str, config: dict | None = None, silent: bool = False) -> dict | None:
 	config = config or get_alert_config()
 	if not (config.get("enabled") and config.get("token") and config.get("chat_id")):
 		return None
@@ -44,6 +48,7 @@ def send_telegram(text: str, config: dict | None = None) -> dict | None:
 				"text": text,
 				"parse_mode": "HTML",
 				"disable_web_page_preview": "true",
+				"disable_notification": "true" if silent else "false",
 			},
 		)
 	except Exception as exception:
@@ -70,19 +75,14 @@ def notify(
 			return
 		frappe.cache().set_value(cache_key, "1", expires_in_sec=dedupe_seconds)
 
-	icon = SEVERITY_ICON.get(severity, "🔔")
+	prefix, silent = SEVERITY_TELEGRAM.get(severity, ("", False))
 	body = "\n".join(lines)
-	text = f"{icon} <b>{frappe.utils.escape_html(title)}</b>\n{body}"
-	send_telegram(text, config)
+	text = f"{prefix}<b>{frappe.utils.escape_html(title)}</b>\n{body}"
+	send_telegram(text, config, silent=silent)
 
 
-def money(amount) -> str:
+def format_money(amount) -> str:
 	return fmt_money(flt(amount), currency="GBP")
-
-
-# ---------------------------------------------------------------------------
-# Instant event hooks (called from the live code paths)
-# ---------------------------------------------------------------------------
 
 
 def alert_feed_error(log_name: str, error: str, channel: str = "Amazon") -> None:
@@ -133,8 +133,8 @@ def alert_below_min_sale(sales_order: str, proxy_sku: str, rate, min_price, qty)
 	notify(
 		"Below-min sale",
 		[
-			f"SKU <b>{frappe.utils.escape_html(proxy_sku)}</b> sold {money(rate)} (min {money(min_price)})",
-			f"{frappe.utils.escape_html(sales_order)} · qty {flt(qty):g} · est. loss {money(loss)}",
+			f"SKU <b>{frappe.utils.escape_html(proxy_sku)}</b> sold {format_money(rate)} (min {format_money(min_price)})",
+			f"{frappe.utils.escape_html(sales_order)} · qty {flt(qty):g} · est. loss {format_money(loss)}",
 		],
 		severity="critical",
 		dedupe_key=f"belowmin:{sales_order}:{proxy_sku}",
@@ -143,15 +143,9 @@ def alert_below_min_sale(sales_order: str, proxy_sku: str, rate, min_price, qty)
 
 
 def check_sales_order_below_min(doc, method=None) -> None:
-	# Fires the instant the Amazon order lands in ERP — the direct money-bleed tripwire.
-	# Detection runs regardless of Telegram config because the circuit breaker depends on it;
-	# only the alert message itself is gated by the alert settings.
+	# Detection runs regardless of Telegram config — the circuit breaker depends on it.
 	if not doc.get("amazon_order_id"):
 		return
-
-	from navgold_custom.navgold_custom.report.below_min_price_sales.below_min_price_sales import (
-		get_min_price_map,
-	)
 
 	pairs = [(item.item_code, item.uom) for item in doc.items]
 	min_price_map = get_min_price_map(pairs)
@@ -169,14 +163,8 @@ def check_sales_order_below_min(doc, method=None) -> None:
 		trip_circuit_breaker_if_needed(window_loss)
 
 
-# ---------------------------------------------------------------------------
-# Loss circuit breaker — auto-freeze when the bleed rate crosses a threshold
-# ---------------------------------------------------------------------------
-
-
 def record_loss_event(loss: float) -> float:
-	# Redis-backed sliding 15-minute window so the breaker reacts within a second of a bad sale,
-	# without a per-order database scan.
+	# Redis-backed sliding 15-minute window: reacts within a second, no per-order DB scan.
 	now = now_datetime()
 	cutoff = add_to_date(now, minutes=-LOSS_WINDOW_MINUTES)
 	events = frappe.cache().get_value(LOSS_WINDOW_CACHE_KEY) or []
@@ -196,12 +184,12 @@ def trip_circuit_breaker_if_needed(window_loss: float) -> bool:
 		return False
 
 	if cint(settings.get("freeze_amazon_outbound")):
-		return False  # already frozen — nothing more to do
+		return False
 
 	frappe.db.set_single_value("Navgold Settings", "freeze_amazon_outbound", 1)
 	frappe.clear_cache(doctype="Navgold Settings")
 
-	# Always leave an audit trail, even if Telegram is off — the freeze itself is the safety action.
+	# Log even when Telegram is off — the freeze itself is the safety action.
 	message = (
 		f"Circuit breaker tripped: below-min loss {fmt_money(window_loss, currency='GBP')} in "
 		f"{LOSS_WINDOW_MINUTES} min (limit {fmt_money(threshold, currency='GBP')}). Outbound frozen."
@@ -210,8 +198,8 @@ def trip_circuit_breaker_if_needed(window_loss: float) -> bool:
 	notify(
 		"CIRCUIT BREAKER TRIPPED — outbound FROZEN",
 		[
-			f"Below-min loss hit {money(window_loss)} in {LOSS_WINDOW_MINUTES} min "
-			f"(limit {money(threshold)}).",
+			f"Below-min loss hit {format_money(window_loss)} in {LOSS_WINDOW_MINUTES} min "
+			f"(limit {format_money(threshold)}).",
 			"All Amazon/Repricer writes are halted. Investigate before releasing the freeze.",
 		],
 		severity="critical",
@@ -222,7 +210,6 @@ def trip_circuit_breaker_if_needed(window_loss: float) -> bool:
 
 
 def sweep_circuit_breaker() -> None:
-	# DB-authoritative backup to the cache window: recompute the 15-minute below-min loss and trip.
 	settings = frappe.get_cached_doc("Navgold Settings")
 	if not cint(settings.get("enable_loss_circuit_breaker")) or cint(settings.get("freeze_amazon_outbound")):
 		return
@@ -237,11 +224,36 @@ def sweep_circuit_breaker() -> None:
 	trip_circuit_breaker_if_needed(flt(window_loss))
 
 
-# ---------------------------------------------------------------------------
-# Scheduled: 15-minute digest + 1-minute safety sweep
-# ---------------------------------------------------------------------------
+def get_activity_rollup(minutes: int = 30) -> dict:
+	cutoff = add_to_date(now_datetime(), minutes=-minutes)
+	pushed = ["Submitted", "Completed"]
+	settings = frappe.get_cached_doc("Navgold Settings")
+	last_fba = settings.get("last_afn_stock_synced_at")
+	return {
+		"minutes": minutes,
+		"orders_synced": frappe.db.count(
+			"Sales Order", {"amazon_order_id": ["is", "set"], "creation": [">=", cutoff]}
+		),
+		"prices_pushed": frappe.db.count(
+			"Amazon Pricing Submission Log",
+			{"submission_type": "Amazon", "status": ["in", pushed], "creation": [">=", cutoff]},
+		),
+		"repricer_pushed": frappe.db.count(
+			"Amazon Pricing Submission Log",
+			{"submission_type": "Repricer", "status": ["in", pushed], "creation": [">=", cutoff]},
+		),
+		"fba_proxy_count": cint(settings.get("last_afn_stock_proxy_count")),
+		"fba_minutes_ago": cint((now_datetime() - get_datetime(last_fba)).total_seconds() / 60)
+		if last_fba
+		else None,
+		"errors": frappe.db.count(
+			"Amazon Pricing Submission Log", {"status": "Error", "creation": [">=", cutoff]}
+		)
+		+ frappe.db.count("Amazon Failed Sync Record", {"status": "Failed", "creation": [">=", cutoff]}),
+	}
 
 
+@frappe.whitelist()
 def send_digest() -> None:
 	config = get_alert_config()
 	if not config.get("enabled"):
@@ -261,22 +273,27 @@ def send_digest() -> None:
 	loss_1h = (velocity.get("1h") or {}).get("loss", 0)
 	is_go = blockers == 0 and below["count"] == 0 and feeds.get("Error", 0) == 0
 
+	activity = get_activity_rollup(30)
+	fba_pull = f"{activity['fba_minutes_ago']}m ago" if activity["fba_minutes_ago"] is not None else "never"
+
 	lines = [
-		f"Status: <b>{'GO ✅' if is_go else 'NO-GO ⛔'}</b>",
-		f"Bleed rate: <b>{money(loss_15m)}/15m</b> · {money(loss_1h)}/1h",
+		f"Status: <b>{'GO' if is_go else 'NO-GO'}</b>",
+		f"Bleed rate: <b>{format_money(loss_15m)}/15m</b> · {format_money(loss_1h)}/1h",
 		f"Ready {readiness['ok_total']} / {readiness['total_active']} · would-block <b>{blockers}</b>",
-		f"Below-min (1d): <b>{below['count']}</b> · est. loss {money(below['estimated_loss'])}",
+		f"Below-min (1d): <b>{below['count']}</b> · est. loss {format_money(below['estimated_loss'])}",
 		f"Feed errors: <b>{feeds.get('Error', 0)}</b> · pending {feeds.get('Pending', 0)}",
 		f"Open failed syncs: {orders.get('Open Failed Syncs', {}).get('value', 0)}",
 		f"Mins since last order: {orders.get('Minutes Since Last Amazon Order', {}).get('value', '—')}",
+		f"Activity (30m): orders <b>{activity['orders_synced']}</b> · prices pushed "
+		f"<b>{activity['prices_pushed']}</b> · repricer <b>{activity['repricer_pushed']}</b> · "
+		f"FBA pull {fba_pull} ({activity['fba_proxy_count']} SKUs)",
+		f"Errors (30m): <b>{activity['errors']}</b>",
 	]
-	notify("15-min digest", lines, severity="info" if is_go else "warning")
+	notify("Activity digest", lines, severity="ok" if is_go else "warning")
 
 
 def safety_sweep() -> None:
-	# Runs every minute as the net under the instant hooks.
-	# The circuit-breaker check runs first and is independent of the Telegram config — the
-	# auto-freeze must work even when alerting is switched off.
+	# The circuit-breaker check runs first and is independent of the Telegram config.
 	sweep_circuit_breaker()
 
 	config = get_alert_config()
@@ -307,22 +324,17 @@ def safety_sweep() -> None:
 		"Sales Order", {"amazon_order_id": ("is", "set")}, "creation", order_by="creation desc"
 	)
 	if last_order:
-		mins = cint(
+		minutes = cint(
 			(frappe.utils.now_datetime() - frappe.utils.get_datetime(last_order)).total_seconds() / 60
 		)
-		if mins > 120:
+		if minutes > 120:
 			notify(
 				"Amazon orders stalled",
-				[f"No Amazon order synced for {mins} minutes."],
+				[f"No Amazon order synced for {minutes} minutes."],
 				severity="warning",
 				dedupe_key="sweep:orders_stalled",
 				dedupe_seconds=1800,
 			)
-
-
-# ---------------------------------------------------------------------------
-# Setup helpers (whitelisted, used by the Navgold Settings buttons)
-# ---------------------------------------------------------------------------
 
 
 @frappe.whitelist()
@@ -358,13 +370,12 @@ def detect_chat_id() -> dict:
 
 
 @frappe.whitelist()
-def send_test() -> dict:
+def send_test() -> None:
 	config = get_alert_config()
 	if not (config.get("token") and config.get("chat_id")):
 		frappe.throw("Set the bot token and chat id first (use Detect Chat ID).")
 	# Bypass the enabled flag for an explicit test send.
 	config["enabled"] = 1
-	result = send_telegram("🟢 <b>Navgold test alert</b>\nTelegram alerting is wired correctly.", config)
+	result = send_telegram("<b>Navgold test alert</b>\nTelegram alerting is wired correctly.", config)
 	if not result or not result.get("ok"):
 		frappe.throw(f"Telegram rejected the message: {frappe.as_json(result)}")
-	return {"ok": True}
