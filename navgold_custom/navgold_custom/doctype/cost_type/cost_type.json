@@ -7,10 +7,8 @@
 	"engine": "InnoDB",
 	"field_order": [
 		"cost_type_name",
+		"calculation_type",
 		"column_break_type",
-		"is_absolute",
-		"is_relative",
-		"is_vat",
 		"is_purchase_cost"
 	],
 	"fields": [
@@ -24,37 +22,25 @@
 			"unique": 1
 		},
 		{
+			"description": "How this cost enters the price formula. Absolute: fixed amount in GBP. Relative: percentage of price. VAT: tax fraction removed from the denominator.",
+			"fieldname": "calculation_type",
+			"fieldtype": "Select",
+			"in_list_view": 1,
+			"in_standard_filter": 1,
+			"label": "Calculation Type",
+			"options": "Absolute\nRelative\nVAT",
+			"reqd": 1
+		},
+		{
 			"fieldname": "column_break_type",
 			"fieldtype": "Column Break"
-		},
-		{
-			"default": "0",
-			"description": "Fixed amount in GBP",
-			"fieldname": "is_absolute",
-			"fieldtype": "Check",
-			"in_list_view": 1,
-			"label": "Is Absolute"
-		},
-		{
-			"default": "0",
-			"description": "Percentage value",
-			"fieldname": "is_relative",
-			"fieldtype": "Check",
-			"in_list_view": 1,
-			"label": "Is Relative"
-		},
-		{
-			"default": "0",
-			"description": "Special VAT handling",
-			"fieldname": "is_vat",
-			"fieldtype": "Check",
-			"label": "Is VAT"
 		},
 		{
 			"default": "0",
 			"description": "COGS - eligible for auto-sync from Supplier Item Price",
 			"fieldname": "is_purchase_cost",
 			"fieldtype": "Check",
+			"in_standard_filter": 1,
 			"label": "Is Purchase Cost"
 		}
 	],
