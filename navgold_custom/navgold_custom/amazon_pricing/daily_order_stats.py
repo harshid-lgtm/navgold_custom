@@ -1,12 +1,7 @@
 # Copyright (c) 2026, Navgold and contributors
 # For license information, please see license.txt
 
-"""Nightly aggregation of Amazon orders into per-day stats for the dashboard report.
-
-Source of truth is Amazon's ALL_ORDERS_BY_ORDER_DATE flat-file report (one report per
-date range) rather than per-order API calls, so a full month is a single request instead
-of ~200 rate-limited getOrders pages.
-"""
+"""Nightly aggregation of Amazon orders into per-day stats for the dashboard report."""
 
 import csv
 import io
@@ -28,14 +23,9 @@ def get_reports_client():
 	return Reports.from_amazon_settings(settings)
 
 
-def recent_window(days):
-	"""Window covering `days` calendar days ending yesterday inclusive.
-
-	Returns (start_date, end_date) where end_date is exclusive on the Amazon side (the day
-	after the last included day, i.e. today). So recent_window(1) is just yesterday, and the
-	number of included days always equals `days`. Both the nightly re-pull and the manual
-	backfill use this single contract so their windows never drift apart by a day.
-	"""
+def get_recent_window(days):
+	# Returns (start_date, end_date); end_date is exclusive on the Amazon side, so
+	# get_recent_window(1) is just yesterday and the window always spans exactly `days` days.
 	end_date = getdate(add_days(today(), 1))
 	start_date = getdate(add_days(end_date, -days))
 	return start_date, end_date
@@ -46,11 +36,8 @@ def aggregate_daily_stats(report_text):
 	if reader.fieldnames and "amazon-order-id" not in reader.fieldnames:
 		frappe.throw("Amazon order report is missing expected columns; the report schema may have changed.")
 
-	# An order spans multiple item lines; status/date are consistent across them, so each
-	# order is counted once. gross_amount is revenue of NON-cancelled orders only — a
-	# cancelled/refunded order contributes nothing to gross but is still counted separately
-	# in cancelled_orders. (Amazon leaves item-price populated on cancelled lines, so summing
-	# it unconditionally would inflate revenue with sales that never happened.)
+	# An order spans multiple item lines, so each order is counted once. gross_amount sums
+	# non-cancelled lines only — Amazon leaves item-price populated on cancelled lines.
 	stats_by_day = {}
 	seen_orders = set()
 
@@ -115,12 +102,9 @@ def save_daily_stats(stats_by_day):
 	return len(stats_by_day)
 
 
-def backfill(start_date=None, end_date=None):
-	"""Pull Amazon order stats for a date range and upsert one row per day.
-
-	end_date is exclusive on the Amazon side, so it should be the day *after* the last
-	day you want included.
-	"""
+def sync_stats_for_range(start_date=None, end_date=None):
+	# Pull the Amazon orders report for the range, aggregate per day, and upsert one row per day.
+	# end_date is exclusive on the Amazon side: pass the day after the last day you want included.
 	end_date = getdate(end_date) if end_date else getdate(add_days(today(), 1))
 	start_date = getdate(start_date) if start_date else getdate(add_days(end_date, -31))
 
@@ -139,9 +123,9 @@ def backfill(start_date=None, end_date=None):
 def enqueue_backfill(days=30):
 	frappe.only_for("System Manager")
 	days = cint(days) or 30
-	start_date, end_date = recent_window(days)
+	start_date, end_date = get_recent_window(days)
 	frappe.enqueue(
-		"navgold_custom.navgold_custom.amazon_pricing.daily_order_stats.backfill",
+		"navgold_custom.navgold_custom.amazon_pricing.daily_order_stats.sync_stats_for_range",
 		queue="long",
 		timeout=1500,
 		start_date=str(start_date),
@@ -151,7 +135,6 @@ def enqueue_backfill(days=30):
 
 
 def sync_daily_order_stats():
-	# Re-pull the last few days each night so late cancellations / status changes
-	# correct already-saved rows. recent_window(4) = the 4 calendar days ending yesterday.
-	start_date, end_date = recent_window(4)
-	backfill(start_date=str(start_date), end_date=str(end_date))
+	# Re-pull the last few days so late cancellations / status changes correct saved rows.
+	start_date, end_date = get_recent_window(4)
+	sync_stats_for_range(start_date=str(start_date), end_date=str(end_date))

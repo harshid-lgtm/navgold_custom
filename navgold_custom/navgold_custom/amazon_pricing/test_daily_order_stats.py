@@ -6,7 +6,7 @@ from frappe.utils import add_days, getdate, today
 
 from navgold_custom.navgold_custom.amazon_pricing.daily_order_stats import (
 	aggregate_daily_stats,
-	recent_window,
+	get_recent_window,
 )
 
 HEADER = "amazon-order-id\tpurchase-date\torder-status\titem-price\tcurrency"
@@ -31,7 +31,7 @@ def make_report(rows):
 
 class TestRecentWindow(IntegrationTestCase):
 	def test_window_is_n_days_ending_yesterday_inclusive(self):
-		start_date, end_date = recent_window(4)
+		start_date, end_date = get_recent_window(4)
 		# end_date is exclusive (today); start is 4 days before that, so the window covers
 		# yesterday and the 3 days before it — 4 calendar days ending yesterday inclusive.
 		self.assertEqual(end_date, getdate(add_days(today(), 1)))
@@ -39,7 +39,7 @@ class TestRecentWindow(IntegrationTestCase):
 		self.assertEqual((end_date - start_date).days, 4)
 
 	def test_window_one_day_is_just_yesterday(self):
-		start_date, end_date = recent_window(1)
+		start_date, end_date = get_recent_window(1)
 		self.assertEqual((end_date - start_date).days, 1)
 		self.assertEqual(start_date, getdate(add_days(today(), 0)))
 
