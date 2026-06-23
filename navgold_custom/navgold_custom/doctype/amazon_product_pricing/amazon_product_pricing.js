@@ -186,8 +186,7 @@ function manual_price_push(frm) {
 				max: flt(values.max),
 				our_price: flt(values.our_price),
 			};
-			// Dry run first: this validates prices and throws on a bad min/max before we ever
-			// offer the live push. The returned preview is intentionally not used here.
+			// Dry run first: validates prices and throws on a bad min/max before the live push.
 			await frappe.call({
 				method:
 					'navgold_custom.navgold_custom.amazon_pricing.manual_price_push.push_manual_prices',
@@ -215,13 +214,9 @@ function manual_price_push(frm) {
 				freeze_message: __('Submitting feed to Amazon...'),
 			});
 			dialog.hide();
-			frappe.show_alert({
-				message: __('Submitted feed {0} (log {1})', [
-					message.feed_id,
-					message.log_name,
-				]),
-				indicator: 'green',
-			});
+			frappe.msgprint(
+				__('Submitted feed {0} (log {1})', [message.feed_id, message.log_name]),
+			);
 		},
 	});
 

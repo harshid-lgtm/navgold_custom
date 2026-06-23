@@ -1,21 +1,11 @@
 # Copyright (c) 2026, developers@buildwithhussain.com and contributors
 # For license information, please see license.txt
 
-"""Per-SKU preview of exactly what the pricing sync sends to Amazon and Repricer.
-
-Two modes (chosen via the Source filter):
-- Live Preview: render the real Amazon feed via build_pricing_feed (nothing is pushed) and
-  mirror the Repricer band, so you can verify a push before it happens.
-- Last Sent: parse the most recent non-dry-run Submission Logs to show what actually went out.
-
-Read-only. The feed builder and repricer client are not modified or invoked for any push.
-"""
-
-import csv
-import io
+"""Per-SKU preview of what the pricing sync would send to Amazon and Repricer. Read-only."""
 
 import frappe
 from frappe import _
+from frappe.utils.csvutils import read_csv_content
 from frappe.utils.data import cint, flt
 
 from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import (
@@ -139,7 +129,6 @@ def parse_feed_messages(feed_content: str | bytes) -> dict:
 
 
 def enrich_sku_metadata(proxy_sku_names: list[str]) -> dict:
-	"""Returns {proxy_sku: {item, is_fba, active_strategy, repricer_rule}} for the given SKUs."""
 	if not proxy_sku_names:
 		return {}
 
@@ -183,7 +172,37 @@ def enrich_sku_metadata(proxy_sku_names: list[str]) -> dict:
 	return metadata
 
 
-def get_live_preview_rows(filters: dict) -> list[dict]:
+def build_preview_row(
+	proxy_sku: str,
+	meta: dict,
+	amazon_values: dict,
+	repricer: dict,
+	*,
+	active_strategy: str | None,
+	publishing_mode: str,
+	status: str,
+	reason: str,
+) -> dict:
+	return {
+		"proxy_sku": proxy_sku,
+		"item": meta.get("item"),
+		"active_strategy": active_strategy,
+		"fba": meta.get("is_fba", 0),
+		"publishing_mode": publishing_mode,
+		"amazon_min": amazon_values.get("amazon_min"),
+		"amazon_max": amazon_values.get("amazon_max"),
+		"amazon_our_price": amazon_values.get("amazon_our_price"),
+		"quantity": amazon_values.get("quantity"),
+		"fulfillment": amazon_values.get("fulfillment"),
+		"repricer_min": repricer.get("repricer_min"),
+		"repricer_max": repricer.get("repricer_max"),
+		"repricer_rule": repricer.get("repricer_rule"),
+		"status": status,
+		"reason": reason,
+	}
+
+
+def get_live_preview_rows(filters: dict) -> tuple[list[dict], str | None]:
 	settings = frappe.get_single("Amazon SP API Settings")
 	marketplace_id = settings.get_marketplace_id()
 	if not settings.merchant_id or not marketplace_id:
@@ -224,7 +243,7 @@ def get_live_preview_rows(filters: dict) -> list[dict]:
 	feed_result = build_pricing_feed(pricing_names, settings.merchant_id, marketplace_id)
 	amazon_map = parse_feed_messages(feed_result.get("feed_content"))
 
-	# Both channels apply the same price guards; compute them once so blocked SKUs surface with reasons.
+	# Both channels share the same price guards.
 	name_to_proxy = {row.name: row.proxy_sku for row in pricing_records}
 	blocked_reasons = {}
 	deviation_blocked = partition_pricing_by_price_deviation(pricing_records)[1]
@@ -242,39 +261,30 @@ def get_live_preview_rows(filters: dict) -> list[dict]:
 		meta = metadata.get(proxy_sku, {})
 		is_blocked = proxy_sku in blocked_reasons
 
-		repricer_min = repricer_max = None
+		repricer = {}
 		if not is_blocked:
-			# Repricer sends the same band; in stock-only mode the feed carries no price, so fall
-			# back to the pricing record's current band (the base the repricer client uses).
-			repricer_min = (
-				amazon_values.get("amazon_min")
+			# In stock-only mode the feed carries no price, so fall back to the current band.
+			repricer = {
+				"repricer_min": amazon_values.get("amazon_min")
 				if amazon_values.get("amazon_min") is not None
-				else flt(pricing.current_min_price)
-			)
-			repricer_max = (
-				amazon_values.get("amazon_max")
+				else flt(pricing.current_min_price),
+				"repricer_max": amazon_values.get("amazon_max")
 				if amazon_values.get("amazon_max") is not None
-				else flt(pricing.current_max_price)
-			)
+				else flt(pricing.current_max_price),
+				"repricer_rule": meta.get("repricer_rule"),
+			}
 
 		rows.append(
-			{
-				"proxy_sku": proxy_sku,
-				"item": meta.get("item"),
-				"active_strategy": pricing.active_strategy,
-				"fba": meta.get("is_fba", 0),
-				"publishing_mode": publishing_mode,
-				"amazon_min": amazon_values.get("amazon_min"),
-				"amazon_max": amazon_values.get("amazon_max"),
-				"amazon_our_price": amazon_values.get("amazon_our_price"),
-				"quantity": amazon_values.get("quantity"),
-				"fulfillment": amazon_values.get("fulfillment"),
-				"repricer_min": repricer_min,
-				"repricer_max": repricer_max,
-				"repricer_rule": meta.get("repricer_rule") if not is_blocked else None,
-				"status": "Blocked" if is_blocked else "OK",
-				"reason": "; ".join(blocked_reasons[proxy_sku]) if is_blocked else "",
-			}
+			build_preview_row(
+				proxy_sku,
+				meta,
+				amazon_values,
+				repricer,
+				active_strategy=pricing.active_strategy,
+				publishing_mode=publishing_mode,
+				status="Blocked" if is_blocked else "OK",
+				reason="; ".join(blocked_reasons[proxy_sku]) if is_blocked else "",
+			)
 		)
 
 	return rows, message
@@ -307,9 +317,12 @@ def parse_blocked_records(blocked_records: str | None) -> dict:
 
 def parse_repricer_csv(feed_content: str | None) -> dict:
 	repricer_map = {}
-	if not feed_content:
+	rows = read_csv_content(feed_content) if feed_content else []
+	if not rows:
 		return repricer_map
-	for row in csv.DictReader(io.StringIO(feed_content)):
+	header = rows[0]
+	for values in rows[1:]:
+		row = dict(zip(header, values, strict=False))
 		sku = row.get("sku")
 		if sku:
 			repricer_map[sku] = {
@@ -320,7 +333,7 @@ def parse_repricer_csv(feed_content: str | None) -> dict:
 	return repricer_map
 
 
-def get_last_sent_rows(filters: dict) -> list[dict]:
+def get_last_sent_rows(filters: dict) -> tuple[list[dict], str | None]:
 	channel = filters.get("channel") or "Both"
 	proxy_sku_filter = filters.get("proxy_sku")
 
@@ -346,7 +359,6 @@ def get_last_sent_rows(filters: dict) -> list[dict]:
 		else:
 			notes.append(_("Repricer: no completed push found"))
 
-	# The two channels are pushed independently, so each column reflects its own latest push event.
 	message = _("Last sent — {0}").format(" · ".join(notes)) if notes else None
 
 	proxy_sku_names = sorted(set(amazon_map) | set(repricer_map) | set(blocked_map))
@@ -365,23 +377,16 @@ def get_last_sent_rows(filters: dict) -> list[dict]:
 		is_blocked = proxy_sku in blocked_map
 
 		rows.append(
-			{
-				"proxy_sku": proxy_sku,
-				"item": meta.get("item"),
-				"active_strategy": meta.get("active_strategy"),
-				"fba": meta.get("is_fba", 0),
-				"publishing_mode": "",
-				"amazon_min": amazon_values.get("amazon_min"),
-				"amazon_max": amazon_values.get("amazon_max"),
-				"amazon_our_price": amazon_values.get("amazon_our_price"),
-				"quantity": amazon_values.get("quantity"),
-				"fulfillment": amazon_values.get("fulfillment"),
-				"repricer_min": repricer_values.get("repricer_min"),
-				"repricer_max": repricer_values.get("repricer_max"),
-				"repricer_rule": repricer_values.get("repricer_rule"),
-				"status": "Blocked" if is_blocked else "Sent",
-				"reason": blocked_map.get(proxy_sku, ""),
-			}
+			build_preview_row(
+				proxy_sku,
+				meta,
+				amazon_values,
+				repricer_values,
+				active_strategy=meta.get("active_strategy"),
+				publishing_mode="",
+				status="Blocked" if is_blocked else "Sent",
+				reason=blocked_map.get(proxy_sku, ""),
+			)
 		)
 
 	return rows, message

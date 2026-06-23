@@ -17,15 +17,20 @@ class AmazonControlCenter {
 		this.page = page;
 		this.body = $('<div class="acc-body">').appendTo(page.main);
 		this.auto_timer = null;
+		this.incident_mode = false;
+		this.title_timer = null;
+		this.original_title = document.title;
 		this.add_styles();
 		this.add_auto_refresh_toggle();
 	}
 
 	add_auto_refresh_toggle() {
-		this.page.add_inner_button('Auto-refresh: Off', () => this.toggle_auto());
+		this.page.add_inner_button('Auto-refresh: Off', () =>
+			this.toggle_auto_refresh(),
+		);
 	}
 
-	toggle_auto() {
+	toggle_auto_refresh() {
 		if (this.auto_timer) {
 			clearInterval(this.auto_timer);
 			this.auto_timer = null;
@@ -34,6 +39,72 @@ class AmazonControlCenter {
 			this.auto_timer = setInterval(() => this.refresh(true), 60000);
 			this.page.set_indicator('Auto-refresh on (60s)', 'green');
 		}
+	}
+
+	handle_incident_mode(bleeding) {
+		if (bleeding && !this.incident_mode) {
+			// Money is leaving NOW. Don't wait for a 60s manual refresh — force a fast
+			// loop and raise an audible + title alarm so it can't be missed.
+			this.incident_mode = true;
+			if (this.auto_timer) clearInterval(this.auto_timer);
+			this.auto_timer = setInterval(() => this.refresh(true), 10000);
+			this.page.set_indicator('INCIDENT — bleeding, 10s refresh', 'red');
+			this.start_alarm();
+		} else if (!bleeding && this.incident_mode) {
+			this.incident_mode = false;
+			this.stop_alarm();
+			if (this.auto_timer) {
+				clearInterval(this.auto_timer);
+				this.auto_timer = null;
+			}
+			this.page.set_indicator('Auto-refresh off', 'gray');
+		}
+		if (bleeding) this.beep();
+	}
+
+	start_alarm() {
+		if (this.title_timer) return;
+		let on = false;
+		this.title_timer = setInterval(() => {
+			on = !on;
+			document.title = on ? '🔴 BLEEDING — Amazon prices' : this.original_title;
+		}, 1000);
+	}
+
+	stop_alarm() {
+		if (this.title_timer) {
+			clearInterval(this.title_timer);
+			this.title_timer = null;
+		}
+		document.title = this.original_title;
+	}
+
+	beep() {
+		try {
+			if (!this.audio_context) {
+				this.audio_context = new (
+					window.AudioContext || window.webkitAudioContext
+				)();
+			}
+			const audio_context = this.audio_context;
+			const oscillator = audio_context.createOscillator();
+			const gain = audio_context.createGain();
+			oscillator.connect(gain);
+			gain.connect(audio_context.destination);
+			oscillator.frequency.value = 880;
+			gain.gain.value = 0.1;
+			oscillator.start();
+			oscillator.stop(audio_context.currentTime + 0.2);
+		} catch {
+			// Browser autoplay policy may block audio — the visual alarm still fires.
+		}
+	}
+
+	summary_to_map(summary) {
+		return (summary || []).reduce((map, row) => {
+			map[row.label] = row;
+			return map;
+		}, {});
 	}
 
 	async refresh(silent) {
@@ -46,304 +117,381 @@ class AmazonControlCenter {
 				'navgold_custom.navgold_custom.amazon_pricing.control_center.get_control_center_data',
 			);
 			this.data = message;
-			this.render();
-		} catch (e) {
+			this.refresh_body();
+		} catch {
 			this.body.html(
 				'<div class="text-danger" style="padding:2rem">Failed to load control center.</div>',
 			);
 		}
 	}
 
-	render() {
-		const d = this.data;
-		const r = d.readiness;
-		const blockers = r.blocked_total;
-		const below = d.below_min.count;
-		const feed_errors = d.feeds.status_counts.Error;
-		const frozen = d.switches.freeze_amazon_outbound;
+	refresh_body() {
+		const data = this.data;
+		const readiness = data.readiness;
+		const blockers = readiness.blocked_total;
+		const below = data.below_min.count;
+		const feed_errors = data.feeds.status_counts.Error;
+		const frozen = data.switches.freeze_amazon_outbound;
 
-		const is_go = blockers === 0 && below === 0 && feed_errors === 0;
+		// Below-min detection depends entirely on order sync. If it is off or stalled,
+		// below === 0 is meaningless and a GO banner would be a lie — hard NO-GO instead.
+		const orders = this.summary_to_map(data.orders.summary);
+		const minutes_since_order = orders['Minutes Since Last Amazon Order'];
+		const detection_blind =
+			!data.switches.order_sync_enabled ||
+			(minutes_since_order && minutes_since_order.indicator === 'Red');
+
+		const is_go =
+			blockers === 0 && below === 0 && feed_errors === 0 && !detection_blind;
+
+		const bleeding = (data.below_min?.velocity?.['15m']?.loss || 0) > 0;
+		this.handle_incident_mode(bleeding);
 
 		this.body.empty();
-		this.body.append(this.banner(is_go, blockers, below, feed_errors, frozen));
-		this.body.append(this.fire_strip(d));
-		this.body.append(this.push_status_strip(d.push_status));
-		this.body.append(this.switches_bar(d.switches));
-		this.body.append(this.stat_cards(d));
-		this.body.append(this.category_grid(r));
+		this.body.append(
+			this.format_banner(
+				is_go,
+				blockers,
+				below,
+				feed_errors,
+				frozen,
+				detection_blind,
+			),
+		);
+		this.body.append(this.format_fire_strip(data));
+		this.body.append(this.format_system_status(data));
+		this.body.append(this.format_stat_cards(data));
+		this.body.append(this.format_category_grid(readiness));
+		this.body.append(this.format_fba_stock_panel(data));
 
-		this.body.append(this.quick_actions(d));
+		this.body.append(this.format_quick_actions(data));
 
 		const tables = $('<div class="acc-tables">').appendTo(this.body);
-		tables.append(this.offenders_table(r.top_offenders));
-		tables.append(this.below_min_table(d.below_min));
-		tables.append(this.feeds_table(d.feeds.recent));
-		tables.append(this.suppliers_table(d.suppliers));
+		tables.append(this.format_top_sellers_table(data.top_sellers));
+		tables.append(this.format_offenders_table(readiness.top_offenders));
+		tables.append(this.format_below_min_table(data.below_min));
+		tables.append(this.format_feeds_table(data.feeds.recent));
+		tables.append(this.format_fba_stock_table(data.fba_stock));
 
-		this.body.append(this.safeguards_panel(d));
-		this.body.append(this.nav_panel());
+		this.body.append(this.format_nav_panel());
 
 		this.body.append(
-			`<div class="text-muted small" style="margin-top:1rem">Generated: ${d.generated_on}</div>`,
+			`<div class="text-muted small" style="margin-top:1rem">Generated: ${data.generated_on}</div>`,
 		);
 	}
 
-	banner(is_go, blockers, below, feed_errors, frozen) {
-		const cls = is_go ? 'acc-go' : 'acc-nogo';
+	format_banner(is_go, blockers, below, feed_errors, frozen, detection_blind) {
+		const banner_class = is_go ? 'acc-go' : 'acc-nogo';
 		const label = is_go ? 'GO — all clear' : 'NO-GO — issues present';
 		const reasons = [];
+		if (detection_blind)
+			reasons.push('below-min detection BLIND — order sync stale/off');
 		if (blockers) reasons.push(`${blockers} SKUs would be blocked`);
 		if (below) reasons.push(`${below} below-min sales`);
 		if (feed_errors) reasons.push(`${feed_errors} feed errors`);
-		const sub = reasons.length
+		const subtitle = reasons.length
 			? reasons.join(' · ')
 			: 'No SKU blocked, no below-min sales, no feed errors';
 
-		const freeze_btn = frozen
+		const freeze_button = frozen
 			? `<button class="btn btn-sm btn-success acc-freeze" data-freeze="0">Outbound is FROZEN — click to release</button>`
 			: `<button class="btn btn-sm btn-danger acc-freeze" data-freeze="1">FREEZE all Amazon/Repricer outbound</button>`;
 
-		const wrap = $(`
-			<div class="acc-banner ${cls}">
+		const wrapper = $(`
+			<div class="acc-banner ${banner_class}">
 				<div>
 					<div class="acc-banner-title">${label}</div>
-					<div class="acc-banner-sub">${sub}</div>
+					<div class="acc-banner-sub">${subtitle}</div>
 				</div>
-				<div>${freeze_btn}</div>
+				<div>${freeze_button}</div>
 			</div>
 		`);
 
-		wrap
+		wrapper
 			.find('.acc-freeze')
-			.on('click', (e) =>
-				this.toggle_freeze($(e.currentTarget).data('freeze')),
+			.on('click', (event) =>
+				this.toggle_freeze($(event.currentTarget).data('freeze')),
 			);
-		return wrap;
+		return wrapper;
 	}
 
 	async toggle_freeze(freeze) {
-		const verb = freeze
+		const action = freeze
 			? 'FREEZE all outbound writes to Amazon and Repricer'
 			: 'RELEASE the outbound freeze';
-		const ok = await new Promise((res) =>
-			frappe.confirm(
-				`Are you sure you want to ${verb}?`,
-				() => res(true),
-				() => res(false),
-			),
+		const confirmed = await navgold.confirm_dialog(
+			`Are you sure you want to ${action}?`,
 		);
-		if (!ok) return;
+		if (!confirmed) return;
 		await frappe.call(
 			'navgold_custom.navgold_custom.amazon_pricing.control_center.set_outbound_freeze',
 			{ freeze },
 		);
-		frappe.show_alert({
-			message: freeze ? 'Outbound frozen' : 'Outbound released',
-			indicator: freeze ? 'red' : 'green',
-		});
+		frappe.msgprint(freeze ? 'Outbound frozen' : 'Outbound released');
 		this.refresh();
 	}
 
-	fire_strip(d) {
-		const v = d.below_min?.velocity || {};
-		const cell = (label, win) => {
-			const c = win || { count: 0, loss: 0 };
-			const hot = c.loss > 0;
+	format_fire_strip(data) {
+		const velocity = data.below_min?.velocity || {};
+		const cell = (label, window_data) => {
+			const window_loss = window_data || { count: 0, loss: 0 };
+			const hot = window_loss.loss > 0;
 			return `<div class="acc-fire-cell ${hot ? 'hot' : 'cool'}">
-				<div class="acc-fire-val">${format_currency(c.loss || 0, 'GBP')}</div>
-				<div class="acc-fire-label">${label} · ${c.count || 0} sales</div>
+				<div class="acc-fire-val">${format_currency(
+					window_loss.loss || 0,
+					'GBP',
+				)}</div>
+				<div class="acc-fire-label">${label} · ${window_loss.count || 0} sales</div>
 			</div>`;
 		};
 
-		const snap = d.last_good_snapshot;
-		const rollback = snap
-			? `<button class="btn btn-sm btn-danger acc-rollback">↩ Revert to last good prices &amp; publish</button>
-				<div class="acc-fire-snap">last good: ${snap.name} (${snap.item_count} SKUs)</div>`
+		const snapshot = data.last_good_snapshot;
+		const rollback = snapshot
+			? `<button class="btn btn-sm btn-danger acc-contain">CONTAIN NOW — revert both channels &amp; freeze</button>
+				<button class="btn btn-sm btn-default acc-rollback">Repricer only</button>
+				<div class="acc-fire-snap">last good: ${snapshot.name} (${snapshot.item_count} SKUs)</div>`
 			: `<div class="acc-fire-snap text-muted">No snapshot to roll back to — take one.</div>`;
 
 		const on_fire =
-			(v['15m'] && v['15m'].loss > 0) || (v['1h'] && v['1h'].loss > 0);
-		const wrap = $(`
+			(velocity['15m'] && velocity['15m'].loss > 0) ||
+			(velocity['1h'] && velocity['1h'].loss > 0);
+		const wrapper = $(`
 			<div class="acc-fire ${on_fire ? 'burning' : ''}">
-				<div class="acc-fire-title">💷 Loss velocity ${
+				<div class="acc-fire-title">Loss velocity ${
 					on_fire ? '— BLEEDING NOW' : '— quiet'
 				}</div>
 				<div class="acc-fire-grid">
-					${cell('last 15 min', v['15m'])}
-					${cell('last 1 hour', v['1h'])}
-					${cell('last 24 hours', v['24h'])}
+					${cell('last 15 min', velocity['15m'])}
+					${cell('last 1 hour', velocity['1h'])}
+					${cell('last 24 hours', velocity['24h'])}
 				</div>
 				<div class="acc-fire-actions">${rollback}</div>
 			</div>
 		`);
-		wrap.find('.acc-rollback').on('click', () => this.emergency_rollback(snap));
-		return wrap;
+		wrapper
+			.find('.acc-rollback')
+			.on('click', () => this.emergency_rollback(snapshot));
+		wrapper.find('.acc-contain').on('click', () => this.contain_now(snapshot));
+		return wrapper;
 	}
 
-	async emergency_rollback(snap) {
-		const ok = await new Promise((res) =>
-			frappe.confirm(
-				`EMERGENCY ROLLBACK: restore prices from <b>${snap.name}</b> (${snap.item_count} SKUs) and re-publish to Repricer? Guards still apply.`,
-				() => res(true),
-				() => res(false),
-			),
+	async contain_now(snapshot) {
+		const confirmed = await navgold.confirm_dialog(
+			`CONTAIN NOW: restore prices from <b>${snapshot.name}</b> (${snapshot.item_count} SKUs), re-publish to <b>Amazon AND Repricer</b>, then FREEZE all outbound. Proceed?`,
 		);
-		if (!ok) return;
-		frappe.show_alert({ message: 'Rolling back…', indicator: 'orange' });
-		try {
-			const { message } = await frappe.call({
-				method:
-					'navgold_custom.navgold_custom.amazon_pricing.control_center.emergency_rollback',
-				args: { channel: 'Repricer' },
-			});
-			frappe.msgprint(
-				`Rolled back ${message.revert.reverted} SKUs from ${message.snapshot} and published to Repricer.`,
-			);
-			this.refresh();
-		} catch (e) {
-			frappe.show_alert({
-				message: 'Rollback failed — check Error Log',
-				indicator: 'red',
-			});
-		}
+		if (!confirmed) return;
+		const { message } = await frappe.call({
+			method:
+				'navgold_custom.navgold_custom.amazon_pricing.control_center.contain_now',
+		});
+		frappe.msgprint(
+			`Contained: reverted ${message.revert.reverted} SKUs from ${message.snapshot}, re-published to Amazon + Repricer, outbound now FROZEN.`,
+		);
+		this.refresh();
 	}
 
-	push_status_strip(ps) {
-		if (!ps) return $('');
-		const pill = (label, on, on_text, off_text) =>
-			`<span class="acc-pill ${on ? 'live' : 'off'}">${label}: <b>${
-				on ? on_text || 'YES' : off_text || 'NO'
-			}</b></span>`;
+	async emergency_rollback(snapshot) {
+		const confirmed = await navgold.confirm_dialog(
+			`EMERGENCY ROLLBACK: restore prices from <b>${snapshot.name}</b> (${snapshot.item_count} SKUs) and re-publish to Repricer? Guards still apply.`,
+		);
+		if (!confirmed) return;
+		const { message } = await frappe.call({
+			method:
+				'navgold_custom.navgold_custom.amazon_pricing.control_center.emergency_rollback',
+			args: { channel: 'Repricer' },
+		});
+		frappe.msgprint(
+			`Rolled back ${message.revert.reverted} SKUs from ${message.snapshot} and published to Repricer.`,
+		);
+		this.refresh();
+	}
 
-		// Prices-to-Amazon is the money-risk line: green when NOT sending, amber when live.
-		const amazon_prices = ps.amazon_prices_live
-			? `<span class="acc-pill warn">Prices → Amazon: <b>LIVE</b></span>`
-			: `<span class="acc-pill safe">Prices → Amazon: <b>NOT SENDING</b></span>`;
+	format_system_status(data) {
+		const push_status = data.push_status;
+		const switches = data.switches;
+		const alerts = data.alerts || {};
+		if (!push_status) return $('');
 
-		const tone = ps.frozen ? 'frozen' : ps.amazon_prices_live ? 'warn' : 'safe';
+		const format_value = (text, kind) =>
+			`<span class="acc-stat-val ${kind || ''}">${frappe.utils.escape_html(
+				String(text),
+			)}</span>`;
+		const format_row = (label, value_html) =>
+			`<span class="acc-stat-label">${label}</span>${value_html}`;
+		const format_toggle = (flag, on_text = 'On', off_text = 'Off') =>
+			format_value(flag ? on_text : off_text, flag ? 'on' : 'off');
+
+		const telegram_value = !alerts.telegram_enabled
+			? format_value('Off', 'off')
+			: alerts.telegram_configured
+			  ? format_value('On', 'on')
+			  : format_value('chat not set', 'warn');
+
+		const outbound = [
+			format_row(
+				'Prices → Amazon',
+				format_value(
+					push_status.amazon_prices_live ? 'LIVE' : 'NOT SENDING',
+					push_status.amazon_prices_live ? 'warn' : 'safe',
+				),
+			),
+			format_row(
+				'Stock → Amazon',
+				format_toggle(push_status.amazon_stock_live, 'SENDING', 'OFF'),
+			),
+			format_row(
+				'Min/Max → Repricer',
+				format_toggle(push_status.repricer_live, 'LIVE', 'OFF'),
+			),
+			format_row('Auto-push', format_toggle(push_status.auto_on, 'ON', 'OFF')),
+		].join('');
+
+		const sync = [
+			format_row('Order sync', format_toggle(switches.order_sync_enabled)),
+			format_row(
+				'AFN stock sync',
+				format_toggle(switches.enable_afn_stock_sync),
+			),
+			format_row('Feed-status poller', format_value('15 min', 'on')),
+			format_row('Telegram alerts', telegram_value),
+		].join('');
+
+		const guards = [
+			format_row('Zero-cost / invalid block', format_value('Active', 'on')),
+			format_row(
+				'Deviation guard',
+				format_value(
+					`${switches.price_change_threshold_percent || 0}% / ${
+						switches.price_change_block_direction
+					}`,
+					'neutral',
+				),
+			),
+			format_row(
+				'Send min → Amazon',
+				format_toggle(switches.send_min_price_to_amazon),
+			),
+			format_row(
+				'Pricing rollout',
+				format_value(switches.pricing_publishing_mode, 'neutral'),
+			),
+			format_row(
+				'Amazon mode',
+				format_value(switches.amazon_publishing_mode, 'neutral'),
+			),
+		].join('');
+
+		const tone = push_status.frozen
+			? 'frozen'
+			: push_status.amazon_prices_live
+			  ? 'warn'
+			  : 'safe';
 		return $(`
-			<div class="acc-push ${tone}">
-				<div class="acc-push-headline">Outbound: ${frappe.utils.escape_html(
-					ps.headline,
-				)}</div>
-				<div class="acc-pills">
-					${amazon_prices}
-					${pill('Stock → Amazon', ps.amazon_stock_live, 'SENDING', 'OFF')}
-					${pill('Min/Max → Repricer', ps.repricer_live, 'LIVE', 'OFF')}
-					<span class="acc-pill neutral">Amazon mode: <b>${frappe.utils.escape_html(
-						ps.amazon_mode,
-					)}</b></span>
-					${pill('Auto-push', ps.auto_on, 'ON', 'OFF')}
+			<div class="acc-status ${tone}">
+				<div class="acc-status-grid">
+					<div class="acc-status-col">
+						<div class="acc-status-title">Outbound now</div>
+						${outbound}
+					</div>
+					<div class="acc-status-col">
+						<div class="acc-status-title">Sync &amp; alerts</div>
+						${sync}
+					</div>
+					<div class="acc-status-col">
+						<div class="acc-status-title">Guards &amp; rollout</div>
+						${guards}
+					</div>
 				</div>
+				<div class="acc-status-foot">Last price sync: ${
+					switches.last_pricing_synced_at || '—'
+				}</div>
 			</div>
 		`);
 	}
 
-	switches_bar(s) {
-		const chip = (label, on, on_text, off_text) =>
-			`<span class="acc-chip ${on ? 'on' : 'off'}">${label}: <b>${
-				on ? on_text || 'On' : off_text || 'Off'
-			}</b></span>`;
-		return $(`
-			<div class="acc-chips">
-				${chip(
-					'Amazon mode',
-					s.amazon_publishing_mode === 'Stock Only',
-					s.amazon_publishing_mode,
-					s.amazon_publishing_mode,
-				)}
-				${chip(
-					'Pricing rollout',
-					s.pricing_publishing_mode !== 'Publish All Prices',
-					s.pricing_publishing_mode,
-					s.pricing_publishing_mode,
-				)}
-				${chip('Order sync', s.order_sync_enabled)}
-				${chip('AFN stock sync', s.enable_afn_stock_sync)}
-				${chip('Repricer', s.repricer_enabled)}
-				${chip('Send min to Amazon', s.send_min_price_to_amazon)}
-				<span class="acc-chip neutral">Deviation guard: <b>${
-					s.price_change_threshold_percent || 0
-				}% / ${s.price_change_block_direction}</b></span>
-				<span class="acc-chip neutral">Last price sync: <b>${
-					s.last_pricing_synced_at || '—'
-				}</b></span>
-			</div>
-		`);
-	}
-
-	stat_cards(d) {
-		const r = d.readiness;
-		const orders = (d.orders.summary || []).reduce((m, x) => {
-			m[x.label] = x;
-			return m;
-		}, {});
+	format_stat_cards(data) {
+		const readiness = data.readiness;
+		const orders = this.summary_to_map(data.orders.summary);
 		const open_failed = orders['Open Failed Syncs'];
-		const mins = orders['Minutes Since Last Amazon Order'];
+		const minutes_since_order = orders['Minutes Since Last Amazon Order'];
+		const fba_stock = this.summary_to_map(data.fba_stock.summary);
+		const minutes_since_fba_sync =
+			fba_stock['Minutes Since Last FBA Stock Sync'];
 
 		const cards = [
-			this.card('Active SKUs', r.total_active, 'neutral'),
-			this.card(
+			this.format_card('Active SKUs', readiness.total_active, 'neutral'),
+			this.format_card(
 				'Ready to push',
-				r.ok_total,
-				r.ok_total === r.total_active ? 'good' : 'neutral',
+				readiness.ok_total,
+				readiness.ok_total === readiness.total_active ? 'good' : 'neutral',
 			),
-			this.card(
+			this.format_card(
 				'Would be BLOCKED',
-				r.blocked_total,
-				r.blocked_total ? 'bad' : 'good',
+				readiness.blocked_total,
+				readiness.blocked_total ? 'bad' : 'good',
 			),
-			this.card(
-				`Below-min sales (${d.below_min.days_back}d)`,
-				d.below_min.count,
-				d.below_min.count ? 'bad' : 'good',
-				d.below_min.estimated_loss
-					? `≈ ${format_currency(d.below_min.estimated_loss, 'GBP')} loss`
+			this.format_card(
+				`Below-min sales (${data.below_min.days_back}d)`,
+				data.below_min.count,
+				data.below_min.count ? 'bad' : 'good',
+				data.below_min.estimated_loss
+					? `≈ ${format_currency(data.below_min.estimated_loss, 'GBP')} loss`
 					: '',
 			),
-			this.card(
+			this.format_card(
 				'Feed errors',
-				d.feeds.status_counts.Error,
-				d.feeds.status_counts.Error ? 'bad' : 'good',
-				`${d.feeds.status_counts.Pending} pending`,
+				data.feeds.status_counts.Error,
+				data.feeds.status_counts.Error ? 'bad' : 'good',
+				`${data.feeds.status_counts.Pending} pending`,
 			),
-			this.card(
+			this.format_card(
+				'Oldest open feed',
+				data.feeds.oldest_open_minutes
+					? `${data.feeds.oldest_open_minutes}m`
+					: '—',
+				data.feeds.oldest_open_minutes > 30 ? 'bad' : 'good',
+				`${data.feeds.status_counts.Submitted} in flight`,
+			),
+			this.format_card(
 				'Open failed order syncs',
 				open_failed ? open_failed.value : 0,
 				open_failed && open_failed.indicator === 'Red' ? 'bad' : 'good',
 			),
-			this.card(
+			this.format_card(
 				'Mins since last order',
-				mins ? mins.value : '—',
-				mins && mins.indicator === 'Red' ? 'bad' : 'good',
+				minutes_since_order ? minutes_since_order.value : '—',
+				minutes_since_order && minutes_since_order.indicator === 'Red'
+					? 'bad'
+					: 'good',
 			),
-			this.card(
-				'Stale suppliers',
-				d.suppliers.stale_count,
-				d.suppliers.stale_count ? 'warn' : 'good',
-				`of ${d.suppliers.total}`,
+			this.format_card(
+				'Mins since last FBA stock sync',
+				minutes_since_fba_sync ? minutes_since_fba_sync.value : '—',
+				minutes_since_fba_sync && minutes_since_fba_sync.indicator === 'Red'
+					? 'bad'
+					: 'good',
 			),
 		];
 		return $('<div class="acc-cards">').append(cards);
 	}
 
-	card(label, value, tone, sub) {
+	format_card(label, value, tone, subtitle) {
 		return $(`
 			<div class="acc-card ${tone}">
 				<div class="acc-card-value">${value}</div>
 				<div class="acc-card-label">${label}</div>
-				${sub ? `<div class="acc-card-sub">${sub}</div>` : ''}
+				${subtitle ? `<div class="acc-card-sub">${subtitle}</div>` : ''}
 			</div>
 		`);
 	}
 
-	category_grid(r) {
-		if (!r.blocked_total) return $('');
-		const items = Object.keys(r.categories)
-			.filter((k) => r.categories[k] > 0)
+	format_category_grid(readiness) {
+		if (!readiness.blocked_total) return $('');
+		const items = Object.keys(readiness.categories)
+			.filter((key) => readiness.categories[key] > 0)
 			.map(
-				(k) =>
-					`<span class="acc-chip bad">${r.category_labels[k]}: <b>${r.categories[k]}</b></span>`,
+				(key) =>
+					`<span class="acc-chip bad">${readiness.category_labels[key]}: <b>${readiness.categories[key]}</b></span>`,
 			)
 			.join('');
 		return $(
@@ -351,7 +499,75 @@ class AmazonControlCenter {
 		);
 	}
 
-	offenders_table(rows) {
+	format_fba_stock_panel(data) {
+		const summary = data.fba_stock?.summary || [];
+		if (!summary.length) return $('');
+		const tone_map = { Red: 'bad', Green: 'on', Blue: 'neutral', Gray: 'off' };
+		const stale = summary.some(
+			(item) =>
+				item.label === 'Minutes Since Last FBA Stock Sync' &&
+				item.indicator === 'Red',
+		);
+		const rows = summary
+			.map(
+				(item) =>
+					`<span class="acc-status-label">${frappe.utils.escape_html(
+						item.label,
+					)}</span><span class="acc-stat-val ${
+						tone_map[item.indicator] || 'neutral'
+					}">${frappe.utils.escape_html(String(item.value))}</span>`,
+			)
+			.join('');
+		return $(`
+			<div class="acc-status ${stale ? 'warn' : 'safe'}">
+				<div class="acc-status-col" style="max-width:560px">
+					<div class="acc-status-title">FBA stock sync health</div>
+					${rows}
+				</div>
+				<div class="acc-status-foot">
+					<a class="acc-open" href="/app/query-report/${encodeURIComponent(
+						'Amazon FBA Stock Sync Health',
+					)}">Open full report →</a>
+				</div>
+			</div>
+		`);
+	}
+
+	format_top_sellers_table(top_sellers) {
+		const rows = top_sellers?.rows || [];
+		const days_back = top_sellers?.days_back || 30;
+		const sku_links = (skus) =>
+			(skus || [])
+				.map(
+					(sku) =>
+						`<a href="/app/proxy-sku/${encodeURIComponent(
+							sku,
+						)}">${frappe.utils.escape_html(sku)}</a>`,
+				)
+				.join(', ') || '<span class="text-muted"><i>unmapped</i></span>';
+		const body = rows
+			.map(
+				(row) => `
+			<tr>
+				<td>${frappe.utils.escape_html(
+					row.item_code || '',
+				)} · ${frappe.utils.escape_html(row.uom || '')}</td>
+				<td class="small">${sku_links(row.skus)}</td>
+				<td class="text-right">${flt(row.total_qty)}</td>
+				<td class="text-right">${format_currency(row.total_amount || 0, 'GBP')}</td>
+				<td class="text-right">${cint(row.order_count)}</td>
+			</tr>`,
+			)
+			.join('');
+		return this.format_table_block(
+			`Top selling SKUs (${days_back}d)`,
+			['Item · UOM', 'Amazon SKU(s)', 'Qty', 'Revenue', 'Orders'],
+			body,
+			'Amazon Top Selling SKU',
+		);
+	}
+
+	format_offenders_table(rows) {
 		const body = rows
 			.map(
 				(row) => `
@@ -369,7 +585,7 @@ class AmazonControlCenter {
 			</tr>`,
 			)
 			.join('');
-		return this.table_block(
+		return this.format_table_block(
 			'Top blocked SKUs',
 			['SKU', 'Strategy', 'Min', 'Max', 'Purchase Cost', 'Violations'],
 			body,
@@ -377,7 +593,7 @@ class AmazonControlCenter {
 		);
 	}
 
-	below_min_table(below) {
+	format_below_min_table(below) {
 		const body = below.rows
 			.map(
 				(row) => `
@@ -396,7 +612,7 @@ class AmazonControlCenter {
 			</tr>`,
 			)
 			.join('');
-		return this.table_block(
+		return this.format_table_block(
 			`Below-min sales (${below.days_back}d)`,
 			['SKU', 'Sales Order', 'Qty', 'Sold At', 'Min', 'Est. Loss'],
 			body,
@@ -404,11 +620,11 @@ class AmazonControlCenter {
 		);
 	}
 
-	feeds_table(rows) {
-		const ind = (s) =>
-			s === 'Error'
+	format_feeds_table(rows) {
+		const status_class = (status) =>
+			status === 'Error'
 				? 'text-danger'
-				: s === 'Completed' || s === 'Submitted'
+				: status === 'Completed' || status === 'Submitted'
 				  ? 'text-success'
 				  : '';
 		const body = rows
@@ -416,7 +632,7 @@ class AmazonControlCenter {
 				(row) => `
 			<tr>
 				<td>${frappe.utils.escape_html(row.submission_type || '')}</td>
-				<td class="${ind(row.status)}">${frappe.utils.escape_html(
+				<td class="${status_class(row.status)}">${frappe.utils.escape_html(
 					row.status || '',
 				)}</td>
 				<td>${frappe.utils.escape_html(row.amazon_status || '')}</td>
@@ -427,7 +643,7 @@ class AmazonControlCenter {
 			</tr>`,
 			)
 			.join('');
-		return this.table_block(
+		return this.format_table_block(
 			'Recent feed submissions',
 			['Type', 'Status', 'Amazon', 'Blocked', 'When'],
 			body,
@@ -435,67 +651,79 @@ class AmazonControlCenter {
 		);
 	}
 
-	suppliers_table(suppliers) {
-		const body = suppliers.rows
+	format_fba_stock_table(fba_stock) {
+		const rows = fba_stock?.rows || [];
+		const body = rows
 			.map(
 				(row) => `
 			<tr>
-				<td>${frappe.utils.escape_html(row.supplier || '')}</td>
-				<td class="text-right">${row.item_count || 0}</td>
-				<td class="text-right">${row.in_stock_count || 0}</td>
-				<td class="text-right text-warning">${row.days_stale}</td>
+				<td><a href="/app/proxy-sku/${encodeURIComponent(
+					row.proxy_sku,
+				)}">${frappe.utils.escape_html(row.proxy_sku || '')}</a></td>
+				<td>${frappe.utils.escape_html(
+					row.item || '',
+				)} · ${frappe.utils.escape_html(row.uom || '')}</td>
+				<td class="small">${frappe.utils.escape_html(row.asin || '')}</td>
+				<td class="text-right ${
+					flt(row.afn_stock) <= 0 ? 'text-danger' : ''
+				}">${flt(row.afn_stock)}</td>
+				<td class="text-center">${row.in_stock ? '✓' : '—'}</td>
 			</tr>`,
 			)
 			.join('');
-		return this.table_block(
-			'Stale suppliers (>7d)',
-			['Supplier', 'Items', 'In stock', 'Days stale'],
+		return this.format_table_block(
+			'FBA stock (lowest fulfillable first)',
+			['Proxy SKU', 'Item · UOM', 'ASIN', 'AFN Stock', 'In Stock'],
 			body,
-			'Supplier Data Readiness',
+			'Amazon FBA Stock Sync Health',
 		);
 	}
 
-	quick_actions(d) {
-		const wrap = $(
+	format_quick_actions(data) {
+		const wrapper = $(
 			'<div class="acc-section"><div class="acc-section-title">Quick actions</div><div class="acc-actions"></div></div>',
 		);
-		const row = wrap.find('.acc-actions');
-		const btn = (label, cls, fn) => {
-			const b = $(`<button class="btn btn-sm ${cls}">${label}</button>`);
-			b.on('click', fn);
-			row.append(b);
+		const actions_row = wrapper.find('.acc-actions');
+		const add_button = (label, css_class, handler) => {
+			const button = $(
+				`<button class="btn btn-sm ${css_class}">${label}</button>`,
+			);
+			button.on('click', handler);
+			actions_row.append(button);
 		};
 
-		const alerts = d.alerts || {};
+		const alerts = data.alerts || {};
 		const alert_state = !alerts.telegram_enabled
-			? '🔕 Alerts OFF'
+			? 'Alerts OFF'
 			: alerts.telegram_configured
-			  ? '🔔 Alerts ON'
-			  : '⚠️ Alerts: chat not set';
+			  ? 'Alerts ON'
+			  : 'Alerts: chat not set';
 
-		btn('📸 Take pricing snapshot', 'btn-primary', () => this.take_snapshot());
-		btn('↻ Refresh strategies', 'btn-default', () =>
+		add_button('Take pricing snapshot', 'btn-primary', () =>
+			this.capture_snapshot(),
+		);
+		add_button('Refresh strategies', 'btn-default', () =>
 			this.run_action(
 				'navgold_custom.navgold_custom.amazon_pricing.strategy_selector.bulk_refresh_strategies',
 				{},
 				'Re-select active strategy for all SKUs from current stock?',
 			),
 		);
-		btn('⬇ Fetch AFN stock', 'btn-default', () =>
+		add_button('Fetch AFN stock', 'btn-default', () =>
 			this.run_action(
 				'navgold_custom.navgold_custom.amazon_pricing.afn_stock_fetcher.bulk_fetch_afn_stock',
 				{},
 				'Pull FBA fulfillable stock from Amazon into ERP now?',
 			),
 		);
-		btn('📨 Send digest now', 'btn-default', () =>
+		add_button('Send digest now', 'btn-default', () =>
 			this.run_action(
 				'navgold_custom.navgold_custom.amazon_pricing.alerts.send_digest',
 				{},
 				'Send the rollup digest to Telegram now?',
 			),
 		);
-		btn('🧪 Test alert', 'btn-default', () =>
+		add_button('Test alert', 'btn-default', () =>
 			this.run_action(
 				'navgold_custom.navgold_custom.amazon_pricing.alerts.send_test',
 				{},
@@ -503,117 +731,50 @@ class AmazonControlCenter {
 			),
 		);
 
-		row.append(
-			`<a class="btn btn-sm btn-default" href="/app/navgold-settings">⚙ Navgold Settings</a>`,
+		actions_row.append(
+			`<a class="btn btn-sm btn-default" href="/app/query-report/${encodeURIComponent(
+				'Amazon Pricing Feed Preview',
+			)}">Feed Preview</a>`,
 		);
-		row.append(
-			`<a class="btn btn-sm btn-default" href="/app/amazon-sp-api-settings">🔌 SP-API Settings</a>`,
+		actions_row.append(
+			`<a class="btn btn-sm btn-default" href="/app/navgold-settings">Navgold Settings</a>`,
 		);
-		row.append(
-			`<a class="btn btn-sm btn-default" href="/app/amazon-pricing-control">🗂 Reports Workspace</a>`,
+		actions_row.append(
+			`<a class="btn btn-sm btn-default" href="/app/amazon-sp-api-settings">SP-API Settings</a>`,
 		);
-		row.append(
+		actions_row.append(
+			`<a class="btn btn-sm btn-default" href="/app/amazon-pricing-control">Reports Workspace</a>`,
+		);
+		actions_row.append(
 			`<span class="acc-chip neutral" style="align-self:center">${alert_state}</span>`,
 		);
-		return wrap;
+		return wrapper;
 	}
 
-	async take_snapshot() {
-		const ok = await new Promise((res) =>
-			frappe.confirm(
-				'Capture a pricing snapshot of all active SKUs now?',
-				() => res(true),
-				() => res(false),
-			),
+	async capture_snapshot() {
+		const confirmed = await navgold.confirm_dialog(
+			'Capture a pricing snapshot of all active SKUs now?',
 		);
-		if (!ok) return;
+		if (!confirmed) return;
 		const { message } = await frappe.call({
 			method:
-				'navgold_custom.navgold_custom.doctype.amazon_pricing_snapshot.amazon_pricing_snapshot.take_snapshot_now',
+				'navgold_custom.navgold_custom.doctype.amazon_pricing_snapshot.amazon_pricing_snapshot.capture_snapshot_now',
 		});
-		frappe.show_alert({
-			message: `Snapshot ${message.name} captured`,
-			indicator: 'green',
-		});
+		frappe.msgprint(`Snapshot ${message.name} captured`);
 		frappe.set_route('Form', 'Amazon Pricing Snapshot', message.name);
 	}
 
 	async run_action(method, args, confirm_text) {
 		if (confirm_text) {
-			const ok = await new Promise((res) =>
-				frappe.confirm(
-					confirm_text,
-					() => res(true),
-					() => res(false),
-				),
-			);
-			if (!ok) return;
+			const confirmed = await navgold.confirm_dialog(confirm_text);
+			if (!confirmed) return;
 		}
-		try {
-			await frappe.call({ method, args });
-			frappe.show_alert({ message: 'Done', indicator: 'green' });
-			this.refresh(true);
-		} catch (e) {
-			frappe.show_alert({ message: 'Action failed', indicator: 'red' });
-		}
+		await frappe.call({ method, args });
+		frappe.msgprint('Done');
+		this.refresh(true);
 	}
 
-	safeguards_panel(d) {
-		const s = d.switches;
-		const guard = (name, ok, detail) =>
-			`<div class="acc-guard"><span class="acc-dot ${ok ? 'good' : 'bad'}"></span>
-				<span class="acc-guard-name">${name}</span>
-				<span class="acc-guard-detail">${detail}</span></div>`;
-
-		const rows = [
-			guard(
-				'Zero-cost / invalid push block',
-				true,
-				'Active — validates every push',
-			),
-			guard(
-				'Price-deviation guard',
-				s.price_change_threshold_percent > 0,
-				`${s.price_change_threshold_percent || 0}% / ${
-					s.price_change_block_direction
-				}`,
-			),
-			guard(
-				'Amazon Stock-Only mode',
-				s.amazon_publishing_mode === 'Stock Only',
-				s.amazon_publishing_mode,
-			),
-			guard(
-				'Phased rollout (canary)',
-				s.pricing_publishing_mode !== 'Publish All Prices',
-				s.pricing_publishing_mode,
-			),
-			guard(
-				'Outbound freeze switch',
-				true,
-				s.freeze_amazon_outbound ? 'FROZEN' : 'armed (not frozen)',
-			),
-			guard(
-				'AFN stock sync',
-				s.enable_afn_stock_sync,
-				s.enable_afn_stock_sync ? 'On' : 'Off',
-			),
-			guard('Feed-status poller', true, 'every 15 min'),
-			guard(
-				'Telegram alerts',
-				d.alerts?.telegram_enabled && d.alerts?.telegram_configured,
-				!d.alerts?.telegram_enabled
-					? 'Off'
-					: d.alerts?.telegram_configured
-					  ? 'On'
-					  : 'chat not set',
-			),
-		];
-		return $(`<div class="acc-section"><div class="acc-section-title">Safeguards &amp; fallbacks</div>
-			<div class="acc-guards">${rows.join('')}</div></div>`);
-	}
-
-	nav_panel() {
+	format_nav_panel() {
 		const report = (name) =>
 			`<a class="acc-link" href="/app/query-report/${encodeURIComponent(
 				name,
@@ -638,6 +799,7 @@ class AmazonControlCenter {
 					report('Below Min Price Sales'),
 					report('Amazon Pricing Push Monitor'),
 					report('Amazon Order Sync Health'),
+					report('Amazon FBA Stock Sync Health'),
 				],
 			],
 			[
@@ -669,7 +831,7 @@ class AmazonControlCenter {
 			],
 		];
 
-		const cols = groups
+		const columns = groups
 			.map(
 				([title, links]) =>
 					`<div class="acc-nav-col"><div class="acc-nav-title">${title}</div>${links.join(
@@ -678,25 +840,25 @@ class AmazonControlCenter {
 			)
 			.join('');
 		return $(`<div class="acc-section"><div class="acc-section-title">Jump to everything</div>
-			<div class="acc-nav">${cols}</div></div>`);
+			<div class="acc-nav">${columns}</div></div>`);
 	}
 
-	table_block(title, headers, body_html, report_name) {
-		const head = headers.map((h) => `<th>${h}</th>`).join('');
-		const link = report_name
+	format_table_block(title, headers, body_html, report_name) {
+		const header_html = headers.map((header) => `<th>${header}</th>`).join('');
+		const link_html = report_name
 			? `<a class="acc-open" href="/app/query-report/${encodeURIComponent(
 					report_name,
 			  )}">Open full report →</a>`
 			: '';
 		return $(`
 			<div class="acc-table-card">
-				<div class="acc-table-head"><span>${title}</span>${link}</div>
+				<div class="acc-table-head"><span>${title}</span>${link_html}</div>
 				<div class="acc-table-scroll">
 					<table class="table table-bordered acc-table">
-						<thead><tr>${head}</tr></thead>
+						<thead><tr>${header_html}</tr></thead>
 						<tbody>${
 							body_html ||
-							`<tr><td colspan="${headers.length}" class="text-muted text-center">None 🎉</td></tr>`
+							`<tr><td colspan="${headers.length}" class="text-muted text-center">None</td></tr>`
 						}</tbody>
 					</table>
 				</div>
@@ -725,22 +887,24 @@ class AmazonControlCenter {
 			.acc-fire-label { font-size:11px; color:#6b7280; margin-top:2px; }
 			.acc-fire-actions { margin-top:10px; display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
 			.acc-fire-snap { font-size:11px; color:#8a929b; }
-			.acc-push { border-radius:10px; padding:12px 16px; margin:10px 0; border:1px solid #e6e9ec; }
-			.acc-push.safe { background:#f1f9f4; border-color:#bfe6d0; }
-			.acc-push.warn { background:#fff7e8; border-color:#f3dca0; }
-			.acc-push.frozen { background:#fdecec; border-color:#f3c9c7; }
-			.acc-push-headline { font-weight:700; font-size:15px; margin-bottom:8px; }
-			.acc-pills { display:flex; flex-wrap:wrap; gap:8px; }
-			.acc-pill { font-size:12px; padding:4px 10px; border-radius:14px; background:#eef0f2; border:1px solid #dfe3e6; }
-			.acc-pill.live { background:#fff2dd; border-color:#f0d091; }
-			.acc-pill.warn { background:#fde9c9; border-color:#eec078; color:#92560a; }
-			.acc-pill.safe { background:#e4f5ec; border-color:#bfe6d0; color:#176a3d; }
-			.acc-pill.off { background:#eef0f2; color:#6b7280; }
-			.acc-pill.neutral { background:#eef2f7; }
+			.acc-status { border-radius:10px; padding:14px 16px; margin:10px 0; border:1px solid #e6e9ec; }
+			.acc-status.safe { background:#f1f9f4; border-color:#bfe6d0; }
+			.acc-status.warn { background:#fff7e8; border-color:#f3dca0; }
+			.acc-status.frozen { background:#fdecec; border-color:#f3c9c7; }
+			.acc-status-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:6px 28px; }
+			@media (max-width:900px){ .acc-status-grid { grid-template-columns:1fr; } }
+			.acc-status-col { display:grid; grid-template-columns:1fr auto; gap:0 14px; align-content:start; min-width:0; }
+			.acc-status-title { grid-column:1 / -1; font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.04em; color:#8a929b; margin:0 0 4px; }
+			.acc-status-label { color:#55606a; font-size:13px; padding:4px 0; border-bottom:1px solid rgba(0,0,0,.05); }
+			.acc-stat-val { font-size:13px; font-weight:700; text-align:right; padding:4px 0; border-bottom:1px solid rgba(0,0,0,.05); }
+			.acc-stat-val.on, .acc-stat-val.safe { color:#176a3d; }
+			.acc-stat-val.off { color:#6b7280; font-weight:600; }
+			.acc-stat-val.bad { color:#b3261e; }
+			.acc-stat-val.warn { color:#92560a; }
+			.acc-stat-val.neutral { color:#3a4452; font-weight:600; }
+			.acc-status-foot { margin-top:12px; font-size:11.5px; color:#8a929b; }
 			.acc-chips { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0; }
-			.acc-chip { font-size:12px; padding:4px 10px; border-radius:14px; background:#eef0f2; border:1px solid #dfe3e6; }
-			.acc-chip.on { background:#e4f5ec; border-color:#bfe6d0; }
-			.acc-chip.off { background:#fdecec; border-color:#f3c9c7; }
+			.acc-chip { font-size:12px; padding:4px 10px; border-radius:8px; background:#eef0f2; border:1px solid #dfe3e6; }
 			.acc-chip.bad { background:#fdecec; border-color:#f3c9c7; color:#9b1c17; }
 			.acc-chip.neutral { background:#eef2f7; }
 			.acc-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin:14px 0; }
@@ -762,13 +926,6 @@ class AmazonControlCenter {
 			.acc-table { margin:0; font-size:12.5px; }
 			.acc-table th { position:sticky; top:0; background:#f7f8fa; z-index:1; }
 			.acc-actions { display:flex; flex-wrap:wrap; gap:8px; }
-			.acc-guards { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:8px 18px; }
-			.acc-guard { display:flex; align-items:center; gap:8px; font-size:13px; padding:4px 0; }
-			.acc-dot { width:9px; height:9px; border-radius:50%; flex:0 0 auto; }
-			.acc-dot.good { background:#1a7f4b; }
-			.acc-dot.bad { background:#b3261e; }
-			.acc-guard-name { font-weight:600; }
-			.acc-guard-detail { color:#6b7280; margin-left:auto; }
 			.acc-nav { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:16px; }
 			.acc-nav-title { font-weight:600; font-size:12px; text-transform:uppercase; color:#8a929b; margin-bottom:6px; }
 			.acc-link { display:block; padding:3px 0; font-size:13px; }

@@ -37,38 +37,6 @@ frappe.ui.form.on('Navgold Settings', {
 		}
 
 		if (frm.doc.amazon_pricing_enabled) {
-			if (frm.doc.auto_sync_cogs && frm.doc.cogs_supplier) {
-				frm.add_custom_button(
-					__('Bulk Sync COGS'),
-					async () => {
-						const confirmed = await navgold.confirm_dialog(
-							__(
-								"This will sync COGS from supplier '{0}' to all active pricing records. Continue?",
-								[frm.doc.cogs_supplier],
-							),
-						);
-						if (!confirmed) return;
-
-						const response = await frappe.call({
-							method:
-								'navgold_custom.navgold_custom.amazon_pricing.cogs_sync.bulk_sync_cogs',
-							args: {
-								supplier: frm.doc.cogs_supplier,
-							},
-							freeze: true,
-							freeze_message: __('Syncing COGS...'),
-						});
-						frappe.msgprint(
-							__('Synced {0} records, {1} errors', [
-								response.message.synced,
-								response.message.errors,
-							]),
-						);
-					},
-					__('Amazon Pricing'),
-				);
-			}
-
 			frm.add_custom_button(
 				__('Refresh All Strategies'),
 				async () => {
@@ -290,5 +258,25 @@ frappe.ui.form.on('Navgold Settings', {
 			{ message: __('Proxy SKUs generation started'), indicator: 'blue' },
 			10,
 		);
+	},
+
+	async detect_telegram_chat_id(frm) {
+		if (frm.is_dirty()) await frm.save();
+		const { message } = await frappe.call({
+			method:
+				'navgold_custom.navgold_custom.amazon_pricing.alerts.detect_chat_id',
+		});
+		frm.reload_doc();
+		frappe.msgprint(
+			__('Detected chat: {0} (id {1})', [message.chat_title, message.chat_id]),
+		);
+	},
+
+	async send_telegram_test(frm) {
+		if (frm.is_dirty()) await frm.save();
+		await frappe.call({
+			method: 'navgold_custom.navgold_custom.amazon_pricing.alerts.send_test',
+		});
+		frappe.show_alert({ message: __('Test alert sent'), indicator: 'green' });
 	},
 });
