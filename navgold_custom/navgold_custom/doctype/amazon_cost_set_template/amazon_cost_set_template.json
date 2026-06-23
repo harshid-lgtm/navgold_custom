@@ -32,6 +32,7 @@
 			"description": "Use this template as default for new pricing records",
 			"fieldname": "is_default",
 			"fieldtype": "Check",
+			"in_standard_filter": 1,
 			"label": "Is Default"
 		},
 		{
