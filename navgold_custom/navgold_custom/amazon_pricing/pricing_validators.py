@@ -71,6 +71,7 @@ def collect_pricing_violations(
 		violations.setdefault(pricing_name, []).append(reason)
 
 	for pricing in pricing_rows:
+		purchase_cost_value = flt(0)
 		if not pricing.active_strategy:
 			add_violation(pricing.name, "No active strategy")
 		elif pricing.active_strategy not in strategy_status_map:
@@ -86,6 +87,8 @@ def collect_pricing_violations(
 					pricing.name,
 					f"Purchase cost is {purchase_cost['value']:g} (source: {purchase_cost['source']})",
 				)
+			else:
+				purchase_cost_value = flt(purchase_cost["value"])
 
 		min_price = flt(pricing.current_min_price)
 		max_price = flt(pricing.current_max_price)
@@ -98,6 +101,13 @@ def collect_pricing_violations(
 				add_violation(pricing.name, f"Min price {min_price:g} is above max price {max_price:g}")
 			elif min_price == max_price and not pricing.fixed_price:
 				add_violation(pricing.name, "Min price equals max price without a fixed price")
+		# Hard money floor: never publish a min at or below purchase cost — this is the
+		# exact below-cost leak that detection-only guards missed. Blocks just this SKU.
+		if min_price > 0 and purchase_cost_value > 0 and min_price <= purchase_cost_value:
+			add_violation(
+				pricing.name,
+				f"Min price {min_price:g} is at or below purchase cost {purchase_cost_value:g}",
+			)
 
 	if include_deviation:
 		pricing_name_by_proxy_sku = {row.proxy_sku: row.name for row in pricing_rows if row.proxy_sku}

@@ -8,19 +8,19 @@ from frappe.tests import IntegrationTestCase
 
 from navgold_custom.navgold_custom.amazon_pricing import pricing_dry_run
 from navgold_custom.navgold_custom.amazon_pricing.pricing_dry_run import (
+	calculate_percent_change,
 	compute_price_variance,
-	delta_pct,
 )
 
 
 class TestDeltaPct(IntegrationTestCase):
 	def test_zero_previous_value_does_not_divide_by_zero(self):
-		self.assertEqual(delta_pct(0, 10), 0.0)
-		self.assertEqual(delta_pct(None, 10), 0.0)
+		self.assertEqual(calculate_percent_change(0, 10), 0.0)
+		self.assertEqual(calculate_percent_change(None, 10), 0.0)
 
 	def test_normal_delta(self):
-		self.assertEqual(delta_pct(10, 12), 20.0)
-		self.assertEqual(delta_pct(10, 8), -20.0)
+		self.assertEqual(calculate_percent_change(10, 12), 20.0)
+		self.assertEqual(calculate_percent_change(10, 8), -20.0)
 
 
 class TestComputePriceVariance(IntegrationTestCase):

@@ -27,7 +27,7 @@ def create_purchase_cost_type():
 
 	cost_type = frappe.new_doc("Cost Type")
 	cost_type.cost_type_name = PURCHASE_COST_TYPE
-	cost_type.is_absolute = 1
+	cost_type.calculation_type = "Absolute"
 	cost_type.is_purchase_cost = 1
 	cost_type.insert()
 	return cost_type.name
@@ -169,6 +169,36 @@ class TestPricingValidators(IntegrationTestCase):
 			violations[pricing_name],
 		)
 
+	def test_min_at_or_below_cost_flagged(self):
+		proxy_sku = create_proxy_sku()
+		strategy = create_strategy(proxy_sku, purchase_cost_value=10)
+		pricing_name = create_pricing(proxy_sku, strategy)
+		frappe.db.set_value(
+			"Amazon Product Pricing",
+			pricing_name,
+			{"current_min_price": 10, "current_max_price": 20},
+			update_modified=False,
+		)
+
+		violations = collect_pricing_violations([pricing_name], include_deviation=False)
+
+		self.assertIn("Min price 10 is at or below purchase cost 10", violations[pricing_name])
+
+	def test_min_above_cost_passes_floor(self):
+		proxy_sku = create_proxy_sku()
+		strategy = create_strategy(proxy_sku, purchase_cost_value=5)
+		pricing_name = create_pricing(proxy_sku, strategy)
+		frappe.db.set_value(
+			"Amazon Product Pricing",
+			pricing_name,
+			{"current_min_price": 8, "current_max_price": 20},
+			update_modified=False,
+		)
+
+		violations = collect_pricing_violations([pricing_name], include_deviation=False)
+
+		self.assertNotIn(pricing_name, violations)
+
 	def test_min_above_max_flagged(self):
 		proxy_sku = create_proxy_sku()
 		strategy = create_strategy(proxy_sku)
@@ -287,6 +317,36 @@ class TestFeedBuilderPublishingMode(IntegrationTestCase):
 		self.assertIn("/attributes/purchasable_offer", patch_paths)
 		self.assertIn("/attributes/fulfillment_availability", patch_paths)
 		self.assertEqual(feed_result["blocked_validation"], [])
+
+	def test_price_feed_always_includes_min_floor(self):
+		# Even with send_min_price_to_amazon OFF, the min floor must still ship so a
+		# downstream repricer can't drive the Amazon price below it. our_price stays gated.
+		proxy_sku = create_proxy_sku(selling_price=6)
+		strategy = create_strategy(proxy_sku)
+		pricing_name = create_pricing(proxy_sku, strategy)
+
+		with change_settings(
+			"Navgold Settings",
+			{
+				"amazon_publishing_mode": "Stock and Prices",
+				"pricing_publishing_mode": "Publish All Prices",
+				"price_change_threshold_percent": 50,
+				"price_change_block_direction": "Both",
+				"send_min_price_to_amazon": 0,
+			},
+		):
+			feed_result = build_pricing_feed([pricing_name], "SELLER", "MARKETPLACE")
+
+		feed = frappe.parse_json(feed_result["feed_content"])
+		offers = [
+			patch_entry["value"][0]
+			for message in feed["messages"]
+			for patch_entry in message["patches"]
+			if patch_entry["path"] == "/attributes/purchasable_offer"
+		]
+		self.assertEqual(len(offers), 1)
+		self.assertIn("minimum_seller_allowed_price", offers[0])
+		self.assertNotIn("our_price", offers[0])
 
 	def test_invalid_pricing_blocked_from_price_feed(self):
 		proxy_sku = create_proxy_sku(selling_price=6)

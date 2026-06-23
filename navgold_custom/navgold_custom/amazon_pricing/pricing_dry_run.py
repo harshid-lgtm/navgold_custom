@@ -1,11 +1,8 @@
 # Copyright (c) 2026, developers@buildwithhussain.com and contributors
 # For license information, please see license.txt
 
-"""
-Pricing dry run: calculate every active SKU's price, render the exact JSON feed that a real
-sync would push, and surface what changed versus the previous snapshot — without ever pushing
-to Amazon. Born from the go-live incident where prices went out with no rendered-feed review.
-"""
+"""Render the exact pricing feed a real sync would push and diff it against the previous
+snapshot, without pushing to Amazon."""
 
 import frappe
 from frappe import _
@@ -25,8 +22,6 @@ def get_price_change_threshold() -> float:
 
 
 def get_previous_snapshot() -> dict | None:
-	# Baseline against the most recent real price set, never another dry run — otherwise running
-	# two dry runs back to back would diff against each other and hide the real movement.
 	previous = frappe.get_all(
 		"Amazon Pricing Snapshot",
 		filters={"item_count": [">", 0], "trigger_type": ["!=", "Dry Run"]},
@@ -37,7 +32,7 @@ def get_previous_snapshot() -> dict | None:
 	return previous[0] if previous else None
 
 
-def delta_pct(previous_value: float, new_value: float) -> float:
+def calculate_percent_change(previous_value: float, new_value: float) -> float:
 	previous_value = flt(previous_value)
 	if not previous_value:
 		return 0.0
@@ -64,8 +59,8 @@ def compute_price_variance(current_rows: list[dict]) -> dict:
 		min_delta = max_delta = 0.0
 		is_new = previous is None
 		if previous:
-			min_delta = delta_pct(previous.get("min_price"), row.get("min_price"))
-			max_delta = delta_pct(previous.get("max_price"), row.get("max_price"))
+			min_delta = calculate_percent_change(previous.get("min_price"), row.get("min_price"))
+			max_delta = calculate_percent_change(previous.get("max_price"), row.get("max_price"))
 
 		flagged = bool(threshold) and (abs(min_delta) > threshold or abs(max_delta) > threshold)
 		if is_new:
@@ -91,8 +86,7 @@ def compute_price_variance(current_rows: list[dict]) -> dict:
 			}
 		)
 
-	# SKUs that were in the previous snapshot but have vanished from the current set — the silent
-	# coverage gap that hides at go-live when a whole strategy stops producing prices.
+	# SKUs in the previous snapshot but missing from the current set.
 	dropped = [
 		{"proxy_sku": previous.get("proxy_sku"), "pricing": pricing}
 		for pricing, previous in previous_map.items()
@@ -124,8 +118,7 @@ def dry_run_pricing(refresh_first: bool = False) -> dict:
 
 	settings = frappe.get_single("Amazon SP API Settings")
 
-	# Fail loud on half-filled pre-go-live config: a feed missing seller/marketplace id would
-	# silently differ from a real one rather than error.
+	# A feed missing seller/marketplace id would silently differ from a real one — fail loud.
 	marketplace_id = settings.get_marketplace_id()
 	if not settings.merchant_id or not marketplace_id:
 		frappe.throw(
@@ -160,7 +153,7 @@ def dry_run_pricing(refresh_first: bool = False) -> dict:
 	snapshot.trigger_type = "Dry Run"
 	snapshot.status = "Dry Run"
 	snapshot.notes = "Dry run — feed rendered for review, not pushed to Amazon."
-	snapshot.populate_from_current_pricing()
+	snapshot.populate_from_amazon_listings()
 	variance = compute_price_variance(snapshot.get_rows())
 	snapshot.variance_data = frappe.as_json(variance)
 	snapshot.insert(ignore_permissions=True)
