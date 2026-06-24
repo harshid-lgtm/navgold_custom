@@ -1,0 +1,38 @@
+{
+	"actions": [],
+	"allow_rename": 1,
+	"creation": "2026-06-24 12:00:00.000000",
+	"doctype": "DocType",
+	"editable_grid": 1,
+	"engine": "InnoDB",
+	"field_order": ["upper_weight_g", "shipping_cost"],
+	"fields": [
+		{
+			"description": "Upper bound (inclusive) of the effective weight band, in grams. Effective weight is the Proxy SKU shipping weight plus the packaging buffer.",
+			"fieldname": "upper_weight_g",
+			"fieldtype": "Int",
+			"in_list_view": 1,
+			"label": "Upper Weight (g)",
+			"reqd": 1
+		},
+		{
+			"fieldname": "shipping_cost",
+			"fieldtype": "Currency",
+			"in_list_view": 1,
+			"label": "Shipping Cost",
+			"reqd": 1
+		}
+	],
+	"index_web_pages_for_search": 1,
+	"istable": 1,
+	"links": [],
+	"modified": "2026-06-24 12:00:00.000000",
+	"modified_by": "Administrator",
+	"module": "Navgold Custom",
+	"name": "Shipping Weight Tier",
+	"owner": "Administrator",
+	"permissions": [],
+	"sort_field": "upper_weight_g",
+	"sort_order": "ASC",
+	"states": []
+}

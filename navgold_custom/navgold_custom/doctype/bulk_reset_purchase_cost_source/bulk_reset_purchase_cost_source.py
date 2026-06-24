@@ -15,7 +15,14 @@ COST_UPDATE_CHUNK_SIZE = 500
 STRATEGY_RECOMPUTE_CHUNK_SIZE = 500
 RESET_JOB_TIMEOUT = 14400
 
-EXPLICIT_TARGET_SOURCES = {"Manual", "Supplier-Sync", "PO-Sync", "FBA-Transfer", "Item-Tax-Sync"}
+EXPLICIT_TARGET_SOURCES = {
+	"Manual",
+	"Supplier-Sync",
+	"PO-Sync",
+	"FBA-Transfer",
+	"Item-Tax-Sync",
+	"Shipping-Sync",
+}
 ALL_TARGET_SOURCES = EXPLICIT_TARGET_SOURCES | {"Auto"}
 
 SUB_TYPE_TO_AUTO_SOURCE = {
@@ -23,6 +30,8 @@ SUB_TYPE_TO_AUTO_SOURCE = {
 	"Purchase Cost-Top Supplier": "Supplier-Sync",
 	"Purchase Cost-Last Transfer": "FBA-Transfer",
 	"Fulfillment Cost-Estimated FBA Fee": "Amazon-Sync",
+	"Fulfillment Cost-Domestic Regular": "Shipping-Sync",
+	"Fulfillment Cost-Amazon Shipping": "Shipping-Sync",
 }
 DEFAULT_AUTO_SOURCE = "Auto-Sync"
 
