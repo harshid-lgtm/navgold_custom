@@ -190,9 +190,7 @@ def group_updates_by_target(
 	if target_source != "Auto":
 		return {target_source: [row["cost_name"] for row in rows]}
 
-	# A reset is always scoped to a single cost type, so VAT-ness is decided once for the whole
-	# batch: Auto for a VAT cost means "pull each item's own tax rate", not the static sub-type
-	# default. Non-VAT cost types keep routing by sub type.
+	# VAT Auto pulls each item's live tax rate, not the static sub-type default.
 	if vat_cost_type:
 		return {"Item-Tax-Sync": [row["cost_name"] for row in rows]}
 

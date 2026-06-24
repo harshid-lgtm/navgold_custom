@@ -5,9 +5,7 @@ import frappe
 
 
 def execute():
-	# Tax cost lines on the cost-set templates were seeded as Manual, so newly generated pricing
-	# never picked up an item's real VAT rate. Point every VAT line at Item-Tax-Sync so the
-	# template applicator copies a self-syncing source onto new strategies.
+	# Repoint template VAT lines from Manual to Item-Tax-Sync so new strategies pick up each item's real VAT.
 	vat_cost_types = frappe.get_all("Cost Type", filters={"calculation_type": "VAT"}, pluck="name")
 	if not vat_cost_types:
 		return
