@@ -177,8 +177,7 @@ def bulk_fetch_selling_prices():
 	if not proxy_skus:
 		return {"message": "No active Proxy SKUs found"}
 
-	# Shared job_id with the scheduled fetch so a manual click during a scheduled run
-	# never double-pulls the listings report from Amazon.
+	# Shared job_id + deduplicate so a manual click during a scheduled run can't double-pull the report.
 	frappe.enqueue(
 		"navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku.process_bulk_selling_price_fetch",
 		job_id="navgold.scheduled_bulk_fetch_selling_prices",
@@ -191,9 +190,7 @@ def bulk_fetch_selling_prices():
 
 
 def schedule_bulk_fetch_selling_prices():
-	# current_selling_price is the anchor the price-deviation guard compares new min/max
-	# against, so refresh it daily instead of relying on a manual button click. The shared
-	# job_id in bulk_fetch_selling_prices dedupes a scheduled run against a manual click.
+	# Daily scheduler entry point so the deviation guard's anchor refreshes without a manual click.
 	bulk_fetch_selling_prices()
 
 

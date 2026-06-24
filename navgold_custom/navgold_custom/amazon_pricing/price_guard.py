@@ -62,9 +62,7 @@ def partition_pricing_by_price_deviation(pricing_records: list) -> tuple[list, l
 			)
 			continue
 
-		# min/max is a band the repricer floats within, not a single forced price. A move is
-		# only forced when the live price falls outside the new band; while current sits inside
-		# [new_min, new_max] nothing changes, so band width alone must never trip the guard.
+		# min/max is a band the repricer floats within; only a current price outside it forces a move.
 		if current > new_max:
 			deviation_pct = (current - new_max) / current * 100
 			is_drop = True
