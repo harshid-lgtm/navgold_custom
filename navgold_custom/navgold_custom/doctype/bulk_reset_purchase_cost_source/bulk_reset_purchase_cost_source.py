@@ -75,7 +75,8 @@ def reset_purchase_cost_sources(
 		)
 		return
 
-	updates_by_target = group_updates_by_target(matching, target_source)
+	vat_cost_type = frappe.db.get_value("Cost Type", filters["cost_type"], "calculation_type") == "VAT"
+	updates_by_target = group_updates_by_target(matching, target_source, vat_cost_type=vat_cost_type)
 
 	updated_count = 0
 	for target, cost_names in updates_by_target.items():
@@ -174,9 +175,17 @@ def apply_optional_filters(query, doc, cost, strategy, proxy_sku, item):
 	return query
 
 
-def group_updates_by_target(rows: list[dict], target_source: str) -> dict[str, list[str]]:
+def group_updates_by_target(
+	rows: list[dict], target_source: str, vat_cost_type: bool = False
+) -> dict[str, list[str]]:
 	if target_source != "Auto":
 		return {target_source: [row["cost_name"] for row in rows]}
+
+	# A reset is always scoped to a single cost type, so VAT-ness is decided once for the whole
+	# batch: Auto for a VAT cost means "pull each item's own tax rate", not the static sub-type
+	# default. Non-VAT cost types keep routing by sub type.
+	if vat_cost_type:
+		return {"Item-Tax-Sync": [row["cost_name"] for row in rows]}
 
 	buckets: dict[str, list[str]] = defaultdict(list)
 	for row in rows:

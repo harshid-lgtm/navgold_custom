@@ -13,3 +13,4 @@ navgold_custom.patches.v1.mark_stale_amazon_submission_logs
 navgold_custom.patches.v1.delete_orphan_afn_stock_scheduled_job
 navgold_custom.patches.v1.unflag_prepared_report_for_strategy_price_comparison
 navgold_custom.patches.v1.drop_obsolete_amazon_price_snapshot
+navgold_custom.patches.v1.set_item_tax_sync_on_template_tax_lines
