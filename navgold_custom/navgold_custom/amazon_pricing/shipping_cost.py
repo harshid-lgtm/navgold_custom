@@ -7,12 +7,7 @@ from frappe.utils.data import cint, flt
 
 
 def get_shipping_cost(shipping_weight_g) -> float:
-	"""Resolve the merchant shipping cost for an effective weight using Navgold Settings tiers.
-
-	Effective weight = Proxy SKU shipping weight + configurable packaging buffer. The first tier
-	whose upper bound covers the effective weight wins; anything heavier than the last tier bills
-	the top tier's cost (the top band is unbounded above by design).
-	"""
+	"""Resolve the merchant shipping cost for an effective weight using Navgold Settings tiers."""
 	weight = cint(shipping_weight_g)
 	if weight <= 0:
 		frappe.throw(

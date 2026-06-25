@@ -23,11 +23,6 @@ def item_weight_in_grams(item_code: str) -> float:
 
 
 def get_shipping_weight_g(item_code: str, uom: str) -> float:
-	"""Grams for one listing unit (pack or bundle as sold).
-
-	Returns 0 when any required weight is missing/unusable so the caller can leave the field
-	blank — the Shipping-Sync resolver then fails loudly at pricing time instead of mis-charging.
-	"""
 	if not item_code:
 		return 0.0
 

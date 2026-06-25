@@ -81,9 +81,6 @@ class ProxySKU(Document):
 			)
 
 	def set_shipping_weight(self):
-		# Fill-if-empty: a manually entered weight is the source of truth and never overwritten.
-		# Left at 0 when the Item weight is missing/unusable, so the Shipping-Sync resolver fails
-		# loudly at pricing time rather than charging a wrong band.
 		if self.shipping_weight_g or not self.item:
 			return
 		weight_g = get_shipping_weight_g(self.item, self.uom)
