@@ -364,7 +364,6 @@ scheduler_events = {
 		],
 	},
 	"daily": [
-		# Keep current_selling_price (the deviation guard's anchor) fresh against live Amazon prices.
 		"navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku.schedule_bulk_fetch_selling_prices",
 		"navgold_custom.navgold_custom.doctype.supplier_item_price_and_stock.supplier_item_price_and_stock.run_update_supplier_rank",
 		"navgold_custom.navgold_custom.doctype.amazon_product_strategy.amazon_product_strategy.refresh_all_strategy_costs",

@@ -177,7 +177,6 @@ def bulk_fetch_selling_prices():
 	if not proxy_skus:
 		return {"message": "No active Proxy SKUs found"}
 
-	# Shared job_id + deduplicate so a manual click during a scheduled run can't double-pull the report.
 	frappe.enqueue(
 		"navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku.process_bulk_selling_price_fetch",
 		job_id="navgold.scheduled_bulk_fetch_selling_prices",
@@ -190,7 +189,6 @@ def bulk_fetch_selling_prices():
 
 
 def schedule_bulk_fetch_selling_prices():
-	# Daily scheduler entry point so the deviation guard's anchor refreshes without a manual click.
 	bulk_fetch_selling_prices()
 
 
