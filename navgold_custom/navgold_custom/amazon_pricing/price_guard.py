@@ -62,19 +62,22 @@ def partition_pricing_by_price_deviation(pricing_records: list) -> tuple[list, l
 			)
 			continue
 
-		drop_pct = (current - new_min) / current * 100 if new_min < current else 0.0
-		rise_pct = (new_max - current) / current * 100 if new_max > current else 0.0
+		# min/max is a band the repricer floats within; only a current price outside it forces a move.
+		if current > new_max:
+			deviation_pct = (current - new_max) / current * 100
+			is_drop = True
+		elif current < new_min:
+			deviation_pct = (new_min - current) / current * 100
+			is_drop = False
+		else:
+			deviation_pct = 0.0
+			is_drop = False
 
-		block_drop = direction in DROP_DIRECTIONS and drop_pct > threshold
-		block_rise = direction in RISE_DIRECTIONS and rise_pct > threshold
+		allowed_directions = DROP_DIRECTIONS if is_drop else RISE_DIRECTIONS
 
-		if block_drop or block_rise:
-			if block_drop and drop_pct >= rise_pct:
-				deviation_pct = drop_pct
-				reason = f"Price drop {drop_pct:.1f}% exceeds threshold {threshold:.1f}%"
-			else:
-				deviation_pct = rise_pct
-				reason = f"Price rise {rise_pct:.1f}% exceeds threshold {threshold:.1f}%"
+		if deviation_pct > threshold and direction in allowed_directions:
+			verb = "drop" if is_drop else "rise"
+			reason = f"Price {verb} {deviation_pct:.1f}% exceeds threshold {threshold:.1f}%"
 
 			blocked_records.append(
 				{

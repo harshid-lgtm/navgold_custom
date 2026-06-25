@@ -179,11 +179,17 @@ def bulk_fetch_selling_prices():
 
 	frappe.enqueue(
 		"navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku.process_bulk_selling_price_fetch",
+		job_id="navgold.scheduled_bulk_fetch_selling_prices",
+		deduplicate=True,
 		seller_skus=proxy_skus,
 		queue="long",
 	)
 
 	return {"message": f"Queued {len(proxy_skus)} Proxy SKUs for selling price fetch"}
+
+
+def schedule_bulk_fetch_selling_prices():
+	bulk_fetch_selling_prices()
 
 
 def process_bulk_selling_price_fetch(seller_skus):
