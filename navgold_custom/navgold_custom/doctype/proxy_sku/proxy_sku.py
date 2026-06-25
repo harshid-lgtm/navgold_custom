@@ -9,6 +9,7 @@ from frappe.utils import flt, now_datetime
 from frappe.utils.xlsxutils import make_xlsx
 
 from navgold_custom.navgold_custom.amazon_pricing.report_attachments import save_last_report_attachment
+from navgold_custom.navgold_custom.amazon_pricing.shipping_weight import get_shipping_weight_g
 from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import (
 	FBAInventory,
 	Listings,
@@ -36,6 +37,7 @@ class ProxySKU(Document):
 		merchant_shipping_group: DF.Data | None
 		naming_series: DF.Data | None
 		selling_price_updated_at: DF.Datetime | None
+		shipping_weight_g: DF.Int
 		uom: DF.Link | None
 	# end: auto-generated types
 
@@ -57,6 +59,8 @@ class ProxySKU(Document):
 			self._user_provided_name = self.name
 
 	def validate(self):
+		self.set_shipping_weight()
+
 		multiple_active_item_uom = frappe.get_single_value("Navgold Settings", "multiple_active_item_uom")
 		if multiple_active_item_uom:
 			return
@@ -75,6 +79,13 @@ class ProxySKU(Document):
 				_(f"Active Proxy SKU for Item {self.item} with UOM {self.uom} already exists: {existing}"),
 				title=_("Duplicate Proxy SKU"),
 			)
+
+	def set_shipping_weight(self):
+		if self.shipping_weight_g or not self.item:
+			return
+		weight_g = get_shipping_weight_g(self.item, self.uom)
+		if weight_g:
+			self.shipping_weight_g = round(weight_g)
 
 	@frappe.whitelist()
 	def fetch_asin(self):

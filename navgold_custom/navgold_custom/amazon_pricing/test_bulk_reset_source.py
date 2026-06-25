@@ -20,3 +20,34 @@ class TestBulkResetTargetSources(IntegrationTestCase):
 		]
 		grouped = group_updates_by_target(rows, "Item-Tax-Sync")
 		self.assertEqual(grouped, {"Item-Tax-Sync": ["C1", "C2"]})
+
+	def test_auto_routes_vat_cost_type_to_item_tax_sync(self):
+		rows = [
+			{"cost_name": "C1", "cost_sub_type": "Tax Rate-Standard"},
+			{"cost_name": "C2", "cost_sub_type": "Tax Rate-Exempt"},
+		]
+		grouped = group_updates_by_target(rows, "Auto", vat_cost_type=True)
+		self.assertEqual(grouped, {"Item-Tax-Sync": ["C1", "C2"]})
+
+	def test_auto_routes_non_vat_cost_type_by_sub_type(self):
+		rows = [
+			{"cost_name": "C1", "cost_sub_type": "Purchase Cost-Top Supplier"},
+			{"cost_name": "C2", "cost_sub_type": "Purchase Cost-Warehouse Cost"},
+			{"cost_name": "C3", "cost_sub_type": "Unmapped Sub Type"},
+		]
+		grouped = group_updates_by_target(rows, "Auto", vat_cost_type=False)
+		self.assertEqual(
+			grouped,
+			{"Supplier-Sync": ["C1"], "PO-Sync": ["C2"], "Auto-Sync": ["C3"]},
+		)
+
+	def test_shipping_sync_is_a_valid_target(self):
+		self.assertIn("Shipping-Sync", EXPLICIT_TARGET_SOURCES)
+
+	def test_auto_routes_shipping_sub_types_to_shipping_sync(self):
+		rows = [
+			{"cost_name": "C1", "cost_sub_type": "Fulfillment Cost-Domestic Regular"},
+			{"cost_name": "C2", "cost_sub_type": "Fulfillment Cost-Amazon Shipping"},
+		]
+		grouped = group_updates_by_target(rows, "Auto", vat_cost_type=False)
+		self.assertEqual(grouped, {"Shipping-Sync": ["C1", "C2"]})

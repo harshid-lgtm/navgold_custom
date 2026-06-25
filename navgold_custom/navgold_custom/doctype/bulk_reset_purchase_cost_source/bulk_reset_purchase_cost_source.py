@@ -15,7 +15,14 @@ COST_UPDATE_CHUNK_SIZE = 500
 STRATEGY_RECOMPUTE_CHUNK_SIZE = 500
 RESET_JOB_TIMEOUT = 14400
 
-EXPLICIT_TARGET_SOURCES = {"Manual", "Supplier-Sync", "PO-Sync", "FBA-Transfer", "Item-Tax-Sync"}
+EXPLICIT_TARGET_SOURCES = {
+	"Manual",
+	"Supplier-Sync",
+	"PO-Sync",
+	"FBA-Transfer",
+	"Item-Tax-Sync",
+	"Shipping-Sync",
+}
 ALL_TARGET_SOURCES = EXPLICIT_TARGET_SOURCES | {"Auto"}
 
 SUB_TYPE_TO_AUTO_SOURCE = {
@@ -23,6 +30,8 @@ SUB_TYPE_TO_AUTO_SOURCE = {
 	"Purchase Cost-Top Supplier": "Supplier-Sync",
 	"Purchase Cost-Last Transfer": "FBA-Transfer",
 	"Fulfillment Cost-Estimated FBA Fee": "Amazon-Sync",
+	"Fulfillment Cost-Domestic Regular": "Shipping-Sync",
+	"Fulfillment Cost-Amazon Shipping": "Shipping-Sync",
 }
 DEFAULT_AUTO_SOURCE = "Auto-Sync"
 
@@ -75,7 +84,8 @@ def reset_purchase_cost_sources(
 		)
 		return
 
-	updates_by_target = group_updates_by_target(matching, target_source)
+	vat_cost_type = frappe.db.get_value("Cost Type", filters["cost_type"], "calculation_type") == "VAT"
+	updates_by_target = group_updates_by_target(matching, target_source, vat_cost_type=vat_cost_type)
 
 	updated_count = 0
 	for target, cost_names in updates_by_target.items():
@@ -174,9 +184,15 @@ def apply_optional_filters(query, doc, cost, strategy, proxy_sku, item):
 	return query
 
 
-def group_updates_by_target(rows: list[dict], target_source: str) -> dict[str, list[str]]:
+def group_updates_by_target(
+	rows: list[dict], target_source: str, vat_cost_type: bool = False
+) -> dict[str, list[str]]:
 	if target_source != "Auto":
 		return {target_source: [row["cost_name"] for row in rows]}
+
+	# VAT Auto pulls each item's live tax rate, not the static sub-type default.
+	if vat_cost_type:
+		return {"Item-Tax-Sync": [row["cost_name"] for row in rows]}
 
 	buckets: dict[str, list[str]] = defaultdict(list)
 	for row in rows:
