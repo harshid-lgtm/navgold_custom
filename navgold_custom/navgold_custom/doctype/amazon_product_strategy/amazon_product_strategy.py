@@ -17,6 +17,7 @@ from navgold_custom.navgold_custom.amazon_pricing.purchase_cost_sources import (
 	get_effective_supplier_purchase_cost,
 	log_missing_bundle_component_rates,
 )
+from navgold_custom.navgold_custom.amazon_pricing.shipping_cost import get_shipping_cost
 from navgold_custom.navgold_custom.utils import get_conversion_factor
 
 
@@ -42,11 +43,19 @@ def resolve_item_tax_sync(context):
 	return get_item_tax_rate(context["item_code"])
 
 
+def resolve_shipping(context):
+	# Amazon ships FBA orders, so the FBA strategy carries no merchant shipping cost.
+	if context["is_fba_strategy"]:
+		return 0
+	return get_shipping_cost(context["shipping_weight_g"])
+
+
 ITEM_SYNCED_SOURCE_RESOLVERS = {
 	"Supplier-Sync": resolve_supplier_sync,
 	"PO-Sync": resolve_po_sync,
 	"FBA-Transfer": resolve_fba_transfer,
 	"Item-Tax-Sync": resolve_item_tax_sync,
+	"Shipping-Sync": resolve_shipping,
 }
 
 
@@ -161,7 +170,10 @@ class AmazonProductStrategy(Document):
 			return {}
 
 		proxy_sku_row = frappe.db.get_value(
-			"Proxy SKU", self.proxy_sku, ["item", "uom", "last_transfer_rate"], as_dict=True
+			"Proxy SKU",
+			self.proxy_sku,
+			["item", "uom", "last_transfer_rate", "shipping_weight_g"],
+			as_dict=True,
 		)
 		if not proxy_sku_row or not proxy_sku_row.item:
 			return dict.fromkeys(active_resolvers, 0)
@@ -170,9 +182,15 @@ class AmazonProductStrategy(Document):
 			"item_code": proxy_sku_row.item,
 			"uom": proxy_sku_row.uom,
 			"last_transfer_rate": proxy_sku_row.last_transfer_rate,
+			"shipping_weight_g": proxy_sku_row.shipping_weight_g,
 			# Set by refresh_strategy_costs_chunk so misses across a whole run land in one Error Log
 			"missing_component_rates": self.flags.get("missing_bundle_component_rates"),
 		}
+
+		if "Shipping-Sync" in active_resolvers:
+			fba_strategy = frappe.db.get_value("Amazon Product Pricing", self.proxy_sku, "fba_strategy")
+			context["is_fba_strategy"] = fba_strategy == self.name
+
 		return {source: resolver(context) for source, resolver in active_resolvers.items()}
 
 	def get_auto_sync_defaults(self) -> dict:

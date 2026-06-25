@@ -20,7 +20,16 @@ class AmazonProductCost(Document):
 		parentfield: DF.Data
 		parenttype: DF.Data
 		rank: DF.Int
-		source: DF.Literal["Manual", "Supplier-Sync", "PO-Sync", "Auto-Sync", "FBA-Transfer"]
+		source: DF.Literal[
+			"Manual",
+			"Supplier-Sync",
+			"PO-Sync",
+			"Auto-Sync",
+			"FBA-Transfer",
+			"Amazon-Sync",
+			"Item-Tax-Sync",
+			"Shipping-Sync",
+		]
 		value: DF.Float
 	# end: auto-generated types
 

@@ -24,6 +24,9 @@ class NavgoldSettings(Document):
 		from navgold_custom.navgold_custom.doctype.navgold_zero_stock_item.navgold_zero_stock_item import (
 			NavgoldZeroStockItem,
 		)
+		from navgold_custom.navgold_custom.doctype.shipping_weight_tier.shipping_weight_tier import (
+			ShippingWeightTier,
+		)
 		from navgold_custom.navgold_custom.doctype.strategy_name_mapping.strategy_name_mapping import (
 			StrategyNameMapping,
 		)
@@ -68,6 +71,8 @@ class NavgoldSettings(Document):
 		repricer_api_username: DF.Data | None
 		repricer_enabled: DF.Check
 		send_min_price_to_amazon: DF.Check
+		shipping_packaging_buffer_g: DF.Int
+		shipping_weight_tiers: DF.Table[ShippingWeightTier]
 		stock_publishing_mode: DF.Literal[
 			"Publish Actual Stock",
 			"Publish Zero Stock for All Items",

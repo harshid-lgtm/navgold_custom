@@ -64,7 +64,7 @@
 			"fieldname": "source",
 			"fieldtype": "Select",
 			"label": "Source",
-			"options": "Manual\nAuto-Sync\nSupplier-Sync\nPO-Sync\nFBA-Transfer\nAmazon-Sync\nItem-Tax-Sync"
+			"options": "Manual\nAuto-Sync\nSupplier-Sync\nPO-Sync\nFBA-Transfer\nAmazon-Sync\nItem-Tax-Sync\nShipping-Sync"
 		}
 	],
 	"grid_page_length": 50,

@@ -63,6 +63,9 @@
 		"column_break_repricer",
 		"repricer_api_username",
 		"repricer_api_password",
+		"weight_based_shipping_section",
+		"shipping_packaging_buffer_g",
+		"shipping_weight_tiers",
 		"stock_tab",
 		"stock_publishing_section",
 		"stock_publishing_mode",
@@ -449,6 +452,26 @@
 			"fieldname": "repricer_api_password",
 			"fieldtype": "Password",
 			"label": "Repricer API Password"
+		},
+		{
+			"description": "Drives Shipping-Sync cost rows. The FBA strategy is always excluded (Amazon ships FBA orders).",
+			"fieldname": "weight_based_shipping_section",
+			"fieldtype": "Section Break",
+			"label": "Weight-Based Shipping"
+		},
+		{
+			"default": "200",
+			"description": "Grams added to the Proxy SKU shipping weight before matching a tier (packaging allowance).",
+			"fieldname": "shipping_packaging_buffer_g",
+			"fieldtype": "Int",
+			"label": "Packaging Buffer (g)"
+		},
+		{
+			"description": "Effective weight (shipping weight + packaging buffer) is matched to the first tier whose upper bound covers it, ascending. Anything above the last tier bills the last tier's cost.",
+			"fieldname": "shipping_weight_tiers",
+			"fieldtype": "Table",
+			"label": "Shipping Weight Tiers",
+			"options": "Shipping Weight Tier"
 		},
 		{
 			"fieldname": "stock_tab",

@@ -12,6 +12,7 @@
 		"uom",
 		"is_active",
 		"merchant_shipping_group",
+		"shipping_weight_g",
 		"current_selling_price",
 		"selling_price_updated_at",
 		"section_break_yaut",
@@ -88,6 +89,13 @@
 			"fieldtype": "Data",
 			"in_standard_filter": 1,
 			"label": "Merchant Shipping Group"
+		},
+		{
+			"default": "0",
+			"description": "Per-listing shipping weight in grams (pack/bundle as sold). Auto-filled from the Item weight on save when blank; enter a value to override. Drives the weight-based shipping tier for merchant-fulfilled strategies.",
+			"fieldname": "shipping_weight_g",
+			"fieldtype": "Int",
+			"label": "Shipping Weight (g)"
 		},
 		{
 			"description": "Live Amazon selling price, populated by Fetch Selling Prices. Used by the price-deviation guard.",
