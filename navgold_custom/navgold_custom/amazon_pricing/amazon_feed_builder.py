@@ -23,7 +23,7 @@ from navgold_custom.navgold_custom.amazon_pricing.pricing_validators import (
 )
 from navgold_custom.navgold_custom.amazon_pricing.purchase_cost_sources import (
 	calculate_bundle_cost,
-	get_bundle_components,
+	get_buildable_bundle_qty_map,
 	get_product_bundle_items,
 )
 from navgold_custom.navgold_custom.amazon_pricing.strategy_selector import (
@@ -34,7 +34,7 @@ from navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku import get_proxy_
 from navgold_custom.navgold_custom.doctype.supplier_item_price_and_stock.supplier_item_price_and_stock import (
 	get_supplier_prices,
 )
-from navgold_custom.navgold_custom.utils import get_conversion_factor, get_free_qty_map
+from navgold_custom.navgold_custom.utils import get_conversion_factor
 
 SHIPPING_GROUPS = {
 	"sfp": "57d54587-7341-4c9f-b3f9-546c8d798b21",
@@ -265,7 +265,7 @@ def get_backorder_strategy_map(strategy_names: list) -> dict:
 			"parenttype": "Amazon Product Strategy",
 			"is_active": 1,
 		},
-		fields=["parent", "is_active", "cost_type", "source", "value"],
+		fields=["parent", "is_active", "cost_type", "value"],
 		order_by="idx asc",
 	)
 
@@ -337,32 +337,6 @@ def calculate_adjusted_qty(raw_qty: float, pool_size: int, pack_size: float) -> 
 	if pool_size <= 0 or pack_size <= 0:
 		return 0
 	return max(math.floor(raw_qty / pool_size / pack_size), 0)
-
-
-# Bundle parents can carry their own (possibly stale) Bin rows; the only honest quantity
-# is what the component free stock can actually assemble right now.
-def get_bundle_buildable_map(item_codes: list) -> dict:
-	bundle_components_map = get_bundle_components(item_codes)
-	if not bundle_components_map:
-		return {}
-
-	component_item_codes = list(
-		{component["item_code"] for components in bundle_components_map.values() for component in components}
-	)
-	component_free_qty_map = get_free_qty_map(component_item_codes)
-
-	buildable_map = {}
-	for item_code, components in bundle_components_map.items():
-		buildable_counts = []
-		for component in components:
-			per_bundle_qty = flt(component["qty"])
-			if per_bundle_qty <= 0:
-				continue
-			component_stock = flt(component_free_qty_map.get(component["item_code"], {}).get("free_qty", 0))
-			buildable_counts.append(math.floor(component_stock / per_bundle_qty))
-		buildable_map[item_code] = max(min(buildable_counts), 0) if buildable_counts else 0
-
-	return buildable_map
 
 
 def get_sku_inventory_data(
@@ -454,10 +428,9 @@ def get_sku_inventory_data(
 
 	if not is_backorder and warehouse_qty > 0 and item_code:
 		if bundle_buildable_map is None:
-			bundle_buildable_map = get_bundle_buildable_map([item_code])
+			bundle_buildable_map = get_buildable_bundle_qty_map([item_code])
 		buildable_bundles = bundle_buildable_map.get(item_code)
-		# A bundle whose components cannot cover the promised quantity must go out as zero,
-		# never as the parent item's warehouse quantity.
+		# Defensive cap; redundant while get_stock_info already sources bundle mfn_stock from buildable.
 		if buildable_bundles is not None and buildable_bundles < warehouse_qty * pack_size:
 			warehouse_qty = 0
 
@@ -643,7 +616,7 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 
 	zero_stock_proxy_skus = get_zero_stock_proxy_skus()
 
-	bundle_buildable_map = get_bundle_buildable_map(all_item_codes) if all_item_codes else {}
+	bundle_buildable_map = get_buildable_bundle_qty_map(all_item_codes) if all_item_codes else {}
 
 	send_min_price = frappe.get_cached_value(
 		"Navgold Settings", "Navgold Settings", "send_min_price_to_amazon"

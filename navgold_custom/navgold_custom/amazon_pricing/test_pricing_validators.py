@@ -7,7 +7,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.tests.utils import change_settings
 
-from navgold_custom.navgold_custom.amazon_pricing import amazon_feed_builder
+from navgold_custom.navgold_custom.amazon_pricing import amazon_feed_builder, purchase_cost_sources
 from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import (
 	build_pricing_feed,
 	get_sku_inventory_data,
@@ -440,16 +440,16 @@ class TestBundleZeroStock(IntegrationTestCase):
 	def test_bundle_buildable_map_constrained_by_scarcest_component(self):
 		with (
 			patch.object(
-				amazon_feed_builder,
+				purchase_cost_sources,
 				"get_bundle_components",
 				return_value={"BUNDLE-ITEM": [{"item_code": "C1", "qty": 2}, {"item_code": "C2", "qty": 1}]},
 			),
 			patch.object(
-				amazon_feed_builder,
+				purchase_cost_sources,
 				"get_free_qty_map",
 				return_value={"C1": {"free_qty": 3}, "C2": {"free_qty": 100}},
 			),
 		):
-			buildable_map = amazon_feed_builder.get_bundle_buildable_map(["BUNDLE-ITEM"])
+			buildable_map = purchase_cost_sources.get_buildable_bundle_qty_map(["BUNDLE-ITEM"])
 
 		self.assertEqual(buildable_map["BUNDLE-ITEM"], 1)
