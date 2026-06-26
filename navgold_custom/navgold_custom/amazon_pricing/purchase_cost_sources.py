@@ -1,6 +1,7 @@
 # Copyright (c) 2026, developers@buildwithhussain.com and contributors
 # For license information, please see license.txt
 
+import math
 from collections.abc import Callable
 
 import frappe
@@ -10,7 +11,7 @@ from frappe.utils.data import flt
 from navgold_custom.navgold_custom.doctype.supplier_item_price_and_stock.supplier_item_price_and_stock import (
 	get_supplier_prices,
 )
-from navgold_custom.navgold_custom.utils import get_conversion_factor
+from navgold_custom.navgold_custom.utils import get_conversion_factor, get_free_qty_map
 
 try:
 	from erpnext.stock.doctype.packed_item.packed_item import get_product_bundle_items
@@ -168,6 +169,30 @@ def get_bundle_components(item_codes: list[str]) -> dict[str, list[dict]]:
 		item_code: components_by_bundle.get(bundle_name, [])
 		for item_code, bundle_name in item_to_bundle.items()
 	}
+
+
+def get_buildable_bundle_qty_map(item_codes: list) -> dict:
+	bundle_components_map = get_bundle_components(item_codes)
+	if not bundle_components_map:
+		return {}
+
+	component_item_codes = list(
+		{component["item_code"] for components in bundle_components_map.values() for component in components}
+	)
+	component_free_qty_map = get_free_qty_map(component_item_codes)
+
+	buildable_map = {}
+	for item_code, components in bundle_components_map.items():
+		buildable_counts = []
+		for component in components:
+			per_bundle_qty = flt(component["qty"])
+			if per_bundle_qty <= 0:
+				continue
+			component_stock = flt(component_free_qty_map.get(component["item_code"], {}).get("free_qty", 0))
+			buildable_counts.append(math.floor(component_stock / per_bundle_qty))
+		buildable_map[item_code] = max(min(buildable_counts), 0) if buildable_counts else 0
+
+	return buildable_map
 
 
 def calculate_effective_purchase_costs(

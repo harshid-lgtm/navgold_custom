@@ -7,6 +7,7 @@ from frappe import _
 from frappe.query_builder import DocType, Order
 from frappe.utils.data import flt
 
+from navgold_custom.navgold_custom.amazon_pricing.purchase_cost_sources import get_buildable_bundle_qty_map
 from navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku import get_proxy_sku_map
 from navgold_custom.navgold_custom.utils import (
 	get_fba_stock_map,
@@ -75,7 +76,12 @@ def get_stock_info(proxy_sku: str) -> dict:
 	sp_api_settings = frappe.get_single("Amazon SP API Settings")
 
 	fba_stock = get_fba_stock_map([proxy.item], sp_api_settings.afn_warehouse).get(proxy.item, 0)
-	mfn_stock = get_free_qty_map([proxy.item]).get(proxy.item, {}).get("free_qty", 0)
+
+	buildable_map = get_buildable_bundle_qty_map([proxy.item])
+	if proxy.item in buildable_map:
+		mfn_stock = buildable_map[proxy.item]
+	else:
+		mfn_stock = get_free_qty_map([proxy.item]).get(proxy.item, {}).get("free_qty", 0)
 
 	restock_info = check_pending_restock(proxy.item)
 
@@ -111,6 +117,7 @@ def get_stock_info_batch(proxy_sku_names: list) -> dict:
 	afn_stock_map = get_fba_stock_map(all_item_codes, sp_api_settings.afn_warehouse)
 	mfn_stock_data = get_free_qty_map(all_item_codes)
 	restock_map = get_restock_data_map(all_item_codes)
+	buildable_map = get_buildable_bundle_qty_map(all_item_codes)
 
 	result = {}
 	for proxy_sku_name in proxy_sku_names:
@@ -120,7 +127,10 @@ def get_stock_info_batch(proxy_sku_names: list) -> dict:
 			continue
 
 		fba_stock = afn_stock_map.get(item_code, 0)
-		mfn_stock = mfn_stock_data.get(item_code, {}).get("free_qty", 0)
+		if item_code in buildable_map:
+			mfn_stock = buildable_map[item_code]
+		else:
+			mfn_stock = mfn_stock_data.get(item_code, {}).get("free_qty", 0)
 		restock_date = restock_map.get(item_code)
 
 		result[proxy_sku_name] = {
