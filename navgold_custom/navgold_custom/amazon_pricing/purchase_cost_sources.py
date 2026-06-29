@@ -5,6 +5,7 @@ import math
 from collections.abc import Callable
 
 import frappe
+from navgold_custom.navgold_custom.erpnext_compat import get_product_bundle_items
 from frappe.query_builder import DocType, Order
 from frappe.utils.data import flt
 

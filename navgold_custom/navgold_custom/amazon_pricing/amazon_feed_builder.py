@@ -6,6 +6,7 @@ import math
 from functools import partial
 
 import frappe
+from navgold_custom.navgold_custom.erpnext_compat import get_product_bundle_items
 from frappe.query_builder import DocType
 from frappe.query_builder.functions import Count
 from frappe.utils import add_days, fmt_money, getdate, now_datetime, today
