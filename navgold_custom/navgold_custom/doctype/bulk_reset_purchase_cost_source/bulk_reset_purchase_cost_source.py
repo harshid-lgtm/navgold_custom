@@ -11,12 +11,15 @@ from frappe.query_builder import DocType
 from frappe.query_builder.functions import Count
 from frappe.utils.data import flt
 
-from navgold_custom.navgold_custom.amazon_pricing.fba_fee_fetcher import FEE_COST_SUB_TYPE, FEE_SOURCE
+from navgold_custom.navgold_custom.amazon_pricing.fba_fee_fetcher import (
+	FEE_COST_SUB_TYPE,
+	FEE_SOURCE,
+	bulk_fetch_fba_fees,
+)
 
 COST_UPDATE_CHUNK_SIZE = 500
 STRATEGY_RECOMPUTE_CHUNK_SIZE = 500
 RESET_JOB_TIMEOUT = 14400
-FBA_FEE_REFRESH_TIMEOUT = 1800
 
 EXPLICIT_TARGET_SOURCES = {
 	"Manual",
@@ -101,11 +104,7 @@ def build_reset_filters(doc) -> dict:
 
 
 def enqueue_fba_fee_refresh():
-	frappe.enqueue(
-		"navgold_custom.navgold_custom.amazon_pricing.fba_fee_fetcher.process_fba_fee_fetch",
-		queue="long",
-		timeout=FBA_FEE_REFRESH_TIMEOUT,
-	)
+	bulk_fetch_fba_fees()
 
 
 def reset_purchase_cost_sources(
