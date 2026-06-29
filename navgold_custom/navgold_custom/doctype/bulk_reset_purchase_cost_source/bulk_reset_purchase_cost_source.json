@@ -6,6 +6,7 @@
 	"field_order": [
 		"filters_section",
 		"cost_type",
+		"cost_sub_type",
 		"strategy_name",
 		"current_source",
 		"col_break_filters",
@@ -28,6 +29,13 @@
 			"label": "Cost Type",
 			"options": "Cost Type",
 			"reqd": 1
+		},
+		{
+			"depends_on": "cost_type",
+			"fieldname": "cost_sub_type",
+			"fieldtype": "Link",
+			"label": "Cost Sub Type",
+			"options": "Cost Sub Type"
 		},
 		{
 			"fieldname": "strategy_name",

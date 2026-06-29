@@ -15,6 +15,21 @@ from navgold_custom.navgold_custom.doctype.bulk_reset_purchase_cost_source.bulk_
 )
 
 
+def make_reset_doc(**overrides):
+	fields = {
+		"target_source": None,
+		"cost_type": None,
+		"cost_sub_type": None,
+		"strategy_name": None,
+		"current_source": None,
+		"item": None,
+		"item_group": None,
+		"proxy_sku": None,
+	}
+	fields.update(overrides)
+	return frappe._dict(fields)
+
+
 class TestBulkResetTargetSources(IntegrationTestCase):
 	def test_item_tax_sync_is_a_valid_target(self):
 		self.assertIn("Item-Tax-Sync", EXPLICIT_TARGET_SOURCES)
@@ -77,28 +92,34 @@ class TestBulkResetTargetSources(IntegrationTestCase):
 		self.assertEqual(grouped, {"Amazon-Sync": ["C1"]})
 
 	def test_amazon_sync_target_restricts_filters_to_fba_fee_sub_type(self):
-		doc = frappe._dict(
-			target_source=FEE_SOURCE,
-			cost_type="Fulfillment Cost",
-			strategy_name=None,
-			current_source=None,
-			item=None,
-			item_group=None,
-			proxy_sku=None,
+		doc = make_reset_doc(target_source=FEE_SOURCE, cost_type="Fulfillment Cost")
+		self.assertEqual(build_reset_filters(doc).get("cost_sub_type"), FEE_COST_SUB_TYPE)
+
+	def test_amazon_sync_target_overrides_a_user_picked_sub_type(self):
+		doc = make_reset_doc(
+			target_source=FEE_SOURCE, cost_type="Fulfillment Cost", cost_sub_type="Some Other Sub Type"
 		)
 		self.assertEqual(build_reset_filters(doc).get("cost_sub_type"), FEE_COST_SUB_TYPE)
 
-	def test_other_targets_do_not_restrict_sub_type(self):
-		doc = frappe._dict(
+	def test_user_picked_sub_type_is_passed_through_for_other_targets(self):
+		doc = make_reset_doc(
 			target_source="Supplier-Sync",
 			cost_type="Purchase Cost",
-			strategy_name=None,
-			current_source=None,
-			item=None,
-			item_group=None,
-			proxy_sku=None,
+			cost_sub_type="Purchase Cost-Top Supplier",
 		)
-		self.assertNotIn("cost_sub_type", build_reset_filters(doc))
+		self.assertEqual(build_reset_filters(doc).get("cost_sub_type"), "Purchase Cost-Top Supplier")
+
+	def test_other_targets_do_not_force_a_sub_type(self):
+		doc = make_reset_doc(target_source="Supplier-Sync", cost_type="Purchase Cost")
+		self.assertIsNone(build_reset_filters(doc).get("cost_sub_type"))
+
+	def test_amazon_sync_rejects_a_conflicting_sub_type(self):
+		doc = frappe.new_doc("Bulk Reset Purchase Cost Source")
+		doc.cost_type = "Fulfillment Cost"
+		doc.target_source = FEE_SOURCE
+		doc.cost_sub_type = "Purchase Cost-Top Supplier"
+		with self.assertRaises(frappe.ValidationError):
+			doc.apply_reset()
 
 	def test_fba_fee_refresh_enqueues_the_fee_processor(self):
 		with patch.object(frappe, "enqueue") as enqueue:

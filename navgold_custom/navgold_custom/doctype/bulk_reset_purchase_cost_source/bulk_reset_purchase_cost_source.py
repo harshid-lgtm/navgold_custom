@@ -56,6 +56,14 @@ class BulkResetPurchaseCostSource(Document):
 		if self.target_source == "Manual" and self.manual_value in (None, ""):
 			frappe.throw(_("Manual Value is required when Target Source is Manual."))
 
+		required_sub_type = SOURCE_REQUIRED_SUB_TYPE.get(self.target_source)
+		if required_sub_type and self.cost_sub_type and self.cost_sub_type != required_sub_type:
+			frappe.throw(
+				_("Target Source {0} only applies to the {1} sub type.").format(
+					self.target_source, required_sub_type
+				)
+			)
+
 		filters_payload = build_reset_filters(self)
 
 		matched_preview = count_matching_cost_rows(filters_payload)
@@ -79,6 +87,7 @@ class BulkResetPurchaseCostSource(Document):
 def build_reset_filters(doc) -> dict:
 	filters = {
 		"cost_type": doc.cost_type,
+		"cost_sub_type": doc.cost_sub_type,
 		"strategy_name": doc.strategy_name,
 		"current_source": doc.current_source,
 		"item": doc.item,
