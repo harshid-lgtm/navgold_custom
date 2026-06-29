@@ -6,7 +6,6 @@ import math
 from functools import partial
 
 import frappe
-from navgold_custom.navgold_custom.erpnext_compat import get_product_bundle_items
 from frappe.query_builder import DocType
 from frappe.query_builder.functions import Count
 from frappe.utils import add_days, fmt_money, getdate, now_datetime, today
@@ -25,7 +24,6 @@ from navgold_custom.navgold_custom.amazon_pricing.pricing_validators import (
 from navgold_custom.navgold_custom.amazon_pricing.purchase_cost_sources import (
 	calculate_bundle_cost,
 	get_buildable_bundle_qty_map,
-	get_product_bundle_items,
 )
 from navgold_custom.navgold_custom.amazon_pricing.strategy_selector import (
 	get_stock_info,
@@ -35,6 +33,7 @@ from navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku import get_proxy_
 from navgold_custom.navgold_custom.doctype.supplier_item_price_and_stock.supplier_item_price_and_stock import (
 	get_supplier_prices,
 )
+from navgold_custom.navgold_custom.erpnext_compat import get_product_bundle_items
 from navgold_custom.navgold_custom.utils import get_conversion_factor
 
 SHIPPING_GROUPS = {
