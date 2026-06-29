@@ -1,10 +1,16 @@
 # Copyright (c) 2026, developers@buildwithhussain.com and Contributors
 # See license.txt
 
+from unittest.mock import patch
+
+import frappe
 from frappe.tests import IntegrationTestCase
 
+from navgold_custom.navgold_custom.amazon_pricing.fba_fee_fetcher import FEE_COST_SUB_TYPE, FEE_SOURCE
 from navgold_custom.navgold_custom.doctype.bulk_reset_purchase_cost_source.bulk_reset_purchase_cost_source import (
 	EXPLICIT_TARGET_SOURCES,
+	build_reset_filters,
+	enqueue_fba_fee_refresh,
 	group_updates_by_target,
 )
 
@@ -69,3 +75,36 @@ class TestBulkResetTargetSources(IntegrationTestCase):
 		]
 		grouped = group_updates_by_target(rows, "Auto", vat_cost_type=False)
 		self.assertEqual(grouped, {"Amazon-Sync": ["C1"]})
+
+	def test_amazon_sync_target_restricts_filters_to_fba_fee_sub_type(self):
+		doc = frappe._dict(
+			target_source=FEE_SOURCE,
+			cost_type="Fulfillment Cost",
+			strategy_name=None,
+			current_source=None,
+			item=None,
+			item_group=None,
+			proxy_sku=None,
+		)
+		self.assertEqual(build_reset_filters(doc).get("cost_sub_type"), FEE_COST_SUB_TYPE)
+
+	def test_other_targets_do_not_restrict_sub_type(self):
+		doc = frappe._dict(
+			target_source="Supplier-Sync",
+			cost_type="Purchase Cost",
+			strategy_name=None,
+			current_source=None,
+			item=None,
+			item_group=None,
+			proxy_sku=None,
+		)
+		self.assertNotIn("cost_sub_type", build_reset_filters(doc))
+
+	def test_fba_fee_refresh_enqueues_the_fee_processor(self):
+		with patch.object(frappe, "enqueue") as enqueue:
+			enqueue_fba_fee_refresh()
+		enqueue.assert_called_once()
+		self.assertEqual(
+			enqueue.call_args.args[0],
+			"navgold_custom.navgold_custom.amazon_pricing.fba_fee_fetcher.process_fba_fee_fetch",
+		)
