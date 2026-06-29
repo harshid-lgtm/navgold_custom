@@ -9,6 +9,7 @@ from frappe.utils.csvutils import read_csv_content
 from frappe.utils.data import cint, flt
 
 from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import (
+	SHIPPING_GROUPS,
 	build_pricing_feed,
 	get_allowed_pricing_proxy_skus,
 )
@@ -19,8 +20,22 @@ from navgold_custom.navgold_custom.amazon_pricing.pricing_validators import (
 	collect_pricing_violations,
 )
 
-AMAZON_COLUMNS = {"amazon_min", "amazon_max", "amazon_our_price", "quantity", "fulfillment"}
+AMAZON_COLUMNS = {
+	"amazon_min",
+	"amazon_max",
+	"amazon_our_price",
+	"quantity",
+	"fulfillment",
+	"shipping_group",
+}
 REPRICER_COLUMNS = {"repricer_min", "repricer_max", "repricer_rule"}
+
+# Reverse of SHIPPING_GROUPS so the feed's merchant_shipping_group UUID shows as a readable label.
+SHIPPING_GROUP_LABELS = {
+	SHIPPING_GROUPS["sfp"]: "SFP",
+	SHIPPING_GROUPS["main_revised"]: "Main Revised",
+	SHIPPING_GROUPS["two_day"]: "Two-Day",
+}
 
 
 def execute(filters: dict | None = None):
@@ -64,6 +79,7 @@ def get_columns(channel: str) -> list[dict]:
 		},
 		{"label": _("Qty"), "fieldname": "quantity", "fieldtype": "Int", "width": 70},
 		{"label": _("Fulfillment"), "fieldname": "fulfillment", "fieldtype": "Data", "width": 200},
+		{"label": _("Shipping Group"), "fieldname": "shipping_group", "fieldtype": "Data", "width": 130},
 		{"label": _("Repricer Min"), "fieldname": "repricer_min", "fieldtype": "Currency", "width": 110},
 		{"label": _("Repricer Max"), "fieldname": "repricer_max", "fieldtype": "Currency", "width": 110},
 		{"label": _("Repricer Rule"), "fieldname": "repricer_rule", "fieldtype": "Data", "width": 160},
@@ -95,11 +111,15 @@ def extract_amazon_values(message: dict) -> dict:
 		"amazon_our_price": None,
 		"quantity": None,
 		"fulfillment": None,
+		"shipping_group": None,
 	}
 	for patch in message.get("patches", []):
 		path = patch.get("path") or ""
 		patch_value = patch.get("value") or []
-		if path.endswith("purchasable_offer") and patch_value:
+		if path.endswith("merchant_shipping_group") and patch_value:
+			group_uuid = patch_value[0].get("value")
+			values["shipping_group"] = SHIPPING_GROUP_LABELS.get(group_uuid, group_uuid)
+		elif path.endswith("purchasable_offer") and patch_value:
 			offer = patch_value[0]
 			values["amazon_max"] = get_schedule_value(offer.get("maximum_seller_allowed_price"))
 			values["amazon_min"] = get_schedule_value(offer.get("minimum_seller_allowed_price"))
@@ -194,6 +214,7 @@ def build_preview_row(
 		"amazon_our_price": amazon_values.get("amazon_our_price"),
 		"quantity": amazon_values.get("quantity"),
 		"fulfillment": amazon_values.get("fulfillment"),
+		"shipping_group": amazon_values.get("shipping_group"),
 		"repricer_min": repricer.get("repricer_min"),
 		"repricer_max": repricer.get("repricer_max"),
 		"repricer_rule": repricer.get("repricer_rule"),
