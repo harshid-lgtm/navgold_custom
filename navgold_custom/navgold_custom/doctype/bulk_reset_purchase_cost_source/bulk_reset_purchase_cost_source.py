@@ -20,6 +20,7 @@ EXPLICIT_TARGET_SOURCES = {
 	"Supplier-Sync",
 	"PO-Sync",
 	"FBA-Transfer",
+	"Amazon-Sync",
 	"Item-Tax-Sync",
 	"Shipping-Sync",
 }

@@ -74,7 +74,7 @@
 			"fieldname": "target_source",
 			"fieldtype": "Select",
 			"label": "Target Source",
-			"options": "Auto\nManual\nSupplier-Sync\nPO-Sync\nFBA-Transfer\nItem-Tax-Sync\nShipping-Sync",
+			"options": "Auto\nManual\nSupplier-Sync\nPO-Sync\nFBA-Transfer\nAmazon-Sync\nItem-Tax-Sync\nShipping-Sync",
 			"reqd": 1
 		},
 		{

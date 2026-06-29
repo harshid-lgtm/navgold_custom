@@ -51,3 +51,21 @@ class TestBulkResetTargetSources(IntegrationTestCase):
 		]
 		grouped = group_updates_by_target(rows, "Auto", vat_cost_type=False)
 		self.assertEqual(grouped, {"Shipping-Sync": ["C1", "C2"]})
+
+	def test_amazon_sync_is_a_valid_target(self):
+		self.assertIn("Amazon-Sync", EXPLICIT_TARGET_SOURCES)
+
+	def test_explicit_amazon_sync_target_routes_all_rows_to_itself(self):
+		rows = [
+			{"cost_name": "C1", "cost_sub_type": "Fulfillment Cost-Estimated FBA Fee"},
+			{"cost_name": "C2", "cost_sub_type": "Fulfillment Cost-Estimated FBA Fee"},
+		]
+		grouped = group_updates_by_target(rows, "Amazon-Sync")
+		self.assertEqual(grouped, {"Amazon-Sync": ["C1", "C2"]})
+
+	def test_auto_routes_fba_fee_sub_type_to_amazon_sync(self):
+		rows = [
+			{"cost_name": "C1", "cost_sub_type": "Fulfillment Cost-Estimated FBA Fee"},
+		]
+		grouped = group_updates_by_target(rows, "Auto", vat_cost_type=False)
+		self.assertEqual(grouped, {"Amazon-Sync": ["C1"]})
