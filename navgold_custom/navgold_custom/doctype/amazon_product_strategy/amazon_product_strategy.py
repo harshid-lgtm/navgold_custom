@@ -10,12 +10,53 @@ from navgold_custom.navgold_custom.amazon_pricing.price_calculator import (
 	calculate_margin_from_price,
 	calculate_prices,
 	get_cost_data,
+	get_item_tax_rate,
 )
 from navgold_custom.navgold_custom.amazon_pricing.purchase_cost_sources import (
 	get_effective_po_purchase_cost,
 	get_effective_supplier_purchase_cost,
+	log_missing_bundle_component_rates,
 )
+from navgold_custom.navgold_custom.amazon_pricing.shipping_cost import get_shipping_cost
 from navgold_custom.navgold_custom.utils import get_conversion_factor
+
+
+# Add a sync provider by registering a resolver below; populate_costs() needs no change. Manual
+# (user value) and Amazon-Sync (owned by the FBA fee fetcher) are deliberately not resolved here.
+def resolve_supplier_sync(context):
+	return get_effective_supplier_purchase_cost(
+		context["item_code"], context["uom"], context["missing_component_rates"]
+	)
+
+
+def resolve_po_sync(context):
+	return get_effective_po_purchase_cost(
+		context["item_code"], context["uom"], context["missing_component_rates"]
+	)
+
+
+def resolve_fba_transfer(context):
+	return flt(context["last_transfer_rate"]) * get_conversion_factor(context["item_code"], context["uom"])
+
+
+def resolve_item_tax_sync(context):
+	return get_item_tax_rate(context["item_code"])
+
+
+def resolve_shipping(context):
+	# Amazon ships FBA orders, so the FBA strategy carries no merchant shipping cost.
+	if context["is_fba_strategy"]:
+		return 0
+	return get_shipping_cost(context["shipping_weight_g"])
+
+
+ITEM_SYNCED_SOURCE_RESOLVERS = {
+	"Supplier-Sync": resolve_supplier_sync,
+	"PO-Sync": resolve_po_sync,
+	"FBA-Transfer": resolve_fba_transfer,
+	"Item-Tax-Sync": resolve_item_tax_sync,
+	"Shipping-Sync": resolve_shipping,
+}
 
 
 class AmazonProductStrategy(Document):
@@ -108,60 +149,64 @@ class AmazonProductStrategy(Document):
 	def populate_costs(self):
 		synced_sources = {cost.source for cost in self.costs if cost.source not in (None, "", "Manual")}
 
-		item_code = None
-		proxy_sku_uom = None
-		last_transfer_rate = None
-		if synced_sources & {"Supplier-Sync", "PO-Sync", "FBA-Transfer"}:
-			proxy_sku_row = frappe.db.get_value(
-				"Proxy SKU",
-				self.proxy_sku,
-				["item", "uom", "last_transfer_rate"],
-				as_dict=True,
-			)
-			if proxy_sku_row:
-				item_code = proxy_sku_row.item
-				proxy_sku_uom = proxy_sku_row.uom
-				last_transfer_rate = proxy_sku_row.last_transfer_rate
-
-		supplier_price = None
-		if "Supplier-Sync" in synced_sources and item_code:
-			supplier_price = get_effective_supplier_purchase_cost(item_code, proxy_sku_uom)
-
-		po_cost = None
-		if "PO-Sync" in synced_sources and item_code:
-			po_cost = get_effective_po_purchase_cost(item_code, proxy_sku_uom)
-
-		effective_transfer_rate = None
-		if "FBA-Transfer" in synced_sources and item_code:
-			effective_transfer_rate = flt(last_transfer_rate) * get_conversion_factor(
-				item_code, proxy_sku_uom
-			)
-
-		sub_type_names = [
-			cost.cost_sub_type for cost in self.costs if cost.source == "Auto-Sync" and cost.cost_sub_type
-		]
-		sub_type_defaults = {}
-		if sub_type_names:
-			sub_type_defaults = {
-				row.name: row.default_value
-				for row in frappe.get_all(
-					"Cost Sub Type",
-					filters={"name": ["in", sub_type_names]},
-					fields=["name", "default_value"],
-				)
-			}
+		synced_values = self.resolve_synced_source_values(synced_sources)
+		sub_type_defaults = self.get_auto_sync_defaults()
 
 		for cost in self.costs:
 			cost.is_active = 1 if cost.rank == 1 else 0
 
-			if cost.source == "Supplier-Sync":
-				cost.value = flt(supplier_price)
-			elif cost.source == "PO-Sync":
-				cost.value = flt(po_cost)
-			elif cost.source == "FBA-Transfer":
-				cost.value = flt(effective_transfer_rate)
+			if cost.source in synced_values:
+				cost.value = flt(synced_values[cost.source])
 			elif cost.source == "Auto-Sync":
 				cost.value = flt(sub_type_defaults.get(cost.cost_sub_type))
+
+	def resolve_synced_source_values(self, synced_sources) -> dict:
+		active_resolvers = {
+			source: resolver
+			for source, resolver in ITEM_SYNCED_SOURCE_RESOLVERS.items()
+			if source in synced_sources
+		}
+		if not active_resolvers:
+			return {}
+
+		proxy_sku_row = frappe.db.get_value(
+			"Proxy SKU",
+			self.proxy_sku,
+			["item", "uom", "last_transfer_rate", "shipping_weight_g"],
+			as_dict=True,
+		)
+		if not proxy_sku_row or not proxy_sku_row.item:
+			return dict.fromkeys(active_resolvers, 0)
+
+		context = {
+			"item_code": proxy_sku_row.item,
+			"uom": proxy_sku_row.uom,
+			"last_transfer_rate": proxy_sku_row.last_transfer_rate,
+			"shipping_weight_g": proxy_sku_row.shipping_weight_g,
+			# Set by refresh_strategy_costs_chunk so misses across a whole run land in one Error Log
+			"missing_component_rates": self.flags.get("missing_bundle_component_rates"),
+		}
+
+		if "Shipping-Sync" in active_resolvers:
+			fba_strategy = frappe.db.get_value("Amazon Product Pricing", self.proxy_sku, "fba_strategy")
+			context["is_fba_strategy"] = fba_strategy == self.name
+
+		return {source: resolver(context) for source, resolver in active_resolvers.items()}
+
+	def get_auto_sync_defaults(self) -> dict:
+		sub_type_names = [
+			cost.cost_sub_type for cost in self.costs if cost.source == "Auto-Sync" and cost.cost_sub_type
+		]
+		if not sub_type_names:
+			return {}
+		return {
+			row.name: row.default_value
+			for row in frappe.get_all(
+				"Cost Sub Type",
+				filters={"name": ["in", sub_type_names]},
+				fields=["name", "default_value"],
+			)
+		}
 
 
 STRATEGY_REFRESH_CHUNK_SIZE = 5000
@@ -193,9 +238,11 @@ def refresh_all_strategy_costs():
 
 def refresh_strategy_costs_chunk(strategy_names: list):
 	refreshed = 0
+	missing_component_rates: list[tuple[str, str]] = []
 	for strategy_name in strategy_names:
 		try:
 			strategy = frappe.get_doc("Amazon Product Strategy", strategy_name)
+			strategy.flags.missing_bundle_component_rates = missing_component_rates
 			strategy.save(ignore_permissions=True)
 			refreshed += 1
 		except Exception as exception:
@@ -203,5 +250,7 @@ def refresh_strategy_costs_chunk(strategy_names: list):
 				f"Daily strategy cost refresh failed for {strategy_name}: {exception!s}",
 				"Amazon Product Strategy Refresh",
 			)
+
+	log_missing_bundle_component_rates(missing_component_rates)
 
 	return {"total": len(strategy_names), "refreshed": refreshed}

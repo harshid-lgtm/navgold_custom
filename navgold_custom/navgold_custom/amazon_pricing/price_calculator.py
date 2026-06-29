@@ -11,9 +11,31 @@ from frappe.utils.data import flt
 def get_cost_type_map() -> dict:
 	rows = frappe.get_all(
 		"Cost Type",
-		fields=["name", "is_absolute", "is_relative", "is_vat"],
+		fields=["name", "calculation_type"],
 	)
 	return {row.name: row for row in rows}
+
+
+def get_item_tax_rate(item_code: str) -> float:
+	if not item_code:
+		return flt(0)
+
+	template = frappe.db.get_value(
+		"Item Tax",
+		{"parent": item_code, "parenttype": "Item"},
+		"item_tax_template",
+		order_by="idx asc",
+	)
+	if not template:
+		return flt(0)
+
+	rate = frappe.db.get_value(
+		"Item Tax Template Detail",
+		{"parent": template},
+		"tax_rate",
+		order_by="idx asc",
+	)
+	return flt(rate)
 
 
 def get_cost_data(strategy, override_supplier_price: float | None = None) -> list[dict]:
@@ -37,9 +59,7 @@ def get_cost_data(strategy, override_supplier_price: float | None = None) -> lis
 		cost_data.append(
 			{
 				"type": cost.cost_type,
-				"is_absolute": cost_type.is_absolute,
-				"is_relative": cost_type.is_relative,
-				"is_vat": cost_type.is_vat,
+				"calculation_type": cost_type.calculation_type,
 				"value": value,
 			}
 		)
@@ -64,16 +84,17 @@ def calculate_prices(costs: list, min_margin: float, max_margin: float) -> dict:
 	denominator = flt(1)
 	for cost in costs:
 		value = flt(cost.get("value", 0))
+		calculation_type = cost.get("calculation_type")
 
-		if cost.get("is_vat"):
+		if calculation_type == "VAT":
 			vat_rate = value / 100
 			vat_fraction = vat_rate / (1 + vat_rate) if vat_rate else 0
 			denominator -= vat_fraction
 
-		elif cost.get("is_absolute"):
+		elif calculation_type == "Absolute":
 			numerator += value
 
-		elif cost.get("is_relative"):
+		elif calculation_type == "Relative":
 			denominator -= value / 100
 
 	min_price = calculate_single_price(numerator, denominator, min_margin, settings)
@@ -133,15 +154,16 @@ def calculate_margin_from_price(costs: list, selling_price: float) -> dict:
 
 	for cost in costs:
 		value = flt(cost.get("value", 0))
+		calculation_type = cost.get("calculation_type")
 
-		if cost.get("is_vat"):
+		if calculation_type == "VAT":
 			vat_rate = value / 100
 			vat_fraction = vat_rate / (1 + vat_rate) if vat_rate else 0
 
-		elif cost.get("is_absolute"):
+		elif calculation_type == "Absolute":
 			total_absolute += value
 
-		elif cost.get("is_relative"):
+		elif calculation_type == "Relative":
 			total_relative_rate += value / 100
 
 	commission_adjustment = flt(0)

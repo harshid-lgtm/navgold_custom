@@ -95,6 +95,7 @@
 			"fieldname": "status",
 			"fieldtype": "Select",
 			"in_list_view": 1,
+			"in_standard_filter": 1,
 			"label": "Status",
 			"options": "Pending\nIn Progress\nSuccess\nPartial Success\nError",
 			"read_only": 1

@@ -11,9 +11,14 @@ import time
 import frappe
 from frappe.integrations.utils import make_get_request
 from frappe.integrations.utils import make_request as frappe_make_request
-from frappe.utils import cstr, get_request_session
+from frappe.utils import cstr, flt, get_request_session
 from frappe.utils.caching import redis_cache
 from requests.exceptions import HTTPError
+
+from navgold_custom.navgold_custom.utils import (
+	block_if_amazon_frozen,
+	block_if_pricing_not_approved,
+)
 
 MAX_RETRIES = 3
 # Amazon Feeds (createFeed/createFeedDocument) restore throttle tokens at ~1 per 2 min, so a 429
@@ -62,7 +67,7 @@ def fetch_access_token(client_id: str, client_secret: str, refresh_token: str) -
 			raise
 		raise SPAPIError(
 			error="AuthenticationError", error_description=f"Failed to authenticate with Amazon: {e!s}"
-		)
+		) from None
 
 
 def is_throttling_error(error) -> bool:
@@ -214,7 +219,8 @@ class SPAPI:
 			raise
 		except HTTPError as e:
 			if e.response is None:
-				raise SPAPIError(error="HTTPError", error_description=cstr(e))
+				# `from None` drops the chained frames whose locals contain auth headers
+				raise SPAPIError(error="HTTPError", error_description=cstr(e)) from None
 
 			response_text = e.response.text or ""
 			try:
@@ -235,12 +241,13 @@ class SPAPI:
 			raise SPAPIError(
 				error=f"HTTP {e.response.status_code}",
 				error_description=description,
-			)
+				status_code=e.response.status_code,
+			) from None
 		except Exception as e:
 			raise SPAPIError(
 				error=type(e).__name__,
 				error_description=cstr(e),
-			)
+			) from None
 
 	def list_to_dict(self, key: str, values: list, data: dict) -> None:
 		if values and isinstance(values, list):
@@ -479,6 +486,70 @@ class Listings(SPAPI):
 			return None
 		return summaries[0]
 
+	# Used for Bulk Fetch of CUrrent Price Listing
+	def search_items(
+		self,
+		included_data: str = "summaries",
+		page_size: int = 20,
+		marketplace_id: str | None = None,
+	) -> list:
+		# Bulk pagination instead of one get_listing_item per SKU, which throttles on large catalogues.
+		if not marketplace_id:
+			marketplace_id = self.marketplace_id
+
+		append_to_base_uri = f"items/{self.seller_id}"
+		items = []
+		page_token = None
+		while True:
+			params = {
+				"marketplaceIds": marketplace_id,
+				"issueLocale": "en_US",
+				"includedData": included_data,
+				"pageSize": page_size,
+				"pageToken": page_token,
+			}
+			response = retry_with_backoff(
+				lambda params=params: self.make_request(append_to_base_uri=append_to_base_uri, params=params),
+				error_title="Listings searchItems failed",
+			)
+			items.extend(response.get("items") or [])
+			page_token = (response.get("pagination") or {}).get("nextToken")
+			if not page_token:
+				break
+		return items
+
+	BY_SKU_BATCH_SIZE = 20
+
+	def search_items_by_skus(
+		self,
+		skus: list[str],
+		included_data: str = "attributes",
+		marketplace_id: str | None = None,
+	) -> list:
+		# Unfiltered searchItems hard-caps at 1000 results; querying by explicit identifiers
+		# (max 20 per call) is the only way to cover the full catalogue.
+		if not marketplace_id:
+			marketplace_id = self.marketplace_id
+
+		append_to_base_uri = f"items/{self.seller_id}"
+		items = []
+		for start in range(0, len(skus), self.BY_SKU_BATCH_SIZE):
+			batch = skus[start : start + self.BY_SKU_BATCH_SIZE]
+			params = {
+				"marketplaceIds": marketplace_id,
+				"identifiers": ",".join(batch),
+				"identifiersType": "SKU",
+				"issueLocale": "en_US",
+				"includedData": included_data,
+				"pageSize": self.BY_SKU_BATCH_SIZE,
+			}
+			response = retry_with_backoff(
+				lambda params=params: self.make_request(append_to_base_uri=append_to_base_uri, params=params),
+				error_title="Listings searchItems by SKU failed",
+			)
+			items.extend(response.get("items") or [])
+		return items
+
 
 class FBAInventory(SPAPI):
 	"""Amazon FBA Inventory API"""
@@ -572,18 +643,24 @@ class Reports(SPAPI):
 	POLL_INTERVAL = 20
 	MAX_POLL_ATTEMPTS = 30
 
-	def create_report(self, report_type, marketplace_ids=None):
+	def create_report(self, report_type, marketplace_ids=None, data_start_time=None, data_end_time=None):
 		if not marketplace_ids:
 			marketplace_ids = [self.marketplace_id]
+
+		body = {
+			"reportType": report_type,
+			"marketplaceIds": marketplace_ids,
+		}
+		if data_start_time:
+			body["dataStartTime"] = data_start_time
+		if data_end_time:
+			body["dataEndTime"] = data_end_time
 
 		url = self.endpoint + self.BASE_URI + "reports"
 		result = frappe_make_request(
 			method="POST",
 			url=url,
-			json={
-				"reportType": report_type,
-				"marketplaceIds": marketplace_ids,
-			},
+			json=body,
 			headers={**self.get_headers(), "Content-Type": "application/json"},
 		)
 		return result.get("reportId")
@@ -604,9 +681,11 @@ class Reports(SPAPI):
 		except UnicodeDecodeError:
 			return content.decode("cp1252")
 
-	def request_and_download_report(self, report_type):
+	def request_and_download_report(self, report_type, data_start_time=None, data_end_time=None):
 		report_id = retry_with_backoff(
-			lambda: self.create_report(report_type),
+			lambda: self.create_report(
+				report_type, data_start_time=data_start_time, data_end_time=data_end_time
+			),
 			error_title=f"Reports API: failed to create {report_type}",
 		)
 
@@ -699,6 +778,8 @@ class Feeds(SPAPI):
 			- feedDocumentId: The feed document identifier
 			- url: Pre-signed URL for uploading content
 		"""
+		block_if_amazon_frozen()
+		block_if_pricing_not_approved()
 		url = self.endpoint + self.BASE_URI + "documents"
 
 		return self.post_feed_json(
@@ -744,6 +825,8 @@ class Feeds(SPAPI):
 			Dictionary containing:
 			- feedId: The feed identifier for tracking
 		"""
+		block_if_amazon_frozen()
+		block_if_pricing_not_approved()
 		if not marketplace_ids:
 			marketplace_ids = [self.marketplace_id]
 
@@ -811,19 +894,23 @@ class Feeds(SPAPI):
 		Returns:
 			Dictionary containing feeds list and pagination info
 		"""
-		data = {
-			"pageSize": page_size,
-			"nextToken": next_token,
-			"createdSince": created_since,
-			"createdUntil": created_until,
-		}
+		# Amazon rejects nextToken combined with any other query parameter, so on pagination
+		# send it alone. The array params (feedTypes/marketplaceIds/processingStatuses) must be
+		# comma-separated values — indexed notation (feedTypes[0]=…) is rejected with HTTP 400.
+		if next_token:
+			data = {"nextToken": next_token}
+		else:
+			data = {
+				"pageSize": page_size,
+				"createdSince": created_since,
+				"createdUntil": created_until,
+				"feedTypes": ",".join(feed_types) if feed_types else None,
+				"marketplaceIds": ",".join(marketplace_ids or [self.marketplace_id]),
+			}
+			if processing_statuses:
+				data["processingStatuses"] = ",".join(processing_statuses)
 
-		self.list_to_dict("feedTypes", feed_types, data)
-		self.list_to_dict("marketplaceIds", marketplace_ids or [self.marketplace_id], data)
-		self.list_to_dict("processingStatuses", processing_statuses, data)
-
-		append_to_base_uri = "feeds"
-		return self.make_request(append_to_base_uri=append_to_base_uri, params=data)
+		return self.make_request(append_to_base_uri="feeds", params=data)
 
 
 class FulfillmentInbound(SPAPI):

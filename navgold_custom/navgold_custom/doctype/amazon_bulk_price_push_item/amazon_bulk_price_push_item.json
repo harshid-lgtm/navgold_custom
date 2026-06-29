@@ -1,0 +1,78 @@
+{
+	"actions": [],
+	"creation": "2026-06-22 10:00:00.000000",
+	"doctype": "DocType",
+	"editable_grid": 1,
+	"engine": "InnoDB",
+	"field_order": [
+		"proxy_sku",
+		"sku",
+		"price_source",
+		"column_break_prices",
+		"min_price",
+		"max_price",
+		"our_price"
+	],
+	"fields": [
+		{
+			"fieldname": "proxy_sku",
+			"fieldtype": "Link",
+			"in_list_view": 1,
+			"label": "Proxy SKU",
+			"options": "Proxy SKU"
+		},
+		{
+			"description": "Seller SKU sent to Amazon. Defaults to the Proxy SKU when one is picked.",
+			"fieldname": "sku",
+			"fieldtype": "Data",
+			"in_list_view": 1,
+			"label": "SKU",
+			"reqd": 1
+		},
+		{
+			"default": "Manual",
+			"fieldname": "price_source",
+			"fieldtype": "Select",
+			"label": "Source",
+			"options": "Manual\nCurrent Min/Max\nFixed Price\nFile",
+			"read_only": 1
+		},
+		{
+			"fieldname": "column_break_prices",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "min_price",
+			"fieldtype": "Currency",
+			"in_list_view": 1,
+			"label": "Minimum",
+			"reqd": 1
+		},
+		{
+			"fieldname": "max_price",
+			"fieldtype": "Currency",
+			"in_list_view": 1,
+			"label": "Maximum",
+			"reqd": 1
+		},
+		{
+			"fieldname": "our_price",
+			"fieldtype": "Currency",
+			"in_list_view": 1,
+			"label": "Our Price",
+			"reqd": 1
+		}
+	],
+	"index_web_pages_for_search": 0,
+	"istable": 1,
+	"links": [],
+	"modified": "2026-06-22 10:00:00.000000",
+	"modified_by": "Administrator",
+	"module": "Navgold Custom",
+	"name": "Amazon Bulk Price Push Item",
+	"owner": "Administrator",
+	"permissions": [],
+	"sort_field": "creation",
+	"sort_order": "DESC",
+	"states": []
+}

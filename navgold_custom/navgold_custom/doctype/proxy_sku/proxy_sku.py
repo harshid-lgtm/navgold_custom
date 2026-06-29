@@ -8,6 +8,8 @@ from frappe.query_builder import DocType
 from frappe.utils import flt, now_datetime
 from frappe.utils.xlsxutils import make_xlsx
 
+from navgold_custom.navgold_custom.amazon_pricing.report_attachments import save_last_report_attachment
+from navgold_custom.navgold_custom.amazon_pricing.shipping_weight import get_shipping_weight_g
 from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import (
 	FBAInventory,
 	Listings,
@@ -24,6 +26,7 @@ class ProxySKU(Document):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
+		afn_stock: DF.Float
 		asin: DF.Link | None
 		current_selling_price: DF.Currency
 		fnsku: DF.Data | None
@@ -34,6 +37,7 @@ class ProxySKU(Document):
 		merchant_shipping_group: DF.Data | None
 		naming_series: DF.Data | None
 		selling_price_updated_at: DF.Datetime | None
+		shipping_weight_g: DF.Int
 		uom: DF.Link | None
 	# end: auto-generated types
 
@@ -55,6 +59,8 @@ class ProxySKU(Document):
 			self._user_provided_name = self.name
 
 	def validate(self):
+		self.set_shipping_weight()
+
 		multiple_active_item_uom = frappe.get_single_value("Navgold Settings", "multiple_active_item_uom")
 		if multiple_active_item_uom:
 			return
@@ -73,6 +79,13 @@ class ProxySKU(Document):
 				_(f"Active Proxy SKU for Item {self.item} with UOM {self.uom} already exists: {existing}"),
 				title=_("Duplicate Proxy SKU"),
 			)
+
+	def set_shipping_weight(self):
+		if self.shipping_weight_g or not self.item:
+			return
+		weight_g = get_shipping_weight_g(self.item, self.uom)
+		if weight_g:
+			self.shipping_weight_g = round(weight_g)
 
 	@frappe.whitelist()
 	def fetch_asin(self):
@@ -177,6 +190,8 @@ def bulk_fetch_selling_prices():
 
 	frappe.enqueue(
 		"navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku.process_bulk_selling_price_fetch",
+		job_id="navgold.scheduled_bulk_fetch_selling_prices",
+		deduplicate=True,
 		seller_skus=proxy_skus,
 		queue="long",
 	)
@@ -184,11 +199,16 @@ def bulk_fetch_selling_prices():
 	return {"message": f"Queued {len(proxy_skus)} Proxy SKUs for selling price fetch"}
 
 
+def schedule_bulk_fetch_selling_prices():
+	bulk_fetch_selling_prices()
+
+
 def process_bulk_selling_price_fetch(seller_skus):
 	# One report download covers every SKU's price — far fewer Amazon calls than
 	# fetching the Listings API per SKU, which throttles on large catalogues.
 	reports_client = Reports.from_amazon_settings()
 	tsv_content = reports_client.request_and_download_report("GET_MERCHANT_LISTINGS_ALL_DATA")
+	save_last_listings_report(tsv_content)
 
 	rows = parse_listings_tsv(tsv_content)
 	if not rows:
@@ -236,6 +256,7 @@ def bulk_import_listings():
 def process_bulk_listing_import():
 	reports_client = Reports.from_amazon_settings()
 	tsv_content = reports_client.request_and_download_report("GET_MERCHANT_LISTINGS_ALL_DATA")
+	save_last_listings_report(tsv_content)
 
 	rows = parse_listings_tsv(tsv_content)
 	if not rows:
@@ -323,6 +344,11 @@ def process_bulk_listing_import():
 		message += f" <a href='{skipped_report_url}'>Download skipped SKUs report</a>"
 
 	frappe.publish_realtime("msgprint", message, user=frappe.session.user)
+
+
+def save_last_listings_report(tsv_content):
+	save_last_report_attachment("last_listings_report", "amazon_all_listings.tsv", tsv_content)
+	frappe.db.set_single_value("Navgold Settings", "last_listings_synced_at", now_datetime())
 
 
 def save_skipped_report(skipped_rows):

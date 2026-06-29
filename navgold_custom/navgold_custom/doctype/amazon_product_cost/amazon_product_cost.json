@@ -45,19 +45,21 @@
 		},
 		{
 			"default": "1",
+			"description": "Derived from Rank (only Rank 1 is active). Read-only — set Rank to change which row applies.",
 			"fieldname": "is_active",
 			"fieldtype": "Check",
 			"in_list_view": 1,
-			"label": "Is Active"
+			"label": "Is Active",
+			"read_only": 1
 		},
 		{
 			"default": "Manual",
-			"description": "Manual: User override (never auto-overwritten). Auto-Sync: Cost Sub Type default. Supplier-Sync: Supplier price. PO-Sync: Purchase Order. FBA-Transfer: Stock Entry. Amazon-Sync: Amazon SP-API FBA fee report",
+			"description": "Manual: User override (never auto-overwritten). Auto-Sync: Cost Sub Type default. Supplier-Sync: Supplier price. PO-Sync: Purchase Order. FBA-Transfer: Stock Entry. Amazon-Sync: Amazon SP-API FBA fee report. Item-Tax-Sync: Item master tax template rate. Shipping-Sync: weight-based shipping tier (FBA strategy excluded)",
 			"fieldname": "source",
 			"fieldtype": "Select",
 			"in_list_view": 1,
 			"label": "Source",
-			"options": "Manual\nSupplier-Sync\nPO-Sync\nAuto-Sync\nFBA-Transfer\nAmazon-Sync"
+			"options": "Manual\nSupplier-Sync\nPO-Sync\nAuto-Sync\nFBA-Transfer\nAmazon-Sync\nItem-Tax-Sync\nShipping-Sync"
 		},
 		{
 			"default": "1",

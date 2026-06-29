@@ -25,6 +25,11 @@ try:
 except ImportError:
 	from erpnext.buying.doctype.purchase_order.purchase_order import make_purchase_receipt
 
+try: 
+    from erpnext.stock.doctype.packed_item.packed_item import get_product_bundle_items
+except ImportError:
+    from erpnext.stock.doctype.packed_item.packed_item import get_product_bundle_items_by_name as get_product_bundle_items
+    
 __all__ = [
 	"create_delivery_note",
 	"create_pick_list",
@@ -33,4 +38,5 @@ __all__ = [
 	"make_packing_slip",
 	"make_purchase_receipt",
 	"make_sales_invoice",
+	"get_product_bundle_items",
 ]

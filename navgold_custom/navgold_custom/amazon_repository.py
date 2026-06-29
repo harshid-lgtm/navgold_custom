@@ -287,6 +287,9 @@ class AmazonRepository:
 		try:
 			items = self.get_order_items(order_id)
 			if not items:
+				# Amazon can list an order before its items are queryable; record it so the
+				# retry path recovers the order instead of losing it silently.
+				self.create_failed_sync_record(order_id, "No order items returned by Amazon", order=order)
 				return None
 
 			if existing_so:

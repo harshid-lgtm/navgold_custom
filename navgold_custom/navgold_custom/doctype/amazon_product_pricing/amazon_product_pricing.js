@@ -54,6 +54,12 @@ frappe.ui.form.on('Amazon Product Pricing', {
 			);
 
 			frm.add_custom_button(
+				__('Manual Price Push'),
+				() => manual_price_push(frm),
+				__('Actions'),
+			);
+
+			frm.add_custom_button(
 				__('Apply Strategy Template'),
 				() => {
 					frappe.prompt(
@@ -126,3 +132,106 @@ frappe.ui.form.on('Amazon Product Pricing', {
 		}
 	},
 });
+
+function manual_price_push(frm) {
+	const fixed_value =
+		flt(frm.doc.fixed_price_value) || flt(frm.doc.current_min_price);
+	const dialog = new frappe.ui.Dialog({
+		title: __('Manual Price Push to Amazon'),
+		fields: [
+			{
+				fieldname: 'sku',
+				fieldtype: 'Link',
+				options: 'Proxy SKU',
+				label: __('SKU'),
+				default: frm.doc.proxy_sku,
+				reqd: 1,
+			},
+			{
+				fieldname: 'price_source',
+				fieldtype: 'Select',
+				label: __('Price Source'),
+				options: ['Fixed Price', 'Current Min/Max'].join('\n'),
+				default: 'Fixed Price',
+				description: __('Pre-fills the prices below; you can still edit them.'),
+			},
+			{ fieldtype: 'Column Break' },
+			{
+				fieldname: 'min',
+				fieldtype: 'Currency',
+				label: __('Minimum'),
+				default: flt(frm.doc.current_min_price),
+				reqd: 1,
+			},
+			{
+				fieldname: 'max',
+				fieldtype: 'Currency',
+				label: __('Maximum'),
+				default: flt(frm.doc.current_max_price),
+				reqd: 1,
+			},
+			{
+				fieldname: 'our_price',
+				fieldtype: 'Currency',
+				label: __('Our Price'),
+				default: fixed_value,
+				reqd: 1,
+			},
+		],
+		primary_action_label: __('Preview & Push'),
+		async primary_action(values) {
+			const update = {
+				sku: values.sku,
+				min: flt(values.min),
+				max: flt(values.max),
+				our_price: flt(values.our_price),
+			};
+			// Dry run first: validates prices and throws on a bad min/max before the live push.
+			await frappe.call({
+				method:
+					'navgold_custom.navgold_custom.amazon_pricing.manual_price_push.push_manual_prices',
+				args: { updates: [update], live: false },
+				freeze: true,
+				freeze_message: __('Validating...'),
+			});
+			const confirmed = await navgold.confirm_dialog(
+				__(
+					'Push to Amazon for {0}? Min {1}, Max {2}, Our Price {3}. Guards still apply and this cannot be undone.',
+					[
+						update.sku,
+						format_currency(update.min, 'GBP'),
+						format_currency(update.max, 'GBP'),
+						format_currency(update.our_price, 'GBP'),
+					],
+				),
+			);
+			if (!confirmed) return;
+			const { message } = await frappe.call({
+				method:
+					'navgold_custom.navgold_custom.amazon_pricing.manual_price_push.push_manual_prices',
+				args: { updates: [update], live: true },
+				freeze: true,
+				freeze_message: __('Submitting feed to Amazon...'),
+			});
+			dialog.hide();
+			frappe.msgprint(
+				__('Submitted feed {0} (log {1})', [message.feed_id, message.log_name]),
+			);
+		},
+	});
+
+	dialog.fields_dict.price_source.$input.on('change', () => {
+		const source = dialog.get_value('price_source');
+		if (source === 'Fixed Price') {
+			dialog.set_value('min', fixed_value);
+			dialog.set_value('max', fixed_value);
+			dialog.set_value('our_price', fixed_value);
+		} else {
+			dialog.set_value('min', flt(frm.doc.current_min_price));
+			dialog.set_value('max', flt(frm.doc.current_max_price));
+			dialog.set_value('our_price', flt(frm.doc.current_min_price));
+		}
+	});
+
+	dialog.show();
+}

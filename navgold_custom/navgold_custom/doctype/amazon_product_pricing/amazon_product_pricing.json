@@ -43,6 +43,7 @@
 			"fieldname": "is_active",
 			"fieldtype": "Check",
 			"in_list_view": 1,
+			"in_standard_filter": 1,
 			"label": "Is Active"
 		},
 		{
@@ -152,7 +153,7 @@
 			"in_list_view": 1,
 			"in_standard_filter": 1,
 			"label": "Amazon Sync Status",
-			"options": "Pending\nSubmitted\nError",
+			"options": "Pending\nSubmitted\nError\nSkipped",
 			"read_only": 1
 		},
 		{

@@ -1,0 +1,152 @@
+{
+	"actions": [],
+	"allow_rename": 0,
+	"autoname": "field:feed_id",
+	"creation": "2026-06-23 12:00:00.000000",
+	"doctype": "DocType",
+	"editable_grid": 0,
+	"engine": "InnoDB",
+	"field_order": [
+		"feed_id",
+		"feed_type",
+		"source",
+		"submission_log",
+		"column_break_main",
+		"processing_status",
+		"created_time",
+		"processing_end_time",
+		"counts_section",
+		"messages_processed",
+		"messages_accepted",
+		"column_break_counts",
+		"messages_invalid",
+		"result_document_id",
+		"result_fetched"
+	],
+	"fields": [
+		{
+			"fieldname": "feed_id",
+			"fieldtype": "Data",
+			"in_list_view": 1,
+			"label": "Feed ID",
+			"reqd": 1,
+			"unique": 1
+		},
+		{
+			"fieldname": "feed_type",
+			"fieldtype": "Data",
+			"in_standard_filter": 1,
+			"label": "Feed Type",
+			"read_only": 1
+		},
+		{
+			"description": "Navgold = matched a feed our system submitted. External = submitted directly to Amazon by another source (e.g. Repricer).",
+			"fieldname": "source",
+			"fieldtype": "Select",
+			"in_list_view": 1,
+			"in_standard_filter": 1,
+			"label": "Source",
+			"options": "Navgold\nExternal",
+			"read_only": 1
+		},
+		{
+			"fieldname": "submission_log",
+			"fieldtype": "Link",
+			"label": "Submission Log",
+			"options": "Amazon Pricing Submission Log",
+			"read_only": 1
+		},
+		{
+			"fieldname": "column_break_main",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "processing_status",
+			"fieldtype": "Data",
+			"in_list_view": 1,
+			"in_standard_filter": 1,
+			"label": "Processing Status",
+			"read_only": 1
+		},
+		{
+			"fieldname": "created_time",
+			"fieldtype": "Datetime",
+			"in_list_view": 1,
+			"label": "Created Time",
+			"read_only": 1
+		},
+		{
+			"fieldname": "processing_end_time",
+			"fieldtype": "Datetime",
+			"label": "Processing End Time",
+			"read_only": 1
+		},
+		{
+			"fieldname": "counts_section",
+			"fieldtype": "Section Break",
+			"label": "Result Summary"
+		},
+		{
+			"fieldname": "messages_processed",
+			"fieldtype": "Int",
+			"label": "Messages Processed",
+			"read_only": 1
+		},
+		{
+			"fieldname": "messages_accepted",
+			"fieldtype": "Int",
+			"label": "Messages Accepted",
+			"read_only": 1
+		},
+		{
+			"fieldname": "column_break_counts",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "messages_invalid",
+			"fieldtype": "Int",
+			"label": "Messages Invalid",
+			"read_only": 1
+		},
+		{
+			"fieldname": "result_document_id",
+			"fieldtype": "Data",
+			"label": "Result Document ID",
+			"read_only": 1
+		},
+		{
+			"default": "0",
+			"description": "Set once the result document summary has been fetched and parsed.",
+			"fieldname": "result_fetched",
+			"fieldtype": "Check",
+			"label": "Result Fetched",
+			"read_only": 1
+		}
+	],
+	"index_web_pages_for_search": 0,
+	"links": [],
+	"modified": "2026-06-23 12:00:00.000000",
+	"modified_by": "Administrator",
+	"module": "Navgold Custom",
+	"name": "Amazon Feed Ledger",
+	"naming_rule": "By fieldname",
+	"owner": "Administrator",
+	"permissions": [
+		{
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "System Manager",
+			"share": 1,
+			"write": 1
+		}
+	],
+	"sort_field": "created_time",
+	"sort_order": "DESC",
+	"states": [],
+	"track_changes": 0
+}

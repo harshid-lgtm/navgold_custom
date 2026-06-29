@@ -1,17 +1,44 @@
 # Copyright (c) 2026, developers@buildwithhussain.com and contributors
 # For license information, please see license.txt
 
+import math
 from collections.abc import Callable
 
 import frappe
-from erpnext.stock.doctype.packed_item.packed_item import get_product_bundle_items
+from navgold_custom.navgold_custom.erpnext_compat import get_product_bundle_items
 from frappe.query_builder import DocType, Order
 from frappe.utils.data import flt
 
 from navgold_custom.navgold_custom.doctype.supplier_item_price_and_stock.supplier_item_price_and_stock import (
 	get_supplier_prices,
 )
-from navgold_custom.navgold_custom.utils import get_conversion_factor
+from navgold_custom.navgold_custom.utils import get_conversion_factor, get_free_qty_map
+
+try:
+	from erpnext.stock.doctype.packed_item.packed_item import get_product_bundle_items
+except ImportError:
+	# Some erpnext versions don't expose this helper at this path. Resolve the
+	# active, submitted bundle's components ourselves with the same shape/filters.
+	def get_product_bundle_items(item_code):
+		product_bundle = DocType("Product Bundle")
+		product_bundle_item = DocType("Product Bundle Item")
+		return (
+			frappe.qb.from_(product_bundle_item)
+			.join(product_bundle)
+			.on(product_bundle_item.parent == product_bundle.name)
+			.select(
+				product_bundle_item.item_code,
+				product_bundle_item.qty,
+				product_bundle_item.uom,
+				product_bundle_item.description,
+			)
+			.where(
+				(product_bundle.new_item_code == item_code)
+				& (product_bundle.is_active == 1)
+				& (product_bundle.docstatus == 1)
+			)
+			.orderby(product_bundle_item.idx)
+		).run(as_dict=True)
 
 
 # Here effective calculation means considering bunles/packs.
@@ -42,6 +69,7 @@ def calculate_bundle_cost(
 	item_code: str,
 	components: list[dict],
 	lookup_rates_by_item: Callable[[list[str]], dict[str, float]],
+	missing_component_rates: list[tuple[str, str]] | None = None,
 ) -> float:
 	component_item_codes = [component["item_code"] for component in components]
 	rate_map = lookup_rates_by_item(component_item_codes)
@@ -49,26 +77,41 @@ def calculate_bundle_cost(
 	for component in components:
 		rate = rate_map.get(component["item_code"])
 		if rate is None:
-			frappe.log_error(
-				f"Missing rate for bundle component {component['item_code']} of {item_code}",
-				"Amazon Pricing — Bundle Cost",
-			)
+			# Don't log per bundle here: callers that run over many bundles collect the
+			# misses and emit one consolidated Error Log via log_missing_bundle_component_rates.
+			if missing_component_rates is not None:
+				missing_component_rates.append((item_code, component["item_code"]))
 			return 0.0
 		total += flt(rate) * flt(component["qty"])
 	return total
+
+
+def log_missing_bundle_component_rates(missing_component_rates: list[tuple[str, str]]):
+	if not missing_component_rates:
+		return
+
+	unique_pairs = sorted(set(missing_component_rates))
+	bundle_count = len({bundle for bundle, _ in unique_pairs})
+	frappe.log_error(
+		title=f"Bundle purchase cost skipped — {bundle_count} bundles with missing component rates",
+		message="\n".join(
+			f"{bundle}: missing rate for component {component}" for bundle, component in unique_pairs
+		),
+	)
 
 
 def calculate_pack_or_bundle_cost(
 	item_code: str,
 	uom: str,
 	lookup_rates_by_item: Callable[[list[str]], dict[str, float]],
+	missing_component_rates: list[tuple[str, str]] | None = None,
 ) -> float:
 	if not item_code:
 		return 0.0
 
 	components = get_product_bundle_items(item_code)
 	if components:
-		return calculate_bundle_cost(item_code, components, lookup_rates_by_item)
+		return calculate_bundle_cost(item_code, components, lookup_rates_by_item, missing_component_rates)
 
 	rate_map = lookup_rates_by_item([item_code])
 	base_rate = rate_map.get(item_code)
@@ -77,12 +120,20 @@ def calculate_pack_or_bundle_cost(
 	return flt(base_rate) * get_conversion_factor(item_code, uom)
 
 
-def get_effective_supplier_purchase_cost(item_code: str, uom: str) -> float:
-	return calculate_pack_or_bundle_cost(item_code, uom, get_supplier_prices)
+def get_effective_supplier_purchase_cost(
+	item_code: str,
+	uom: str,
+	missing_component_rates: list[tuple[str, str]] | None = None,
+) -> float:
+	return calculate_pack_or_bundle_cost(item_code, uom, get_supplier_prices, missing_component_rates)
 
 
-def get_effective_po_purchase_cost(item_code: str, uom: str) -> float:
-	return calculate_pack_or_bundle_cost(item_code, uom, get_po_rates)
+def get_effective_po_purchase_cost(
+	item_code: str,
+	uom: str,
+	missing_component_rates: list[tuple[str, str]] | None = None,
+) -> float:
+	return calculate_pack_or_bundle_cost(item_code, uom, get_po_rates, missing_component_rates)
 
 
 def get_bundle_components(item_codes: list[str]) -> dict[str, list[dict]]:
@@ -119,6 +170,30 @@ def get_bundle_components(item_codes: list[str]) -> dict[str, list[dict]]:
 		item_code: components_by_bundle.get(bundle_name, [])
 		for item_code, bundle_name in item_to_bundle.items()
 	}
+
+
+def get_buildable_bundle_qty_map(item_codes: list) -> dict:
+	bundle_components_map = get_bundle_components(item_codes)
+	if not bundle_components_map:
+		return {}
+
+	component_item_codes = list(
+		{component["item_code"] for components in bundle_components_map.values() for component in components}
+	)
+	component_free_qty_map = get_free_qty_map(component_item_codes)
+
+	buildable_map = {}
+	for item_code, components in bundle_components_map.items():
+		buildable_counts = []
+		for component in components:
+			per_bundle_qty = flt(component["qty"])
+			if per_bundle_qty <= 0:
+				continue
+			component_stock = flt(component_free_qty_map.get(component["item_code"], {}).get("free_qty", 0))
+			buildable_counts.append(math.floor(component_stock / per_bundle_qty))
+		buildable_map[item_code] = max(min(buildable_counts), 0) if buildable_counts else 0
+
+	return buildable_map
 
 
 def calculate_effective_purchase_costs(

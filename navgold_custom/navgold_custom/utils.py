@@ -5,6 +5,7 @@ from frappe.utils import flt
 from frappe.utils.caching import redis_cache
 
 BATCH_SIZE = 500
+ITEM_AFN_FIELD = "custom_amazon_afn_stock"
 
 
 def bulk_set_value(doctype: str, names: list, field: str, value, batch_size: int = BATCH_SIZE):
@@ -26,6 +27,31 @@ def get_afn_warehouse_stock_map(item_codes: list[str], warehouse: str) -> dict[s
 	).run(as_dict=True)
 
 	return {row.item_code: flt(row.actual_qty) for row in rows}
+
+
+def get_fba_stock_map(item_codes: list[str], afn_warehouse: str | None) -> dict[str, float]:
+	if not item_codes:
+		return {}
+
+	bin_stock_map = get_afn_warehouse_stock_map(item_codes, afn_warehouse)
+
+	if not frappe.get_cached_doc("Navgold Settings").enable_afn_stock_sync:
+		return bin_stock_map
+
+	fetched_rows = frappe.get_all(
+		"Item",
+		filters={"name": ["in", item_codes]},
+		fields=["name", ITEM_AFN_FIELD],
+	)
+	fetched_stock_map = {row.name: flt(row.get(ITEM_AFN_FIELD)) for row in fetched_rows}
+
+	# FBA Transfer stock entries land in the AFN warehouse Bin at packing time, before Amazon's
+	# inventory report counts them as fulfillable. Taking the max keeps the FBA strategy selected
+	# during the inbound transit window while still seeing stock only Amazon knows about.
+	return {
+		item_code: max(flt(bin_stock_map.get(item_code)), fetched_stock_map.get(item_code, 0.0))
+		for item_code in item_codes
+	}
 
 
 def get_restock_data_map(item_codes: list[str]) -> dict[str, object]:
@@ -92,3 +118,33 @@ def get_conversion_factor(item_code: str, uom: str):
 		"UOM Conversion Detail", {"parent": item_code, "uom": uom}, "conversion_factor"
 	)
 	return flt(conversion_factor) or 1.0
+
+
+class AmazonFrozenError(frappe.ValidationError):
+	# Distinct from a real transport/API failure so callers can mark records "Skipped"
+	# instead of polluting the failed-sync triage queue with deliberate blocks.
+	pass
+
+
+class PricingNotApprovedError(frappe.ValidationError):
+	# Same intent as the freeze error: a Dry Run block is an intentional gate, not a failure.
+	pass
+
+
+def block_if_amazon_frozen():
+	# Deliberately uncached: this is the emergency kill switch and must take effect
+	# on long-running workers without a cache clear.
+	if frappe.db.get_single_value("Navgold Settings", "freeze_amazon_outbound"):
+		raise AmazonFrozenError(frappe._("Amazon outbound writes are frozen via Navgold Settings."))
+
+
+def block_if_pricing_not_approved():
+	# Read uncached for the same reason as the freeze guard: the Dry Run / Live approval
+	# state must take effect immediately on long-running workers without a cache clear.
+	if frappe.db.get_single_value("Navgold Settings", "pricing_sync_mode") != "Live":
+		raise PricingNotApprovedError(
+			frappe._(
+				"Pricing sync is in Dry Run mode — push blocked until approved "
+				"(Navgold Settings → Approve & Go Live)."
+			)
+		)

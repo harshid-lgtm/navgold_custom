@@ -24,32 +24,55 @@ class NavgoldSettings(Document):
 		from navgold_custom.navgold_custom.doctype.navgold_zero_stock_item.navgold_zero_stock_item import (
 			NavgoldZeroStockItem,
 		)
+		from navgold_custom.navgold_custom.doctype.shipping_weight_tier.shipping_weight_tier import (
+			ShippingWeightTier,
+		)
 		from navgold_custom.navgold_custom.doctype.strategy_name_mapping.strategy_name_mapping import (
 			StrategyNameMapping,
 		)
 
 		amazon_pricing_enabled: DF.Check
-		auto_sync_cogs: DF.Check
+		amazon_publishing_mode: DF.Literal["Stock Only", "Stock and Prices"]
 		buying_price_list: DF.Link
-		cogs_supplier: DF.Link | None
 		commission_threshold: DF.Float
-		default_cost_set_template: DF.Link | None
 		default_label_owner: DF.Literal["AMAZON", "SELLER", "NONE"]
 		default_prep_owner: DF.Literal["AMAZON", "SELLER", "NONE"]
 		default_stock_allocation_warehouse: DF.Link | None
-		default_strategy_template: DF.Link | None
+		enable_afn_stock_sync: DF.Check
 		enable_pricing_sync: DF.Check
 		fba_inbound_enabled: DF.Check
 		fba_source_address: DF.Link | None
+		freeze_amazon_outbound: DF.Check
 		high_price_commission_adjustment: DF.Float
+		last_afn_stock_items_count: DF.Int
+		last_afn_stock_proxy_count: DF.Int
+		last_afn_stock_report: DF.Attach | None
+		last_afn_stock_synced_at: DF.Datetime | None
+		last_fba_fee_report: DF.Attach | None
+		last_fba_fee_synced_at: DF.Datetime | None
+		last_listings_report: DF.Attach | None
+		last_listings_synced_at: DF.Datetime | None
+		last_pricing_submit_at: DF.Datetime | None
 		last_pricing_synced_at: DF.Datetime | None
+		last_repricer_submit_at: DF.Datetime | None
+		last_strategy_refresh_at: DF.Datetime | None
 		min_shelf_expiry_in_days: DF.Int
 		multiple_active_item_uom: DF.Check
+		pause_strategy_refresh: DF.Check
+		price_change_block_direction: DF.Literal["Both", "Drops Only", "Increases Only"]
+		price_change_threshold_percent: DF.Float
+		pricing_alert_recipients: DF.SmallText | None
 		pricing_publishing_mode: DF.Literal["Publish All Prices", "Publish Selected Prices Only"]
+		pricing_sync_approved_at: DF.Datetime | None
+		pricing_sync_approved_by: DF.Link | None
+		pricing_sync_mode: DF.Literal["Dry Run", "Live"]
 		published_pricing_items: DF.Table[NavgoldPublishedPricingItem]
 		repricer_api_password: DF.Password | None
 		repricer_api_username: DF.Data | None
 		repricer_enabled: DF.Check
+		send_min_price_to_amazon: DF.Check
+		shipping_packaging_buffer_g: DF.Int
+		shipping_weight_tiers: DF.Table[ShippingWeightTier]
 		stock_publishing_mode: DF.Literal[
 			"Publish Actual Stock",
 			"Publish Zero Stock for All Items",
@@ -177,6 +200,37 @@ class NavgoldSettings(Document):
 		if queued:
 			frappe.msgprint(_("Queued: {0}").format(", ".join(queued)))
 
+	@frappe.whitelist()
+	def approve_and_go_live(self):
+		frappe.only_for("System Manager")
+
+		self.pricing_sync_mode = "Live"
+		self.pricing_sync_approved_by = frappe.session.user
+		self.pricing_sync_approved_at = frappe.utils.now_datetime()
+		self.save()
+
+		frappe.msgprint(_("Pricing sync is now Live. Outbound pushes to Amazon and Repricer are enabled."))
+
+	@frappe.whitelist()
+	def revert_to_dry_run(self):
+		frappe.only_for("System Manager")
+
+		self.pricing_sync_mode = "Dry Run"
+		self.pricing_sync_approved_by = None
+		self.pricing_sync_approved_at = None
+		self.save()
+
+		frappe.msgprint(_("Pricing sync reverted to Dry Run. All outbound pushes are blocked."))
+
+
+def prices_not_refreshed_since_last_submit(settings, submit_stamp_field: str) -> bool:
+	# Stagger guard: refresh runs at :00/:30, submit at :15/:45. If a refresh overran or never ran,
+	# submitting now would build a feed from half-refreshed prices, so require a refresh to have
+	# completed since this channel's last submit. First-ever run (no submit stamp) is allowed.
+	last_refresh = settings.last_strategy_refresh_at
+	last_submit = settings.get(submit_stamp_field)
+	return bool(last_submit and (not last_refresh or last_refresh <= last_submit))
+
 
 def schedule_submit_active_pricing():
 	settings = frappe.get_cached_doc("Navgold Settings")
@@ -184,6 +238,23 @@ def schedule_submit_active_pricing():
 		return
 
 	if not settings.amazon_pricing_enabled:
+		return
+
+	if prices_not_refreshed_since_last_submit(settings, "last_pricing_submit_at"):
+		return
+
+	frappe.db.set_single_value("Navgold Settings", "last_pricing_submit_at", frappe.utils.now_datetime())
+
+	# In Dry Run mode the scheduled sync must still DO something useful: render the exact feed
+	# a live sync would push and persist it as a never-submitted preview + variance, instead of
+	# letting it sail into the approval gate only to be blocked. Live mode submits for real.
+	if settings.pricing_sync_mode == "Dry Run":
+		frappe.enqueue(
+			job_id="navgold.amazon_scheduled_pricing_dry_run",
+			deduplicate=True,
+			method="navgold_custom.navgold_custom.amazon_pricing.pricing_dry_run.dry_run_pricing",
+			timeout=6000,
+		)
 		return
 
 	frappe.enqueue(
@@ -202,6 +273,17 @@ def schedule_submit_active_repricer():
 	if not settings.repricer_enabled:
 		return
 
+	# In Dry Run mode the Amazon pricing schedule already renders the shared preview + variance,
+	# so the Repricer push has nothing extra to preview — skip it rather than enqueue a job that
+	# only exists to be blocked at the approval gate.
+	if settings.pricing_sync_mode == "Dry Run":
+		return
+
+	if prices_not_refreshed_since_last_submit(settings, "last_repricer_submit_at"):
+		return
+
+	frappe.db.set_single_value("Navgold Settings", "last_repricer_submit_at", frappe.utils.now_datetime())
+
 	frappe.enqueue(
 		job_id="navgold.repricer_scheduled_sync",
 		deduplicate=True,
@@ -211,11 +293,30 @@ def schedule_submit_active_repricer():
 
 
 def schedule_bulk_refresh_strategies():
+	if frappe.db.get_single_value("Navgold Settings", "pause_strategy_refresh"):
+		return
+
 	frappe.enqueue(
 		job_id="navgold.scheduled_bulk_refresh_strategies",
 		deduplicate=True,
 		method="navgold_custom.navgold_custom.amazon_pricing.strategy_selector.bulk_refresh_strategies",
 		timeout=6000,
+	)
+
+
+def schedule_bulk_fetch_afn_stock():
+	settings = frappe.get_cached_doc("Navgold Settings")
+	if not settings.enable_afn_stock_sync:
+		return
+
+	# Same job_id as the manual entry in afn_stock_fetcher.bulk_fetch_afn_stock so a manual
+	# click during a scheduled run never double-pulls from Amazon.
+	frappe.enqueue(
+		job_id="navgold.scheduled_bulk_fetch_afn_stock",
+		deduplicate=True,
+		method="navgold_custom.navgold_custom.amazon_pricing.afn_stock_fetcher.process_afn_stock_fetch",
+		queue="long",
+		timeout=1800,
 	)
 
 
