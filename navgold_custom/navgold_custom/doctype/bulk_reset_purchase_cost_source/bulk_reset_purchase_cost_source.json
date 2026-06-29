@@ -6,6 +6,7 @@
 	"field_order": [
 		"filters_section",
 		"cost_type",
+		"cost_sub_type",
 		"strategy_name",
 		"current_source",
 		"col_break_filters",
@@ -28,6 +29,13 @@
 			"label": "Cost Type",
 			"options": "Cost Type",
 			"reqd": 1
+		},
+		{
+			"depends_on": "cost_type",
+			"fieldname": "cost_sub_type",
+			"fieldtype": "Link",
+			"label": "Cost Sub Type",
+			"options": "Cost Sub Type"
 		},
 		{
 			"fieldname": "strategy_name",
@@ -74,7 +82,7 @@
 			"fieldname": "target_source",
 			"fieldtype": "Select",
 			"label": "Target Source",
-			"options": "Auto\nManual\nSupplier-Sync\nPO-Sync\nFBA-Transfer\nItem-Tax-Sync\nShipping-Sync",
+			"options": "Auto\nManual\nSupplier-Sync\nPO-Sync\nFBA-Transfer\nAmazon-Sync\nItem-Tax-Sync\nShipping-Sync",
 			"reqd": 1
 		},
 		{

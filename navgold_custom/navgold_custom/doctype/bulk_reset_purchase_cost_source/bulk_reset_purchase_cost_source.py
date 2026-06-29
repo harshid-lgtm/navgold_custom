@@ -11,6 +11,12 @@ from frappe.query_builder import DocType
 from frappe.query_builder.functions import Count
 from frappe.utils.data import flt
 
+from navgold_custom.navgold_custom.amazon_pricing.fba_fee_fetcher import (
+	FEE_COST_SUB_TYPE,
+	FEE_SOURCE,
+	bulk_fetch_fba_fees,
+)
+
 COST_UPDATE_CHUNK_SIZE = 500
 STRATEGY_RECOMPUTE_CHUNK_SIZE = 500
 RESET_JOB_TIMEOUT = 14400
@@ -20,10 +26,17 @@ EXPLICIT_TARGET_SOURCES = {
 	"Supplier-Sync",
 	"PO-Sync",
 	"FBA-Transfer",
+	FEE_SOURCE,
 	"Item-Tax-Sync",
 	"Shipping-Sync",
 }
 ALL_TARGET_SOURCES = EXPLICIT_TARGET_SOURCES | {"Auto"}
+
+# Amazon-Sync is refreshed only by the FBA fee fetcher, so restrict it to the FBA-fee sub type; any other
+# sub type set to Amazon-Sync would have its value orphaned (no sync ever recomputes it).
+SOURCE_REQUIRED_SUB_TYPE = {
+	FEE_SOURCE: FEE_COST_SUB_TYPE,
+}
 
 SUB_TYPE_TO_AUTO_SOURCE = {
 	"Purchase Cost-Warehouse Cost": "PO-Sync",
@@ -46,14 +59,15 @@ class BulkResetPurchaseCostSource(Document):
 		if self.target_source == "Manual" and self.manual_value in (None, ""):
 			frappe.throw(_("Manual Value is required when Target Source is Manual."))
 
-		filters_payload = {
-			"cost_type": self.cost_type,
-			"strategy_name": self.strategy_name,
-			"current_source": self.current_source,
-			"item": self.item,
-			"item_group": self.item_group,
-			"proxy_sku": self.proxy_sku,
-		}
+		required_sub_type = SOURCE_REQUIRED_SUB_TYPE.get(self.target_source)
+		if required_sub_type and self.cost_sub_type and self.cost_sub_type != required_sub_type:
+			frappe.throw(
+				_("Target Source {0} only applies to the {1} sub type.").format(
+					self.target_source, required_sub_type
+				)
+			)
+
+		filters_payload = build_reset_filters(self)
 
 		matched_preview = count_matching_cost_rows(filters_payload)
 		if not matched_preview:
@@ -71,6 +85,26 @@ class BulkResetPurchaseCostSource(Document):
 		)
 
 		return {"matched_preview": matched_preview, "enqueued": True}
+
+
+def build_reset_filters(doc) -> dict:
+	filters = {
+		"cost_type": doc.cost_type,
+		"cost_sub_type": doc.cost_sub_type,
+		"strategy_name": doc.strategy_name,
+		"current_source": doc.current_source,
+		"item": doc.item,
+		"item_group": doc.item_group,
+		"proxy_sku": doc.proxy_sku,
+	}
+	required_sub_type = SOURCE_REQUIRED_SUB_TYPE.get(doc.target_source)
+	if required_sub_type:
+		filters["cost_sub_type"] = required_sub_type
+	return filters
+
+
+def enqueue_fba_fee_refresh():
+	bulk_fetch_fba_fees()
 
 
 def reset_purchase_cost_sources(
@@ -107,6 +141,11 @@ def reset_purchase_cost_sources(
 	strategy_names = sorted({row["strategy"] for row in matching})
 	chunks_enqueued = enqueue_strategy_recompute(strategy_names)
 
+	fba_fee_refresh_enqueued = False
+	if target_source == FEE_SOURCE and updated_count:
+		enqueue_fba_fee_refresh()
+		fba_fee_refresh_enqueued = True
+
 	frappe.publish_realtime(
 		event="bulk_reset_purchase_cost_complete",
 		message={
@@ -116,6 +155,7 @@ def reset_purchase_cost_sources(
 			"enqueued_strategies": len(strategy_names),
 			"chunks_enqueued": chunks_enqueued,
 			"target_breakdown": {target: len(names) for target, names in updates_by_target.items()},
+			"fba_fee_refresh_enqueued": fba_fee_refresh_enqueued,
 		},
 		user=enqueued_by,
 	)
@@ -175,6 +215,8 @@ def apply_optional_filters(query, doc, cost, strategy, proxy_sku, item):
 		query = query.where(strategy.strategy_name == doc.strategy_name)
 	if doc.current_source:
 		query = query.where(cost.source == doc.current_source)
+	if doc.cost_sub_type:
+		query = query.where(cost.cost_sub_type == doc.cost_sub_type)
 	if doc.item:
 		query = query.where(proxy_sku.item == doc.item)
 	if doc.item_group:

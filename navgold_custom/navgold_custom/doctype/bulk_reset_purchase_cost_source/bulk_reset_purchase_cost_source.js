@@ -2,12 +2,20 @@
 // For license information, please see license.txt
 
 frappe.ui.form.on('Bulk Reset Purchase Cost Source', {
+	setup(frm) {
+		frm.set_query('cost_sub_type', () => ({
+			filters: { cost_type: frm.doc.cost_type },
+		}));
+	},
 	refresh(frm) {
 		frm.disable_save();
 		frm.page.set_primary_action(__('Apply Reset'), async () => {
 			await apply_reset(frm);
 		});
 		add_completion_listener();
+	},
+	cost_type(frm) {
+		frm.set_value('cost_sub_type', null);
 	},
 });
 
@@ -67,6 +75,12 @@ function add_completion_listener() {
 			)
 			.join('');
 
+		const fba_note = payload.fba_fee_refresh_enqueued
+			? `<p>${__(
+					'An FBA fee refresh has been queued to repopulate the Amazon-Sync values.',
+			  )}</p>`
+			: '';
+
 		frappe.msgprint({
 			title: __('Bulk Reset Complete'),
 			indicator: 'green',
@@ -80,6 +94,7 @@ function add_completion_listener() {
 						payload.chunks_enqueued,
 					],
 				)}</p>
+				${fba_note}
 				<table class="table table-bordered">
 					<thead><tr><th>${__('Target Source')}</th><th class="text-right">${__(
 						'Rows',
