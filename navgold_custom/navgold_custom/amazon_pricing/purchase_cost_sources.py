@@ -5,40 +5,14 @@ import math
 from collections.abc import Callable
 
 import frappe
-from navgold_custom.navgold_custom.erpnext_compat import get_product_bundle_items
 from frappe.query_builder import DocType, Order
 from frappe.utils.data import flt
 
 from navgold_custom.navgold_custom.doctype.supplier_item_price_and_stock.supplier_item_price_and_stock import (
 	get_supplier_prices,
 )
+from navgold_custom.navgold_custom.erpnext_compat import get_product_bundle_items
 from navgold_custom.navgold_custom.utils import get_conversion_factor, get_free_qty_map
-
-try:
-	from erpnext.stock.doctype.packed_item.packed_item import get_product_bundle_items
-except ImportError:
-	# Some erpnext versions don't expose this helper at this path. Resolve the
-	# active, submitted bundle's components ourselves with the same shape/filters.
-	def get_product_bundle_items(item_code):
-		product_bundle = DocType("Product Bundle")
-		product_bundle_item = DocType("Product Bundle Item")
-		return (
-			frappe.qb.from_(product_bundle_item)
-			.join(product_bundle)
-			.on(product_bundle_item.parent == product_bundle.name)
-			.select(
-				product_bundle_item.item_code,
-				product_bundle_item.qty,
-				product_bundle_item.uom,
-				product_bundle_item.description,
-			)
-			.where(
-				(product_bundle.new_item_code == item_code)
-				& (product_bundle.is_active == 1)
-				& (product_bundle.docstatus == 1)
-			)
-			.orderby(product_bundle_item.idx)
-		).run(as_dict=True)
 
 
 # Here effective calculation means considering bunles/packs.
