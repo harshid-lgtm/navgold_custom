@@ -343,9 +343,10 @@ def apply_stock_guard(qty: int, reserve_pct: float, max_publish_qty: int) -> int
 	# Clamp defensively: a negative reserve would inflate the published qty and oversell on Amazon,
 	# and form-level non_negative won't stop a console/API/db_set write. >100 falls out as publish-nothing.
 	reserve_pct = max(0.0, min(flt(reserve_pct), 100.0))
+	max_publish_qty = cint(max_publish_qty)
 	guarded_qty = max(math.floor(flt(qty) * (1 - reserve_pct / 100)), 0)
-	if cint(max_publish_qty) > 0:
-		guarded_qty = min(guarded_qty, cint(max_publish_qty))
+	if max_publish_qty > 0:
+		guarded_qty = min(guarded_qty, max_publish_qty)
 	return guarded_qty
 
 
@@ -447,9 +448,11 @@ def get_sku_inventory_data(
 			warehouse_qty = 0
 
 	# Reserve/cap applies to own warehouse stock only, never to backorder/supplier quantity.
-	warehouse_qty = apply_stock_guard(warehouse_qty, reserve_pct, max_publish_qty)
-
-	quantity = resolved_supplier_qty if is_backorder else warehouse_qty
+	quantity = (
+		resolved_supplier_qty
+		if is_backorder
+		else apply_stock_guard(warehouse_qty, reserve_pct, max_publish_qty)
+	)
 
 	if zero_stock_proxy_skus is not None and pricing.proxy_sku in zero_stock_proxy_skus:
 		quantity = 0
