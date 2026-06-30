@@ -453,8 +453,8 @@ def get_sku_inventory_data(
 	elif supplier_sfp_eligible_map is not None:
 		supplier_sfp_eligible = bool(supplier_sfp_eligible_map.get(resolved_supplier.supplier))
 	else:
-		supplier_sfp_eligible = bool(
-			frappe.db.get_value("Supplier", resolved_supplier.supplier, "custom_sfp_eligible")
+		supplier_sfp_eligible = get_supplier_sfp_eligible_batch([resolved_supplier.supplier]).get(
+			resolved_supplier.supplier, False
 		)
 
 	resolved_supplier_sfp = bool(resolved_supplier.get("sfp")) if resolved_supplier else False

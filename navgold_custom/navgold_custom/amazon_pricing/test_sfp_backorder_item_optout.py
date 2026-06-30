@@ -60,6 +60,8 @@ class TestSfpBackorderItemOptOut(IntegrationTestCase):
 	def test_eligible_supplier_row_sfp_with_restock_date_lists_as_sfp(self):
 		inventory = inventory_for_backorder(supplier_sfp_eligible=True, row_sfp=True, has_restock_date=True)
 		self.assertEqual(inventory["shipping_group"], SHIPPING_GROUPS["sfp"])
+		self.assertTrue(inventory["send_lead_time"])
+		self.assertIsNotNone(inventory["restock_date"])
 
 	def test_row_sfp_off_stays_main_revised(self):
 		inventory = inventory_for_backorder(supplier_sfp_eligible=True, row_sfp=False, has_restock_date=True)
