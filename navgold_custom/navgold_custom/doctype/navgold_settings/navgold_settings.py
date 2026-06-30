@@ -56,6 +56,7 @@ class NavgoldSettings(Document):
 		last_pricing_synced_at: DF.Datetime | None
 		last_repricer_submit_at: DF.Datetime | None
 		last_strategy_refresh_at: DF.Datetime | None
+		max_publish_qty: DF.Int
 		min_shelf_expiry_in_days: DF.Int
 		multiple_active_item_uom: DF.Check
 		pause_strategy_refresh: DF.Check
@@ -78,6 +79,7 @@ class NavgoldSettings(Document):
 			"Publish Zero Stock for All Items",
 			"Publish Zero Stock for Selected Items",
 		]
+		stock_reserve_pct: DF.Percent
 		strategy_name_mapping: DF.Table[StrategyNameMapping]
 		subscribe_and_save_warehouse: DF.Link
 		tote_weight_limit: DF.Int

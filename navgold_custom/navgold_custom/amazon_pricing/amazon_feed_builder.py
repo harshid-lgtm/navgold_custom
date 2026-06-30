@@ -339,6 +339,13 @@ def calculate_adjusted_qty(raw_qty: float, pool_size: int, pack_size: float) -> 
 	return max(math.floor(raw_qty / pool_size / pack_size), 0)
 
 
+def apply_stock_guard(qty: int, reserve_pct: float, max_publish_qty: int) -> int:
+	guarded_qty = max(math.floor(flt(qty) * (1 - flt(reserve_pct) / 100)), 0)
+	if cint(max_publish_qty) > 0:
+		guarded_qty = min(guarded_qty, cint(max_publish_qty))
+	return guarded_qty
+
+
 def get_sku_inventory_data(
 	pricing: dict,
 	zero_stock_proxy_skus: set | None = None,
@@ -347,6 +354,8 @@ def get_sku_inventory_data(
 	supplier_data_map: dict | None = None,
 	lead_time_map: dict | None = None,
 	bundle_buildable_map: dict | None = None,
+	reserve_pct: float = 0,
+	max_publish_qty: int = 0,
 ) -> dict:
 	stock_info = (
 		stock_info_map.get(pricing.proxy_sku, {})
@@ -433,6 +442,9 @@ def get_sku_inventory_data(
 		# Defensive cap; redundant while get_stock_info already sources bundle mfn_stock from buildable.
 		if buildable_bundles is not None and buildable_bundles < warehouse_qty * pack_size:
 			warehouse_qty = 0
+
+	# Reserve/cap applies to own warehouse stock only, never to backorder/supplier quantity.
+	warehouse_qty = apply_stock_guard(warehouse_qty, reserve_pct, max_publish_qty)
 
 	quantity = resolved_supplier_qty if is_backorder else warehouse_qty
 
@@ -622,6 +634,12 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 		"Navgold Settings", "Navgold Settings", "send_min_price_to_amazon"
 	)
 
+	guard_settings = frappe.get_cached_value(
+		"Navgold Settings", "Navgold Settings", ["stock_reserve_pct", "max_publish_qty"], as_dict=True
+	)
+	reserve_pct = flt(guard_settings.stock_reserve_pct)
+	max_publish_qty = cint(guard_settings.max_publish_qty)
+
 	for pricing in pricing_records:
 		try:
 			inventory_data = get_sku_inventory_data(
@@ -632,6 +650,8 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 				supplier_data_map,
 				lead_time_map,
 				bundle_buildable_map,
+				reserve_pct,
+				max_publish_qty,
 			)
 		except Exception as e:
 			frappe.log_error(f"Skipping inventory patches for {pricing.name}: {e!s}", "Amazon Feed Builder")
