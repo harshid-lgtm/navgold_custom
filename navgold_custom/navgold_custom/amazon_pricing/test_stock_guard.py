@@ -11,7 +11,7 @@ from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import (
 
 
 class TestStockGuard(IntegrationTestCase):
-	def test_reserve_pct_reduces_own_qty(self):
+	def test_reserve_percentage_reduces_own_qty(self):
 		self.assertEqual(apply_stock_guard(100, 10, 0), 90)
 
 	def test_max_cap_applies(self):
@@ -38,7 +38,7 @@ class TestStockGuard(IntegrationTestCase):
 	def test_cap_above_qty_is_noop(self):
 		self.assertEqual(apply_stock_guard(40, 0, 100), 40)
 
-	def build_inventory(self, pricing_overrides, reserve_pct=0, max_publish_qty=0, mfn_stock=100):
+	def build_inventory(self, pricing_overrides, reserve_percentage=0, max_publish_qty=0, mfn_stock=100):
 		pricing = frappe._dict(
 			{
 				"proxy_sku": "GUARD-TEST-SKU",
@@ -80,17 +80,17 @@ class TestStockGuard(IntegrationTestCase):
 			supplier_data_map,
 			lead_time_map,
 			bundle_buildable_map,
-			reserve_pct,
+			reserve_percentage,
 			max_publish_qty,
 		)
 
 	def test_own_stock_reduced_via_inventory_data(self):
-		inventory = self.build_inventory({"active_strategy": "default"}, reserve_pct=10, mfn_stock=100)
+		inventory = self.build_inventory({"active_strategy": "default"}, reserve_percentage=10, mfn_stock=100)
 		self.assertEqual(inventory["quantity"], 90)
 
 	def test_own_stock_capped_via_inventory_data(self):
 		inventory = self.build_inventory(
-			{"active_strategy": "default"}, reserve_pct=10, max_publish_qty=50, mfn_stock=100
+			{"active_strategy": "default"}, reserve_percentage=10, max_publish_qty=50, mfn_stock=100
 		)
 		self.assertEqual(inventory["quantity"], 50)
 
@@ -101,6 +101,6 @@ class TestStockGuard(IntegrationTestCase):
 	def test_backorder_qty_not_reduced_by_guard(self):
 		# Backorder publishes supplier stock (70); the guard must leave it untouched.
 		inventory = self.build_inventory(
-			{"active_strategy": "backorder"}, reserve_pct=50, max_publish_qty=10, mfn_stock=100
+			{"active_strategy": "backorder"}, reserve_percentage=50, max_publish_qty=10, mfn_stock=100
 		)
 		self.assertEqual(inventory["quantity"], 70)
