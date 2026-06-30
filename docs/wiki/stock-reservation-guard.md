@@ -23,7 +23,9 @@ if max_publish_qty > 0:
     published = min(published, max_publish_qty)
 ```
 
-The reserve is applied first (and always floors down), then the cap.
+The reserve is applied first (and always floors down), then the cap. With binary floating point the
+floor errs toward reserving slightly more rather than less, which is the safe direction for a guard.
+A negative `reserve_pct` is clamped to 0 (never inflates), and any value above 100 publishes nothing.
 
 ## Scope
 

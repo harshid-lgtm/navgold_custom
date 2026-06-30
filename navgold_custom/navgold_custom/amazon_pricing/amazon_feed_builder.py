@@ -340,7 +340,10 @@ def calculate_adjusted_qty(raw_qty: float, pool_size: int, pack_size: float) -> 
 
 
 def apply_stock_guard(qty: int, reserve_pct: float, max_publish_qty: int) -> int:
-	guarded_qty = max(math.floor(flt(qty) * (1 - flt(reserve_pct) / 100)), 0)
+	# Clamp defensively: a negative reserve would inflate the published qty and oversell on Amazon,
+	# and form-level non_negative won't stop a console/API/db_set write. >100 falls out as publish-nothing.
+	reserve_pct = max(0.0, min(flt(reserve_pct), 100.0))
+	guarded_qty = max(math.floor(flt(qty) * (1 - reserve_pct / 100)), 0)
 	if cint(max_publish_qty) > 0:
 		guarded_qty = min(guarded_qty, cint(max_publish_qty))
 	return guarded_qty
@@ -630,15 +633,15 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 
 	bundle_buildable_map = get_buildable_bundle_qty_map(all_item_codes) if all_item_codes else {}
 
-	send_min_price = frappe.get_cached_value(
-		"Navgold Settings", "Navgold Settings", "send_min_price_to_amazon"
+	settings = frappe.get_cached_value(
+		"Navgold Settings",
+		"Navgold Settings",
+		["send_min_price_to_amazon", "stock_reserve_pct", "max_publish_qty"],
+		as_dict=True,
 	)
-
-	guard_settings = frappe.get_cached_value(
-		"Navgold Settings", "Navgold Settings", ["stock_reserve_pct", "max_publish_qty"], as_dict=True
-	)
-	reserve_pct = flt(guard_settings.stock_reserve_pct)
-	max_publish_qty = cint(guard_settings.max_publish_qty)
+	send_min_price = settings.send_min_price_to_amazon
+	reserve_pct = flt(settings.stock_reserve_pct)
+	max_publish_qty = cint(settings.max_publish_qty)
 
 	for pricing in pricing_records:
 		try:

@@ -24,6 +24,13 @@ class TestStockGuard(IntegrationTestCase):
 	def test_defaults_are_noop(self):
 		self.assertEqual(apply_stock_guard(100, 0, 0), 100)
 
+	def test_negative_reserve_clamped_to_zero(self):
+		# A negative reserve must never inflate published qty (oversell guard).
+		self.assertEqual(apply_stock_guard(100, -10, 0), 100)
+
+	def test_reserve_over_100_publishes_nothing(self):
+		self.assertEqual(apply_stock_guard(100, 150, 0), 0)
+
 	def test_reserve_floors_down(self):
 		# floor(33 * 0.85) = floor(28.05) = 28
 		self.assertEqual(apply_stock_guard(33, 15, 0), 28)

@@ -510,7 +510,8 @@
 			"description": "Hold back this % of own warehouse stock from the Amazon feed.",
 			"fieldname": "stock_reserve_pct",
 			"fieldtype": "Percent",
-			"label": "Stock Reserve %"
+			"label": "Stock Reserve %",
+			"non_negative": 1
 		},
 		{
 			"default": "0",
