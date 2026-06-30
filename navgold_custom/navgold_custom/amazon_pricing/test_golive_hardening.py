@@ -92,6 +92,9 @@ class TestGoliveHardening(IntegrationTestCase):
 			{
 				"enable_pricing_sync": 1,
 				"repricer_enabled": 1,
+				# schedule_submit_active_repricer short-circuits in Dry Run (the bare-site default),
+				# so this Live-path stagger-guard test must run in Live mode explicitly.
+				"pricing_sync_mode": "Live",
 				"last_strategy_refresh_at": add_to_date(now, minutes=-5),
 				"last_repricer_submit_at": add_to_date(now, minutes=-20),
 			},
