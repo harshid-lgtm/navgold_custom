@@ -17,3 +17,16 @@ class CostType(Document):
 		cost_type_name: DF.Data
 		is_purchase_cost: DF.Check
 	# end: auto-generated types
+
+	# Price calculation reads cost types through a cached map; refresh it on change.
+	def on_update(self):
+		clear_cost_type_map_cache()
+
+	def on_trash(self):
+		clear_cost_type_map_cache()
+
+
+def clear_cost_type_map_cache():
+	from navgold_custom.navgold_custom.amazon_pricing.price_calculator import get_cost_type_map
+
+	get_cost_type_map.clear_cache()
