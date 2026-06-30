@@ -6,6 +6,8 @@ on the published number, without touching backorder/supplier quantities.
 
 It is configured globally in **Navgold Settings → Stock → Stock Publishing Guard**.
 
+![Stock reservation guard](images/stock-reservation-guard.png)
+
 ## Settings
 
 | Field | Type | Default | Meaning |
