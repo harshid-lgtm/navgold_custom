@@ -2,6 +2,10 @@ import frappe
 
 
 def execute():
+	# Field is synced by sync_customizations, which runs after this patch; nothing to backfill yet.
+	if not frappe.db.has_column("Supplier", "custom_sfp_eligible"):
+		return
+
 	eligible_suppliers = frappe.get_all(
 		"Supplier",
 		filters={"custom_sfp_eligible": 1},

@@ -28,9 +28,16 @@ except ImportError:
 try:
 	from erpnext.stock.doctype.packed_item.packed_item import get_product_bundle_items
 except ImportError:
-	from erpnext.stock.doctype.packed_item.packed_item import (
-		get_product_bundle_items_by_name as get_product_bundle_items,
-	)
+	# v17+: Product Bundle is versioned, no longer named by item_code; resolve active version first.
+	from erpnext.selling.doctype.product_bundle.product_bundle import get_active_product_bundle
+	from erpnext.stock.doctype.packed_item.packed_item import get_product_bundle_items_by_name
+
+	def get_product_bundle_items(item_code):
+		bundle_name = get_active_product_bundle(item_code)
+		if not bundle_name:
+			return []
+		return get_product_bundle_items_by_name(bundle_name)
+
 
 __all__ = [
 	"create_delivery_note",
