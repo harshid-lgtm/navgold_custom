@@ -299,6 +299,7 @@ doc_events = {
 	},
 	"Supplier": {
 		"validate": "navgold_custom.navgold_custom.custom_script.supplier.supplier.validate_lead_time",
+		"on_update": "navgold_custom.navgold_custom.custom_script.supplier.supplier.propagate_sfp_eligibility",
 	},
 	"Sales Order": {
 		"on_submit": [

@@ -47,7 +47,7 @@ def get_top_supplier_for_item(item_code: str) -> dict | None:
 	suppliers = frappe.get_all(
 		"Supplier Item Price and Stock",
 		filters={"item": item_code, "purchase_blocked": 0},
-		fields=["supplier", "stock_qty", "rank", "price"],
+		fields=["supplier", "stock_qty", "rank", "price", "sfp"],
 		order_by="rank asc",
 		limit=1,
 	)
@@ -58,7 +58,7 @@ def get_best_in_stock_supplier_for_item(item_code: str) -> dict | None:
 	suppliers = frappe.get_all(
 		"Supplier Item Price and Stock",
 		filters={"item": item_code, "purchase_blocked": 0},
-		fields=["supplier", "stock_qty", "rank", "price"],
+		fields=["supplier", "stock_qty", "rank", "price", "sfp"],
 		order_by="rank asc",
 	)
 	if not suppliers:
@@ -204,7 +204,7 @@ def get_supplier_data_batch(item_codes: list) -> dict:
 	all_suppliers = frappe.get_all(
 		"Supplier Item Price and Stock",
 		filters={"item": ["in", item_codes], "purchase_blocked": 0},
-		fields=["supplier", "stock_qty", "rank", "price", "item"],
+		fields=["supplier", "stock_qty", "rank", "price", "item", "sfp"],
 		order_by="item asc, rank asc",
 	)
 
@@ -457,6 +457,8 @@ def get_sku_inventory_data(
 			frappe.db.get_value("Supplier", resolved_supplier.supplier, "custom_sfp_eligible")
 		)
 
+	resolved_supplier_sfp = bool(resolved_supplier.get("sfp")) if resolved_supplier else False
+
 	resolved_supplier_stock = resolved_supplier.get("stock_qty", 0) if resolved_supplier else 0
 	resolved_supplier_qty = calculate_adjusted_qty(resolved_supplier_stock, pool_size, pack_size)
 
@@ -486,7 +488,7 @@ def get_sku_inventory_data(
 	if is_sfp:
 		is_two_day = (sku_shipping_group_choice or "").strip().lower() == "twoday"
 		shipping_group = SHIPPING_GROUPS["two_day"] if is_two_day else SHIPPING_GROUPS["sfp"]
-	elif is_backorder and supplier_sfp_eligible and restock_date:
+	elif is_backorder and supplier_sfp_eligible and resolved_supplier_sfp and restock_date:
 		shipping_group = SHIPPING_GROUPS["sfp"]
 	else:
 		shipping_group = SHIPPING_GROUPS["main_revised"]

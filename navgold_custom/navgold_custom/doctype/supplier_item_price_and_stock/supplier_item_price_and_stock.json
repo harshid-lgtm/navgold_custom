@@ -18,6 +18,7 @@
 		"price",
 		"item_price",
 		"purchase_blocked",
+		"sfp",
 		"rank",
 		"section_break_hkks",
 		"offers"
@@ -99,6 +100,14 @@
 			"fieldtype": "Check",
 			"in_standard_filter": 1,
 			"label": "Purchase Blocked?"
+		},
+		{
+			"default": "0",
+			"description": "When set, a backorder from this supplier-item lists on the SFP shipping group (if the supplier is Prime/SFP eligible and a restock date is available). Defaults from the supplier's Prime/SFP Eligible flag on new rows.",
+			"fieldname": "sfp",
+			"fieldtype": "Check",
+			"in_standard_filter": 1,
+			"label": "SFP Eligible"
 		},
 		{
 			"fieldname": "section_break_pasj",

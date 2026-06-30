@@ -29,3 +29,34 @@ def validate_lead_time(doc, method=None):
 				", ".join(sorted(missing_days, key=DAYS_OF_WEEK.index))
 			)
 		)
+
+
+def propagate_sfp_eligibility(doc, method=None):
+	if not doc.has_value_changed("custom_sfp_eligible") or not doc.custom_sfp_eligible:
+		# Turning the flag off is intentionally non-destructive: the live
+		# supplier-level gate in the feed builder already neutralizes per-row
+		# SFP flags, so existing rows keep their manually-set values.
+		return
+
+	row_count = frappe.db.count("Supplier Item Price and Stock", {"supplier": doc.name})
+	if not row_count:
+		return
+
+	if row_count > 100:
+		frappe.enqueue(
+			set_sfp_eligible_for_supplier_items,
+			supplier=doc.name,
+			now=frappe.flags.in_test,
+		)
+	else:
+		set_sfp_eligible_for_supplier_items(doc.name)
+
+
+def set_sfp_eligible_for_supplier_items(supplier):
+	frappe.db.set_value(
+		"Supplier Item Price and Stock",
+		{"supplier": supplier},
+		"sfp",
+		1,
+		update_modified=False,
+	)

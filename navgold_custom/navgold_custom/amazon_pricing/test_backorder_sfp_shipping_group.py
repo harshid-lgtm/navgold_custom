@@ -37,7 +37,7 @@ def inventory_for_backorder(supplier_sfp_eligible, has_restock_date):
 			"restock_date": "2026-07-10" if has_restock_date else None,
 		}
 	}
-	resolved_supplier = frappe._dict(supplier="TEST-SUPPLIER", stock_qty=5, rank=1, price=10)
+	resolved_supplier = frappe._dict(supplier="TEST-SUPPLIER", stock_qty=5, rank=1, price=10, sfp=1)
 	supplier_data_map = {
 		"TEST-ITEM": {"top_supplier": resolved_supplier, "in_stock_supplier": resolved_supplier}
 	}

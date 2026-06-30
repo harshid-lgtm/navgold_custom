@@ -29,6 +29,7 @@ class SupplierItemPriceandStock(Document):
 		price: DF.Currency
 		purchase_blocked: DF.Check
 		rank: DF.Int
+		sfp: DF.Check
 		stock_qty: DF.Int
 		supplier: DF.Link
 		supplier_part_number: DF.Data | None
@@ -36,6 +37,8 @@ class SupplierItemPriceandStock(Document):
 	# end: auto-generated types
 
 	def before_insert(self):
+		if not self.sfp:
+			self.sfp = frappe.db.get_value("Supplier", self.supplier, "custom_sfp_eligible")
 		if not frappe.db.exists(
 			"UOM Conversion Detail", {"parenttype": "Item", "parent": self.item, "uom": self.uom}
 		):
