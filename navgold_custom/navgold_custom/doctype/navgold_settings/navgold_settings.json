@@ -70,6 +70,9 @@
 		"stock_publishing_section",
 		"stock_publishing_mode",
 		"zero_stock_items",
+		"stock_publishing_guard_section",
+		"stock_reserve_pct",
+		"max_publish_qty",
 		"afn_stock_sync_section",
 		"enable_afn_stock_sync",
 		"last_afn_stock_synced_at",
@@ -496,6 +499,27 @@
 			"fieldtype": "Table",
 			"label": "Zero Stock Items",
 			"options": "Navgold Zero Stock Item"
+		},
+		{
+			"fieldname": "stock_publishing_guard_section",
+			"fieldtype": "Section Break",
+			"label": "Stock Publishing Guard"
+		},
+		{
+			"default": "0",
+			"description": "Hold back this % of own warehouse stock from the Amazon feed.",
+			"fieldname": "stock_reserve_pct",
+			"fieldtype": "Percent",
+			"label": "Stock Reserve %",
+			"non_negative": 1
+		},
+		{
+			"default": "0",
+			"description": "Ceiling on published own-stock quantity. 0 = no cap.",
+			"fieldname": "max_publish_qty",
+			"fieldtype": "Int",
+			"label": "Max Publish Qty",
+			"non_negative": 1
 		},
 		{
 			"fieldname": "afn_stock_sync_section",

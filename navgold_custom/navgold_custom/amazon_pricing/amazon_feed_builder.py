@@ -339,6 +339,15 @@ def calculate_adjusted_qty(raw_qty: float, pool_size: int, pack_size: float) -> 
 	return max(math.floor(raw_qty / pool_size / pack_size), 0)
 
 
+def apply_stock_guard(qty: int, reserve_percentage: float, max_publish_qty: int) -> int:
+	reserve_percentage = max(0.0, min(flt(reserve_percentage), 100.0))
+	max_publish_qty = cint(max_publish_qty)
+	guarded_qty = max(math.floor(flt(qty) * (1 - reserve_percentage / 100)), 0)
+	if max_publish_qty > 0:
+		guarded_qty = min(guarded_qty, max_publish_qty)
+	return guarded_qty
+
+
 def get_sku_inventory_data(
 	pricing: dict,
 	zero_stock_proxy_skus: set | None = None,
@@ -347,6 +356,8 @@ def get_sku_inventory_data(
 	supplier_data_map: dict | None = None,
 	lead_time_map: dict | None = None,
 	bundle_buildable_map: dict | None = None,
+	reserve_percentage: float = 0,
+	max_publish_qty: int = 0,
 ) -> dict:
 	stock_info = (
 		stock_info_map.get(pricing.proxy_sku, {})
@@ -434,7 +445,12 @@ def get_sku_inventory_data(
 		if buildable_bundles is not None and buildable_bundles < warehouse_qty * pack_size:
 			warehouse_qty = 0
 
-	quantity = resolved_supplier_qty if is_backorder else warehouse_qty
+	# Reserve/cap applies to own warehouse stock only, never to backorder/supplier quantity.
+	quantity = (
+		resolved_supplier_qty
+		if is_backorder
+		else apply_stock_guard(warehouse_qty, reserve_percentage, max_publish_qty)
+	)
 
 	if zero_stock_proxy_skus is not None and pricing.proxy_sku in zero_stock_proxy_skus:
 		quantity = 0
@@ -618,9 +634,15 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 
 	bundle_buildable_map = get_buildable_bundle_qty_map(all_item_codes) if all_item_codes else {}
 
-	send_min_price = frappe.get_cached_value(
-		"Navgold Settings", "Navgold Settings", "send_min_price_to_amazon"
+	settings = frappe.get_cached_value(
+		"Navgold Settings",
+		"Navgold Settings",
+		["send_min_price_to_amazon", "stock_reserve_pct", "max_publish_qty"],
+		as_dict=True,
 	)
+	send_min_price = settings.send_min_price_to_amazon
+	reserve_percentage = flt(settings.stock_reserve_pct)
+	max_publish_qty = cint(settings.max_publish_qty)
 
 	for pricing in pricing_records:
 		try:
@@ -632,6 +654,8 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 				supplier_data_map,
 				lead_time_map,
 				bundle_buildable_map,
+				reserve_percentage,
+				max_publish_qty,
 			)
 		except Exception as e:
 			frappe.log_error(f"Skipping inventory patches for {pricing.name}: {e!s}", "Amazon Feed Builder")
