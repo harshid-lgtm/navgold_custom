@@ -34,7 +34,7 @@ from navgold_custom.navgold_custom.doctype.supplier_item_price_and_stock.supplie
 	get_supplier_prices,
 )
 from navgold_custom.navgold_custom.erpnext_compat import get_product_bundle_items
-from navgold_custom.navgold_custom.utils import get_conversion_factor
+from navgold_custom.navgold_custom.utils import calculate_adjusted_qty, get_conversion_factor
 
 SHIPPING_GROUPS = {
 	"sfp": "57d54587-7341-4c9f-b3f9-546c8d798b21",
@@ -344,12 +344,6 @@ def build_proxy_sku_info_map(proxy_sku_names: list) -> dict:
 		}
 
 	return result
-
-
-def calculate_adjusted_qty(raw_qty: float, pool_size: int, pack_size: float) -> int:
-	if pool_size <= 0 or pack_size <= 0:
-		return 0
-	return max(math.floor(raw_qty / pool_size / pack_size), 0)
 
 
 def apply_stock_guard(qty: int, reserve_percentage: float, max_publish_qty: int) -> int:
