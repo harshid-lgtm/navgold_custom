@@ -53,6 +53,8 @@ def propagate_sfp_eligibility(doc, method=None):
 
 
 def set_sfp_eligible_for_supplier_items(supplier):
+	# ponytail: re-enabling a supplier re-marks all its rows sfp=1 by design (spec),
+	# wiping prior per-item opt-outs; revisit if opt-outs must survive a disable/re-enable cycle.
 	frappe.db.set_value(
 		"Supplier Item Price and Stock",
 		{"supplier": supplier},

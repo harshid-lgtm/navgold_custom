@@ -29,8 +29,10 @@ restock date there is nothing to promise the customer, so the listing stays `mai
 ## Auto-propagation and manual opt-out
 
 - **New rows inherit the supplier flag.** When a Supplier Item Price and Stock row is
-  created, its `sfp` flag defaults to the parent supplier's `custom_sfp_eligible`. A new
-  row under a Prime supplier starts Prime-eligible; under a non-Prime supplier it starts off.
+  created without an explicit `sfp` value, it defaults to the parent supplier's
+  `custom_sfp_eligible`. A new row under a Prime supplier starts Prime-eligible; under a
+  non-Prime supplier it starts off. An `sfp` value supplied at creation (including an
+  explicit `0`) is honored as-is and overrides inheritance.
 - **Marking a supplier Prime back-fills its rows.** When `custom_sfp_eligible` flips on, all
   existing rows for that supplier are set to `sfp = 1` in one bulk update. The item gate
   therefore starts in lockstep with the supplier.

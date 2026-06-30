@@ -102,8 +102,7 @@
 			"label": "Purchase Blocked?"
 		},
 		{
-			"default": "0",
-			"description": "When set, a backorder from this supplier-item lists on the SFP shipping group (if the supplier is Prime/SFP eligible and a restock date is available). Defaults from the supplier's Prime/SFP Eligible flag on new rows.",
+			"description": "When set, a backorder from this supplier-item lists on the SFP shipping group (if the supplier is Prime/SFP eligible and a restock date is available). Defaults from the supplier's Prime/SFP Eligible flag on new rows when left unset.",
 			"fieldname": "sfp",
 			"fieldtype": "Check",
 			"in_standard_filter": 1,

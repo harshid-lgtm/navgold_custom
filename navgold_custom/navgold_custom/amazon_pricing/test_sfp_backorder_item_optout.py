@@ -111,31 +111,43 @@ def make_item(item_code):
 	return item_code
 
 
-def make_sips(supplier, item, sfp=None):
-	row = frappe.new_doc("Supplier Item Price and Stock")
-	row.item = item
-	row.supplier = supplier
-	row.uom = "Nos"
-	row.stock_qty = 5
-	row.currency = "GBP"
-	row.price = 10
-	if sfp is not None:
-		row.sfp = sfp
-	row.insert()
-	return row
+SFP_OMITTED = object()
+
+
+def make_sips(supplier, item, sfp=SFP_OMITTED):
+	data = {
+		"doctype": "Supplier Item Price and Stock",
+		"item": item,
+		"supplier": supplier,
+		"uom": "Nos",
+		"stock_qty": 5,
+		"currency": "GBP",
+		"price": 10,
+	}
+	# Only set sfp when the caller provides it, so an omitted value stays genuinely
+	# unset and exercises the supplier-inheritance path.
+	if sfp is not SFP_OMITTED:
+		data["sfp"] = sfp
+	return frappe.get_doc(data).insert()
 
 
 class TestSfpInheritanceAndPropagation(IntegrationTestCase):
-	def test_new_row_under_prime_supplier_inherits_sfp_on(self):
+	def test_unset_sfp_under_prime_supplier_inherits_on(self):
 		supplier = make_supplier("_Test SFP Prime Supplier", custom_sfp_eligible=1)
 		item = make_item("_Test SFP Item A")
 		row = make_sips(supplier.name, item)
 		self.assertEqual(row.sfp, 1)
 
-	def test_new_row_under_non_prime_supplier_inherits_sfp_off(self):
+	def test_unset_sfp_under_non_prime_supplier_inherits_off(self):
 		supplier = make_supplier("_Test SFP Plain Supplier", custom_sfp_eligible=0)
 		item = make_item("_Test SFP Item B")
 		row = make_sips(supplier.name, item)
+		self.assertEqual(row.sfp, 0)
+
+	def test_explicit_sfp_off_under_prime_supplier_stays_off(self):
+		supplier = make_supplier("_Test SFP Optout Supplier", custom_sfp_eligible=1)
+		item = make_item("_Test SFP Item D")
+		row = make_sips(supplier.name, item, sfp=0)
 		self.assertEqual(row.sfp, 0)
 
 	def test_marking_supplier_prime_propagates_to_existing_rows(self):
@@ -148,3 +160,19 @@ class TestSfpInheritanceAndPropagation(IntegrationTestCase):
 		supplier.save()
 
 		self.assertEqual(frappe.db.get_value("Supplier Item Price and Stock", row.name, "sfp"), 1)
+
+	def test_backfill_patch_marks_existing_prime_supplier_rows(self):
+		from navgold_custom.patches.v1.backfill_sfp_eligible_on_supplier_items import execute
+
+		supplier = make_supplier("_Test SFP Backfill Supplier", custom_sfp_eligible=1)
+		item = make_item("_Test SFP Item E")
+		# Pre-existing row left at sfp=0, as every row was after the field's initial migration.
+		row = make_sips(supplier.name, item, sfp=0)
+		self.assertEqual(row.sfp, 0)
+
+		execute()
+
+		self.assertEqual(frappe.db.get_value("Supplier Item Price and Stock", row.name, "sfp"), 1)
+
+		inventory = inventory_for_backorder(supplier_sfp_eligible=True, row_sfp=True, has_restock_date=True)
+		self.assertEqual(inventory["shipping_group"], SHIPPING_GROUPS["sfp"])
