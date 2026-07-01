@@ -482,7 +482,15 @@ def get_sku_inventory_data(
 	if is_sfp:
 		is_two_day = (sku_shipping_group_choice or "").strip().lower() == "twoday"
 		shipping_group = SHIPPING_GROUPS["two_day"] if is_two_day else SHIPPING_GROUPS["sfp"]
-	elif is_backorder and supplier_sfp_eligible and resolved_supplier_sfp and restock_date:
+	elif (
+		is_backorder
+		and supplier_sfp_eligible
+		and resolved_supplier_sfp
+		and (restock_date or resolved_supplier_stock > 0)
+	):
+		# Backorder can be triggered by "no own stock" (not just a restock date). A prime + SFP
+		# supplier who has stock can fulfill now, so list SFP even without a restock date; only
+		# fall to Main Revised when the supplier can neither ship-now nor promise a restock.
 		shipping_group = SHIPPING_GROUPS["sfp"]
 	else:
 		shipping_group = SHIPPING_GROUPS["main_revised"]
