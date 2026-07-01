@@ -24,16 +24,10 @@ def after_install():
 def before_tests():
 	import frappe
 
-	# CI runs the suite on a fresh bare site (frappe + erpnext + navgold_custom). Frappe's own
-	# before_tests seeds the site by completing the setup wizard only when a single app is
-	# installed, so with erpnext + navgold_custom present it bails and leaves the site with no
-	# Company / Warehouse / UOM "Nos" / Item Group tree / Price List. Complete the wizard here
-	# to reuse erpnext's canonical seed suite instead of hand-rolling fixtures.
-	#
-	# We call setup_complete directly rather than frappe.utils.install.complete_setup_wizard
-	# because that helper omits the fiscal-year dates; erpnext then fails Fiscal Year validation
-	# (end must be exactly one year after start) and aborts Company creation, leaving the site
-	# with no Company or Warehouses.
+	# Frappe's before_tests seeds via the wizard only when a single app is installed, so our 3-app
+	# CI site gets none. Call setup_complete directly (not complete_setup_wizard) to pass explicit
+	# fiscal-year dates — without them erpnext's Fiscal Year validation fails and silently aborts
+	# Company creation.
 	if not frappe.is_setup_complete():
 		from frappe.desk.page.setup_wizard.setup_wizard import setup_complete
 		from frappe.utils import getdate
@@ -62,9 +56,8 @@ def before_tests():
 		enable_all_roles_and_domains()
 		set_defaults_for_tests()
 
-		# validate() requires buying_price_list once amazon_pricing_enabled is on, but tests flip
-		# that flag via change_settings without supplying a price list. Seed the singleton with the
-		# Standard Buying list the wizard already created so those saves pass the guard.
+		# Tests enable amazon_pricing_enabled without setting a price list, which validate() now
+		# requires — seed the wizard's Standard Buying list so those saves pass.
 		if frappe.db.exists("Price List", "Standard Buying"):
 			frappe.db.set_single_value("Navgold Settings", "buying_price_list", "Standard Buying")
 
