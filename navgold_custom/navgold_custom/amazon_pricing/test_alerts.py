@@ -86,10 +86,24 @@ class NavgoldAlertsTestBase(IntegrationTestCase):
 		pricing.insert(ignore_permissions=True)
 		return item_code
 
+	def create_test_customer(self):
+		# Create our own customer — the bare CI site has no Customer seeded (only the wizard's
+		# Company/Warehouse/Item Group), so reusing an existing one only works on the restored dev site.
+		customer = frappe.new_doc("Customer")
+		customer.customer_name = f"Alert CB Customer {frappe.generate_hash(length=8)}"
+		customer.customer_group = frappe.db.get_value(
+			"Customer Group", {"is_group": 0}, "name"
+		) or frappe.db.get_value("Customer Group", {}, "name")
+		customer.territory = frappe.db.get_value("Territory", {"is_group": 0}, "name") or frappe.db.get_value(
+			"Territory", {}, "name"
+		)
+		customer.insert(ignore_permissions=True)
+		return customer.name
+
 	def create_amazon_sales_order(self, item_code, rate, qty=1, submit=False):
 		warehouse = frappe.db.get_value("Warehouse", {"is_group": 0, "disabled": 0}, "name")
 		so = frappe.new_doc("Sales Order")
-		so.customer = frappe.db.get_value("Customer", {"disabled": 0}, "name")
+		so.customer = self.create_test_customer()
 		so.company = frappe.db.get_value("Company", {}, "name")
 		so.transaction_date = nowdate()
 		so.delivery_date = add_days(nowdate(), 5)
