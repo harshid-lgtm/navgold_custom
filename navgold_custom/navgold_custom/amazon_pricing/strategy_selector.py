@@ -76,6 +76,17 @@ def get_stock_info(proxy_sku: str) -> dict:
 	"""
 	proxy = frappe.get_cached_doc("Proxy SKU", proxy_sku)
 
+	if not proxy.item:
+		# An item-less Proxy SKU has no item to compute stock/conversion for; treat it as out of
+		# stock (mirrors the item-less guard in get_stock_info_batch).
+		return {
+			"fba_stock": 0,
+			"mfn_stock": 0,
+			"has_restock_date": False,
+			"restock_date": None,
+			"total_stock": 0,
+		}
+
 	sp_api_settings = frappe.get_single("Amazon SP API Settings")
 
 	fba_stock = get_fba_stock_map([proxy.item], sp_api_settings.afn_warehouse).get(proxy.item, 0)
