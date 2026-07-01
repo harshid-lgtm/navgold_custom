@@ -206,7 +206,7 @@ fixtures = [
 # Testing
 # -------
 
-# before_tests = "navgold_custom.install.before_tests"
+before_tests = "navgold_custom.install.before_tests"
 
 # Overriding Methods
 # ------------------------------
