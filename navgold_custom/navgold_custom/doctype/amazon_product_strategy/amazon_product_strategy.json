@@ -11,6 +11,7 @@
 		"is_active",
 		"column_break_strategy",
 		"repricer_rule",
+		"item",
 		"margin_section",
 		"min_margin",
 		"max_margin",
@@ -41,6 +42,15 @@
 			"label": "Proxy SKU",
 			"options": "Proxy SKU",
 			"reqd": 1
+		},
+		{
+			"fetch_from": "proxy_sku.item",
+			"fieldname": "item",
+			"fieldtype": "Link",
+			"in_standard_filter": 1,
+			"label": "Item",
+			"options": "Item",
+			"read_only": 1
 		},
 		{
 			"default": "1",
@@ -148,7 +158,7 @@
 	"grid_page_length": 50,
 	"index_web_pages_for_search": 1,
 	"links": [],
-	"modified": "2026-02-02 12:00:00.000000",
+	"modified": "2026-07-01 07:49:31.393333",
 	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Amazon Product Strategy",
