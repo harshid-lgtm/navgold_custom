@@ -14,7 +14,25 @@ from navgold_custom.navgold_custom.utils import (
 )
 
 
+def create_active_pricing():
+	# asin left unset so Proxy SKU.validate's duplicate-active check never trips.
+	proxy_sku = frappe.new_doc("Proxy SKU")
+	proxy_sku.is_active = 1
+	proxy_sku.insert()
+
+	pricing = frappe.new_doc("Amazon Product Pricing")
+	pricing.proxy_sku = proxy_sku.name
+	pricing.is_active = 1
+	pricing.insert()
+	return pricing.name
+
+
 class TestGoliveHardening(IntegrationTestCase):
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.pricing_name = create_active_pricing()
+
 	@change_settings("Navgold Settings", {"freeze_amazon_outbound": 1})
 	def test_freeze_blocks_outbound(self):
 		self.assertRaises(AmazonFrozenError, block_if_amazon_frozen)
@@ -129,15 +147,16 @@ class TestGoliveHardening(IntegrationTestCase):
 
 	@change_settings("Navgold Settings", {"enable_pricing_sync": 0})
 	def test_submit_button_requires_pricing_sync_enabled(self):
-		pricing_name = frappe.db.get_value("Amazon Product Pricing", {"is_active": 1})
-		if not pricing_name:
-			self.skipTest("no pricing fixture available")
-
-		pricing = frappe.get_doc("Amazon Product Pricing", pricing_name)
+		pricing = frappe.get_doc("Amazon Product Pricing", self.pricing_name)
 		self.assertRaises(frappe.ValidationError, pricing.submit_to_amazon)
 
 
 class TestApprovalGate(IntegrationTestCase):
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.pricing_name = create_active_pricing()
+
 	@change_settings("Navgold Settings", {"pricing_sync_mode": "Dry Run"})
 	def test_dry_run_blocks_push(self):
 		self.assertRaises(PricingNotApprovedError, block_if_pricing_not_approved)
@@ -186,9 +205,7 @@ class TestApprovalGate(IntegrationTestCase):
 	def test_repricer_gate_exception_marks_log_skipped(self):
 		from navgold_custom.navgold_custom.amazon_pricing import repricer_client
 
-		pricing_name = frappe.db.get_value("Amazon Product Pricing", {"is_active": 1})
-		if not pricing_name:
-			self.skipTest("no pricing fixture available")
+		pricing_name = self.pricing_name
 
 		with change_settings("Navgold Settings", {"repricer_enabled": 1}):
 			# A gate exception at the transport must mark the log "Skipped" (not "Error"), not log_error, not re-raise.
