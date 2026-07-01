@@ -10,6 +10,8 @@ from navgold_custom.navgold_custom.amazon_pricing import manual_price_push
 from navgold_custom.navgold_custom.amazon_pricing.manual_price_push import (
 	MAX_PRICE_RATIO,
 	SANE_MAX_PRICE,
+	build_feed,
+	build_purchasable_offer,
 	push_manual_prices,
 	validate_updates,
 )
@@ -119,3 +121,43 @@ class TestManualPricePushBandSync(IntegrationTestCase):
 			"Amazon Product Pricing",
 			{"KNOWN-1": {"current_min_price": 8.86, "current_max_price": 12.0}},
 		)
+
+
+UK_MARKETPLACE_ID = "A1F83G8C2ARO7P"
+
+
+class TestManualPushFeedBody(IntegrationTestCase):
+	@staticmethod
+	def offer_value(offer, key):
+		# purchasable_offer nests each price as key -> [ { "schedule": [ { "value_with_tax": X } ] } ]
+		return offer[key][0]["schedule"][0]["value_with_tax"]
+
+	def test_feed_body_carries_row_prices_and_header(self):
+		# The pushed numbers must land byte-for-byte in the feed: no strategy calc, no rounding drift.
+		# Row is passed straight in, so expected values ARE the row values (rounded to 2 dp).
+		row = {"sku": "TEST-SKU", "min": 8.86, "max": 12.0, "our_price": 9.5}
+
+		# orjson_dumps yields str in this build; parse_json handles str or bytes.
+		feed = frappe.parse_json(build_feed([row], "SELLER", UK_MARKETPLACE_ID))
+
+		self.assertEqual(feed["header"]["sellerId"], "SELLER")
+		self.assertEqual(feed["marketplaceIds"], [UK_MARKETPLACE_ID])
+
+		self.assertEqual(len(feed["messages"]), 1)
+		message = feed["messages"][0]
+		self.assertEqual(message["sku"], "TEST-SKU")
+		self.assertEqual(message["operationType"], "PATCH")
+
+		patches = message["patches"]
+		self.assertEqual(len(patches), 1)
+		self.assertEqual(patches[0]["path"], "/attributes/purchasable_offer")
+		offer = patches[0]["value"][0]
+
+		self.assertAlmostEqual(self.offer_value(offer, "our_price"), 9.5, places=2)
+		self.assertAlmostEqual(self.offer_value(offer, "minimum_seller_allowed_price"), 8.86, places=2)
+		self.assertAlmostEqual(self.offer_value(offer, "maximum_seller_allowed_price"), 12.0, places=2)
+
+	def test_purchasable_offer_rounds_sub_cent_min_up(self):
+		# 0.006 rounds to 0.01 at PRICE_PRECISION (2 dp); it must not silently truncate to 0.00.
+		offer = build_purchasable_offer({"min": 0.006, "max": 12.0, "our_price": 9.5})
+		self.assertAlmostEqual(self.offer_value(offer, "minimum_seller_allowed_price"), 0.01, places=2)
