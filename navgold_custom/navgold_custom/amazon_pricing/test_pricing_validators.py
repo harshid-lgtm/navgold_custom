@@ -272,6 +272,22 @@ class TestFeedBuilderPublishingMode(IntegrationTestCase):
 			patch_entry["path"] for message in feed["messages"] for patch_entry in message["patches"]
 		]
 
+	def get_single_offer(self, feed_result):
+		feed = frappe.parse_json(feed_result["feed_content"])
+		offers = [
+			patch_entry["value"][0]
+			for message in feed["messages"]
+			for patch_entry in message["patches"]
+			if patch_entry["path"] == "/attributes/purchasable_offer"
+		]
+		self.assertEqual(len(offers), 1)
+		return feed, offers[0]
+
+	@staticmethod
+	def offer_value(offer, key):
+		# purchasable_offer nests each price as key -> [ { "schedule": [ { "value_with_tax": X } ] } ]
+		return offer[key][0]["schedule"][0]["value_with_tax"]
+
 	def test_stock_only_mode_omits_price_patches(self):
 		proxy_sku = create_proxy_sku()
 		strategy = create_strategy(proxy_sku)
@@ -318,6 +334,14 @@ class TestFeedBuilderPublishingMode(IntegrationTestCase):
 		self.assertIn("/attributes/fulfillment_availability", patch_paths)
 		self.assertEqual(feed_result["blocked_validation"], [])
 
+		# Hand-derived from the fixture: purchase_cost=5.00 (Absolute), min_margin=10%, max_margin=20%.
+		# price = numerator / (denominator - margin); numerator=5.00, denominator=1.00 (no VAT/relative).
+		# min = 5.00 / (1.00 - 0.10) = 5.5556 -> 5.56 ; max = 5.00 / (1.00 - 0.20) = 6.25
+		# Both < commission_threshold (10) so no high-price adjustment.
+		_feed, offer = self.get_single_offer(feed_result)
+		self.assertAlmostEqual(self.offer_value(offer, "minimum_seller_allowed_price"), 5.56, places=2)
+		self.assertAlmostEqual(self.offer_value(offer, "maximum_seller_allowed_price"), 6.25, places=2)
+
 	def test_price_feed_always_includes_min_floor(self):
 		# Even with send_min_price_to_amazon OFF, the min floor must still ship so a
 		# downstream repricer can't drive the Amazon price below it. our_price stays gated.
@@ -347,6 +371,45 @@ class TestFeedBuilderPublishingMode(IntegrationTestCase):
 		self.assertEqual(len(offers), 1)
 		self.assertIn("minimum_seller_allowed_price", offers[0])
 		self.assertNotIn("our_price", offers[0])
+		# Same fixture band as above: min floor must still ship exactly at 5.56 even with our_price gated off.
+		self.assertAlmostEqual(self.offer_value(offers[0], "minimum_seller_allowed_price"), 5.56, places=2)
+
+	def test_send_min_price_publishes_our_price_at_max(self):
+		# With send_min_price_to_amazon ON, production sets our_price = round(final_max_price, 2).
+		# A regression that pins our_price to the MIN (5.56) instead of the MAX (6.25) must go red here.
+		proxy_sku = create_proxy_sku(selling_price=6)
+		strategy = create_strategy(proxy_sku)
+		pricing_name = create_pricing(proxy_sku, strategy)
+
+		with change_settings(
+			"Navgold Settings",
+			{
+				"amazon_publishing_mode": "Stock and Prices",
+				"pricing_publishing_mode": "Publish All Prices",
+				"price_change_threshold_percent": 50,
+				"price_change_block_direction": "Both",
+				"send_min_price_to_amazon": 1,
+			},
+		):
+			feed_result = build_pricing_feed([pricing_name], "SELLER", "MARKETPLACE")
+
+		feed, offer = self.get_single_offer(feed_result)
+		self.assertIn("our_price", offer)
+		# our_price pinned to the max of the band (6.25), NOT the min.
+		self.assertAlmostEqual(self.offer_value(offer, "our_price"), 6.25, places=2)
+		self.assertAlmostEqual(
+			self.offer_value(offer, "our_price"),
+			self.offer_value(offer, "maximum_seller_allowed_price"),
+			places=2,
+		)
+		self.assertNotAlmostEqual(
+			self.offer_value(offer, "our_price"),
+			self.offer_value(offer, "minimum_seller_allowed_price"),
+			places=2,
+		)
+		# UK/GBP marketplace indicator lives in the feed header locale (the schedule carries no
+		# explicit currency_code field in this feed shape).
+		self.assertEqual(feed["header"]["issueLocale"], "en_GB")
 
 	def test_invalid_pricing_blocked_from_price_feed(self):
 		proxy_sku = create_proxy_sku(selling_price=6)
