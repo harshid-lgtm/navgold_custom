@@ -41,7 +41,9 @@ class TestGoliveReports(IntegrationTestCase):
 			execute_below_min,
 		):
 			result = execute({})
-			self.assertGreaterEqual(len(result), 2)
+			columns, data = result[0], result[1]
+			self.assertIsInstance(columns, list)
+			self.assertIsInstance(data, list)
 
 	def test_below_min_rows_flag_deficit(self):
 		so_rows = [
