@@ -9,6 +9,8 @@ from frappe.tests.utils import change_settings
 
 from navgold_custom.navgold_custom.amazon_pricing import amazon_feed_builder, purchase_cost_sources
 from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import (
+	SHIPPING_GROUPS,
+	build_inventory_patches,
 	build_pricing_feed,
 	get_sku_inventory_data,
 )
@@ -516,3 +518,411 @@ class TestBundleZeroStock(IntegrationTestCase):
 			buildable_map = purchase_cost_sources.get_buildable_bundle_qty_map(["BUNDLE-ITEM"])
 
 		self.assertEqual(buildable_map["BUNDLE-ITEM"], 1)
+
+
+STOCK_ITEM_CODE = "TEST-FEED-STOCK-ITEM"
+STOCK_SEED_QTY = 1_000_000
+
+
+def create_stock_item():
+	if frappe.db.exists("Item", STOCK_ITEM_CODE):
+		return STOCK_ITEM_CODE
+
+	item = frappe.new_doc("Item")
+	item.item_code = STOCK_ITEM_CODE
+	item.item_name = STOCK_ITEM_CODE
+	item.item_group = "All Item Groups"
+	item.stock_uom = "Nos"
+	item.is_stock_item = 1
+	item.insert()
+	return item.name
+
+
+def seed_bin_stock(item_code, qty=STOCK_SEED_QTY):
+	# A read-only stock stub: get_free_qty_map sums Bin.actual_qty - reserved_qty over
+	# non-rejected warehouses, so a single Bin row is enough to drive mfn_stock > 0.
+	warehouse = frappe.db.get_value(
+		"Warehouse",
+		{"is_group": 0, "is_rejected_warehouse": 0, "disabled": 0},
+		"name",
+	)
+	if not warehouse:
+		raise RuntimeError("No usable non-rejected warehouse on this site to seed Bin stock")
+
+	existing = frappe.db.get_value("Bin", {"item_code": item_code, "warehouse": warehouse}, "name")
+	if existing:
+		bin_doc = frappe.get_doc("Bin", existing)
+		bin_doc.actual_qty = qty
+		bin_doc.reserved_qty = 0
+		bin_doc.save(ignore_permissions=True)
+		return warehouse
+
+	bin_doc = frappe.new_doc("Bin")
+	bin_doc.item_code = item_code
+	bin_doc.warehouse = warehouse
+	bin_doc.actual_qty = qty
+	bin_doc.reserved_qty = 0
+	bin_doc.insert(ignore_permissions=True)
+	return warehouse
+
+
+def create_stock_proxy_sku(item_code, selling_price=None):
+	proxy_sku = frappe.new_doc("Proxy SKU")
+	proxy_sku.is_active = 1
+	proxy_sku.item = item_code
+	proxy_sku.uom = "Nos"
+	if selling_price is not None:
+		proxy_sku.current_selling_price = selling_price
+	proxy_sku.insert()
+	return proxy_sku.name
+
+
+def create_stock_strategy(proxy_sku, purchase_cost_value=5.0):
+	strategy = frappe.new_doc("Amazon Product Strategy")
+	strategy.proxy_sku = proxy_sku
+	strategy.strategy_name = "default"
+	strategy.is_active = 1
+	strategy.min_margin = 10
+	strategy.max_margin = 20
+	strategy.append(
+		"costs",
+		{
+			"cost_type": PURCHASE_COST_TYPE,
+			"value": purchase_cost_value,
+			"source": "Manual",
+			"rank": 1,
+			"is_active": 1,
+		},
+	)
+	strategy.insert()
+	return strategy
+
+
+def create_stock_pricing(proxy_sku, strategy, current_min=None, current_max=None):
+	pricing = frappe.new_doc("Amazon Product Pricing")
+	pricing.proxy_sku = proxy_sku
+	pricing.is_active = 1
+	pricing.default_strategy = strategy.name
+	pricing.insert()
+	if current_min is not None or current_max is not None:
+		frappe.db.set_value(
+			"Amazon Product Pricing",
+			pricing.name,
+			{
+				"current_min_price": current_min or 0,
+				"current_max_price": current_max or 0,
+			},
+			update_modified=False,
+		)
+	return pricing.name
+
+
+def apply_navgold_settings(**fields):
+	# change_settings does a raw setattr; use Document.set so child-table fields
+	# (zero_stock_items / published_pricing_items) are coerced into real child docs.
+	settings = frappe.get_doc("Navgold Settings")
+	for key, value in fields.items():
+		settings.set(key, value)
+	settings.save(ignore_permissions=True)
+
+
+def message_skus(feed_result):
+	feed = frappe.parse_json(feed_result["feed_content"])
+	return [message["sku"] for message in feed["messages"]]
+
+
+def quantity_for_sku(feed_result, sku):
+	feed = frappe.parse_json(feed_result["feed_content"])
+	for message in feed["messages"]:
+		if message["sku"] != sku:
+			continue
+		for patch_entry in message["patches"]:
+			if patch_entry["path"] == "/attributes/fulfillment_availability":
+				return patch_entry["value"][0].get("quantity")
+	return None
+
+
+def offer_paths_for_sku(feed_result, sku):
+	feed = frappe.parse_json(feed_result["feed_content"])
+	for message in feed["messages"]:
+		if message["sku"] != sku:
+			continue
+		return [patch_entry["path"] for patch_entry in message["patches"]]
+	return None
+
+
+class TestFeedBuilderStockPublishingMode(IntegrationTestCase):
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		create_purchase_cost_type()
+		create_stock_item()
+		seed_bin_stock(STOCK_ITEM_CODE)
+
+	def tearDown(self):
+		# Reset the shared singleton so a mode leak can't turn a neighbour green/red by accident.
+		apply_navgold_settings(
+			stock_publishing_mode="Publish Actual Stock",
+			pricing_publishing_mode="Publish All Prices",
+			zero_stock_items=[],
+			published_pricing_items=[],
+			stock_reserve_pct=0,
+			max_publish_qty=0,
+		)
+
+	def build_stock_only_feed(self, pricing_names):
+		return build_pricing_feed(pricing_names, "SELLER", "MARKETPLACE")
+
+	def test_actual_stock_mode_emits_real_positive_quantity(self):
+		# Control: proves the seeded item genuinely has stock, so a forced-zero elsewhere is
+		# the mode's doing, not an empty bin.
+		proxy_sku = create_stock_proxy_sku(STOCK_ITEM_CODE)
+		strategy = create_stock_strategy(proxy_sku)
+		pricing_name = create_stock_pricing(proxy_sku, strategy)
+
+		apply_navgold_settings(
+			amazon_publishing_mode="Stock Only",
+			pricing_publishing_mode="Publish All Prices",
+			stock_publishing_mode="Publish Actual Stock",
+			stock_reserve_pct=0,
+			max_publish_qty=0,
+		)
+		feed_result = self.build_stock_only_feed([pricing_name])
+
+		self.assertIn(proxy_sku, message_skus(feed_result))
+		self.assertGreater(quantity_for_sku(feed_result, proxy_sku), 0)
+
+	def test_publish_zero_stock_for_all_forces_quantity_zero(self):
+		# [oversell guard] An in-stock SKU must ship quantity 0 under the all-items zero mode.
+		proxy_sku = create_stock_proxy_sku(STOCK_ITEM_CODE)
+		strategy = create_stock_strategy(proxy_sku)
+		pricing_name = create_stock_pricing(proxy_sku, strategy)
+
+		apply_navgold_settings(
+			amazon_publishing_mode="Stock Only",
+			pricing_publishing_mode="Publish All Prices",
+			stock_publishing_mode="Publish Zero Stock for All Items",
+			stock_reserve_pct=0,
+			max_publish_qty=0,
+		)
+		feed_result = self.build_stock_only_feed([pricing_name])
+
+		self.assertIn(proxy_sku, message_skus(feed_result))
+		self.assertEqual(quantity_for_sku(feed_result, proxy_sku), 0)
+
+	def test_publish_zero_stock_for_selected_only_zeros_selected_sku(self):
+		# [oversell guard] Selected SKU -> quantity 0; a non-selected in-stock SKU keeps real stock.
+		selected_proxy = create_stock_proxy_sku(STOCK_ITEM_CODE)
+		selected_strategy = create_stock_strategy(selected_proxy)
+		selected_pricing = create_stock_pricing(selected_proxy, selected_strategy)
+
+		unselected_proxy = create_stock_proxy_sku(STOCK_ITEM_CODE)
+		unselected_strategy = create_stock_strategy(unselected_proxy)
+		unselected_pricing = create_stock_pricing(unselected_proxy, unselected_strategy)
+
+		apply_navgold_settings(
+			amazon_publishing_mode="Stock Only",
+			pricing_publishing_mode="Publish All Prices",
+			stock_publishing_mode="Publish Zero Stock for Selected Items",
+			zero_stock_items=[{"proxy_sku": selected_proxy}],
+			stock_reserve_pct=0,
+			max_publish_qty=0,
+		)
+		feed_result = self.build_stock_only_feed([selected_pricing, unselected_pricing])
+
+		self.assertEqual(quantity_for_sku(feed_result, selected_proxy), 0)
+		self.assertGreater(quantity_for_sku(feed_result, unselected_proxy), 0)
+
+
+class TestFeedBuilderPricingPublishingMode(IntegrationTestCase):
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		create_purchase_cost_type()
+		create_stock_item()
+		seed_bin_stock(STOCK_ITEM_CODE)
+
+	def tearDown(self):
+		apply_navgold_settings(
+			pricing_publishing_mode="Publish All Prices",
+			published_pricing_items=[],
+		)
+
+	def test_publish_selected_prices_only_excludes_unselected_sku(self):
+		# A SKU absent from the selected-prices list must not appear in the feed at all
+		# (its purchasable_offer is never emitted); a selected SKU keeps its price patch.
+		selected_proxy = create_stock_proxy_sku(STOCK_ITEM_CODE, selling_price=8.5)
+		selected_strategy = create_stock_strategy(selected_proxy)
+		selected_pricing = create_stock_pricing(
+			selected_proxy, selected_strategy, current_min=8, current_max=9
+		)
+
+		unselected_proxy = create_stock_proxy_sku(STOCK_ITEM_CODE, selling_price=8.5)
+		unselected_strategy = create_stock_strategy(unselected_proxy)
+		unselected_pricing = create_stock_pricing(
+			unselected_proxy, unselected_strategy, current_min=8, current_max=9
+		)
+
+		apply_navgold_settings(
+			amazon_publishing_mode="Stock and Prices",
+			pricing_publishing_mode="Publish Selected Prices Only",
+			published_pricing_items=[{"proxy_sku": selected_proxy}],
+			price_change_threshold_percent=50,
+			price_change_block_direction="Both",
+			stock_reserve_pct=0,
+			max_publish_qty=0,
+		)
+		feed_result = build_pricing_feed([selected_pricing, unselected_pricing], "SELLER", "MARKETPLACE")
+
+		skus = message_skus(feed_result)
+		self.assertIn(selected_proxy, skus)
+		self.assertNotIn(unselected_proxy, skus)
+		self.assertIn("/attributes/purchasable_offer", offer_paths_for_sku(feed_result, selected_proxy))
+
+
+class TestFeedBuilderPriceDeviationBlock(IntegrationTestCase):
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		create_purchase_cost_type()
+		create_stock_item()
+		seed_bin_stock(STOCK_ITEM_CODE)
+
+	def tearDown(self):
+		apply_navgold_settings(
+			pricing_publishing_mode="Publish All Prices",
+			published_pricing_items=[],
+		)
+
+	def test_price_deviation_excludes_sku_and_records_block(self):
+		# [money guard] A live selling price far outside the min/max band must block the SKU
+		# from the price feed (blocked_price_deviation), while an in-band SKU still ships.
+		blocked_proxy = create_stock_proxy_sku(STOCK_ITEM_CODE, selling_price=100)
+		blocked_strategy = create_stock_strategy(blocked_proxy)
+		blocked_pricing = create_stock_pricing(blocked_proxy, blocked_strategy, current_min=5, current_max=6)
+
+		allowed_proxy = create_stock_proxy_sku(STOCK_ITEM_CODE, selling_price=8.5)
+		allowed_strategy = create_stock_strategy(allowed_proxy)
+		allowed_pricing = create_stock_pricing(allowed_proxy, allowed_strategy, current_min=8, current_max=9)
+
+		apply_navgold_settings(
+			amazon_publishing_mode="Stock and Prices",
+			pricing_publishing_mode="Publish All Prices",
+			price_change_threshold_percent=1,
+			price_change_block_direction="Both",
+			stock_reserve_pct=0,
+			max_publish_qty=0,
+		)
+		feed_result = build_pricing_feed([blocked_pricing, allowed_pricing], "SELLER", "MARKETPLACE")
+
+		blocked_skus = [record["proxy_sku"] for record in feed_result["blocked_price_deviation"]]
+		self.assertIn(blocked_proxy, blocked_skus)
+
+		skus = message_skus(feed_result)
+		self.assertNotIn(blocked_proxy, skus)
+		self.assertIn(allowed_proxy, skus)
+
+
+class TestFeedBuilderInventoryChannels(IntegrationTestCase):
+	# Direct get_sku_inventory_data + build_inventory_patches seam (the same seam the
+	# TestBundleZeroStock class uses) to cover the FBA and backorder shipping-group forks
+	# without needing live AFN/restock seeding through the batch layer.
+	def base_proxy_sku_info(self, shipping_group_choice=None):
+		return {
+			"SKU-CH": {
+				"item": "CH-ITEM",
+				"uom": "Nos",
+				"pool_size": 1,
+				"pack_size": 1.0,
+				"merchant_shipping_group": shipping_group_choice,
+			}
+		}
+
+	def test_fba_active_with_stock_emits_zero_qty_amazon_channel(self):
+		# [oversell guard] FBA-fulfilled SKUs must never publish a merchant quantity; Amazon owns it.
+		pricing = frappe._dict(
+			proxy_sku="SKU-CH",
+			active_strategy="STRAT-fba",
+			fba_strategy="STRAT-fba",
+			sfp_strategy=None,
+			backorder_strategy=None,
+		)
+		stock_info_map = {
+			"SKU-CH": {"mfn_stock": 500, "fba_stock": 42, "has_restock_date": False, "restock_date": None}
+		}
+		inventory_data = get_sku_inventory_data(
+			pricing,
+			None,
+			self.base_proxy_sku_info(),
+			stock_info_map,
+			supplier_data_map={},
+			lead_time_map={},
+			bundle_buildable_map={},
+		)
+
+		self.assertTrue(inventory_data["is_fba"])
+		self.assertEqual(inventory_data["quantity"], 0)
+		self.assertEqual(inventory_data["fulfillment_channel"], "AMAZON_EU")
+
+		patches = build_inventory_patches(inventory_data, "MARKETPLACE")
+		fulfillment_patch = next(
+			patch_entry
+			for patch_entry in patches
+			if patch_entry["path"] == "/attributes/fulfillment_availability"
+		)
+		self.assertEqual(fulfillment_patch["value"][0]["fulfillment_channel_code"], "AMAZON_EU")
+		self.assertNotIn("quantity", fulfillment_patch["value"][0])
+
+	def test_sfp_active_emits_sfp_shipping_group(self):
+		pricing = frappe._dict(
+			proxy_sku="SKU-CH",
+			active_strategy="STRAT-sfp",
+			fba_strategy=None,
+			sfp_strategy="STRAT-sfp",
+			backorder_strategy=None,
+		)
+		stock_info_map = {
+			"SKU-CH": {"mfn_stock": 10, "fba_stock": 0, "has_restock_date": False, "restock_date": None}
+		}
+		inventory_data = get_sku_inventory_data(
+			pricing,
+			None,
+			self.base_proxy_sku_info(),
+			stock_info_map,
+			supplier_data_map={},
+			lead_time_map={},
+			bundle_buildable_map={},
+		)
+
+		self.assertEqual(inventory_data["shipping_group"], SHIPPING_GROUPS["sfp"])
+
+		patches = build_inventory_patches(inventory_data, "MARKETPLACE")
+		shipping_patch = next(
+			patch_entry
+			for patch_entry in patches
+			if patch_entry["path"] == "/attributes/merchant_shipping_group"
+		)
+		self.assertEqual(shipping_patch["value"][0]["value"], SHIPPING_GROUPS["sfp"])
+
+	def test_non_sfp_default_emits_main_revised_shipping_group(self):
+		pricing = frappe._dict(
+			proxy_sku="SKU-CH",
+			active_strategy="STRAT-default",
+			fba_strategy=None,
+			sfp_strategy=None,
+			backorder_strategy=None,
+		)
+		stock_info_map = {
+			"SKU-CH": {"mfn_stock": 10, "fba_stock": 0, "has_restock_date": False, "restock_date": None}
+		}
+		inventory_data = get_sku_inventory_data(
+			pricing,
+			None,
+			self.base_proxy_sku_info(),
+			stock_info_map,
+			supplier_data_map={},
+			lead_time_map={},
+			bundle_buildable_map={},
+		)
+
+		self.assertEqual(inventory_data["shipping_group"], SHIPPING_GROUPS["main_revised"])
