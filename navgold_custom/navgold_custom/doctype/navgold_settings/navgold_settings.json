@@ -108,8 +108,7 @@
 			"fieldtype": "Link",
 			"in_list_view": 1,
 			"label": "Buying Price List",
-			"options": "Price List",
-			"reqd": 1
+			"options": "Price List"
 		},
 		{
 			"fieldname": "column_break_zziq",
@@ -164,8 +163,7 @@
 			"fieldname": "subscribe_and_save_warehouse",
 			"fieldtype": "Link",
 			"label": "Subscribe and Save Warehouse",
-			"options": "Warehouse",
-			"reqd": 1
+			"options": "Warehouse"
 		},
 		{
 			"fieldname": "stock_allocation_section",

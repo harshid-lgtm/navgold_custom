@@ -86,6 +86,12 @@ class NavgoldSettings(Document):
 		zero_stock_items: DF.Table[NavgoldZeroStockItem]
 	# end: auto-generated types
 
+	def validate(self):
+		# subscribe_and_save_warehouse is deliberately not enforced here: it currently has no
+		# consumer, so requiring it would block every unrelated settings save for no benefit.
+		if self.amazon_pricing_enabled and not self.buying_price_list:
+			frappe.throw(_("Buying Price List is required when Amazon pricing is enabled."))
+
 	def get_source_address(self, state_key="stateOrRegion"):
 		if not self.fba_source_address:
 			frappe.throw(_("Source address is not configured in Navgold Settings."))

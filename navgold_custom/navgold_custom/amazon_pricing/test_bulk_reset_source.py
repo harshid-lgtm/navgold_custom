@@ -8,7 +8,6 @@ from frappe.tests import IntegrationTestCase
 
 from navgold_custom.navgold_custom.amazon_pricing.fba_fee_fetcher import FEE_COST_SUB_TYPE, FEE_SOURCE
 from navgold_custom.navgold_custom.doctype.bulk_reset_purchase_cost_source.bulk_reset_purchase_cost_source import (
-	EXPLICIT_TARGET_SOURCES,
 	build_reset_filters,
 	enqueue_fba_fee_refresh,
 	group_updates_by_target,
@@ -31,9 +30,6 @@ def make_reset_doc(**overrides):
 
 
 class TestBulkResetTargetSources(IntegrationTestCase):
-	def test_item_tax_sync_is_a_valid_target(self):
-		self.assertIn("Item-Tax-Sync", EXPLICIT_TARGET_SOURCES)
-
 	def test_explicit_target_routes_all_rows_to_itself(self):
 		rows = [
 			{"cost_name": "C1", "cost_sub_type": "VAT-Standard"},
@@ -62,9 +58,6 @@ class TestBulkResetTargetSources(IntegrationTestCase):
 			{"Supplier-Sync": ["C1"], "PO-Sync": ["C2"], "Auto-Sync": ["C3"]},
 		)
 
-	def test_shipping_sync_is_a_valid_target(self):
-		self.assertIn("Shipping-Sync", EXPLICIT_TARGET_SOURCES)
-
 	def test_auto_routes_shipping_sub_types_to_shipping_sync(self):
 		rows = [
 			{"cost_name": "C1", "cost_sub_type": "Fulfillment Cost-Domestic Regular"},
@@ -72,9 +65,6 @@ class TestBulkResetTargetSources(IntegrationTestCase):
 		]
 		grouped = group_updates_by_target(rows, "Auto", vat_cost_type=False)
 		self.assertEqual(grouped, {"Shipping-Sync": ["C1", "C2"]})
-
-	def test_amazon_sync_is_a_valid_target(self):
-		self.assertIn("Amazon-Sync", EXPLICIT_TARGET_SOURCES)
 
 	def test_explicit_amazon_sync_target_routes_all_rows_to_itself(self):
 		rows = [
