@@ -6,6 +6,7 @@ from unittest.mock import patch
 import frappe
 from frappe.tests import IntegrationTestCase, change_settings
 
+from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import get_sku_inventory_data
 from navgold_custom.navgold_custom.amazon_pricing.strategy_selector import (
 	get_stock_info,
 	get_stock_info_batch,
@@ -13,7 +14,11 @@ from navgold_custom.navgold_custom.amazon_pricing.strategy_selector import (
 )
 from navgold_custom.navgold_custom.amazon_pricing.template_applicator import apply_template_to_proxy_sku
 from navgold_custom.navgold_custom.amazon_pricing.test_template_applicator import create_strategy_template
-from navgold_custom.navgold_custom.utils import ITEM_AFN_FIELD, get_fba_stock_map
+from navgold_custom.navgold_custom.utils import (
+	ITEM_AFN_FIELD,
+	calculate_adjusted_qty,
+	get_fba_stock_map,
+)
 
 
 def create_test_item():
@@ -35,6 +40,111 @@ def create_fba_fixture(template_name):
 	proxy_sku.insert()
 	apply_template_to_proxy_sku(template_name, proxy_sku.name)
 	return item_code, proxy_sku.name
+
+
+def ensure_uom(uom_name):
+	if not frappe.db.exists("UOM", uom_name):
+		frappe.get_doc({"doctype": "UOM", "uom_name": uom_name}).insert()
+	return uom_name
+
+
+def create_pack_item(pack_uom, conversion_factor):
+	item = frappe.new_doc("Item")
+	item.item_code = f"TEST-PACK-{frappe.generate_hash(length=8)}"
+	item.item_group = "All Item Groups"
+	item.stock_uom = "Nos"
+	item.is_stock_item = 1
+	item.append("uoms", {"uom": pack_uom, "conversion_factor": conversion_factor})
+	item.insert()
+	return item.name
+
+
+def create_proxy_sku_for(item_code, uom):
+	proxy_sku = frappe.new_doc("Proxy SKU")
+	proxy_sku.item = item_code
+	proxy_sku.uom = uom
+	proxy_sku.is_active = 1
+	proxy_sku.insert()
+	return proxy_sku.name
+
+
+class TestPackAllocationStrategy(IntegrationTestCase):
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.template_name = create_strategy_template()
+
+	def test_calculate_adjusted_qty_floors_per_pool_and_pack(self):
+		# 4 base units shared across 5 SKUs at pack-of-6: no full pack can be allocated.
+		self.assertEqual(calculate_adjusted_qty(4, 5, 6), 0)
+		# Single SKU, pack-of-3, 4 base units: one full pack fits.
+		self.assertEqual(calculate_adjusted_qty(4, 1, 3), 1)
+		self.assertEqual(calculate_adjusted_qty(4, 0, 3), 0)
+		self.assertEqual(calculate_adjusted_qty(4, 1, 0), 0)
+
+	def test_no_full_pack_falls_through_to_backorder(self):
+		pack_uom = ensure_uom(f"NG Pack 6 {frappe.generate_hash(length=6)}")
+		item_code = create_pack_item(pack_uom, 6)
+
+		under_test = create_proxy_sku_for(item_code, pack_uom)
+		# Four sibling Proxy SKUs share the same physical stock: pool size becomes five.
+		for index in range(4):
+			sibling_uom = ensure_uom(f"NG Sibling {index} {frappe.generate_hash(length=6)}")
+			create_proxy_sku_for(item_code, sibling_uom)
+
+		apply_template_to_proxy_sku(self.template_name, under_test)
+
+		proxy = frappe.get_cached_doc("Proxy SKU", under_test)
+		self.assertEqual(proxy.uom, pack_uom)
+
+		with patch(
+			"navgold_custom.navgold_custom.amazon_pricing.strategy_selector.get_free_qty_map",
+			return_value={item_code: {"free_qty": 4, "actual_qty": 4}},
+		):
+			stock_info = get_stock_info(under_test)
+
+		# mfn_stock stays raw (feed contract); only total_stock is pack-aware.
+		# 4 units / pool 5 / pack 6 floors to zero full packs.
+		self.assertEqual(stock_info["mfn_stock"], 4)
+		self.assertEqual(stock_info["total_stock"], 0)
+
+		pricing = frappe.get_doc("Amazon Product Pricing", {"proxy_sku": under_test})
+		# Pre-fix this reported total_stock 4 > 0 and wrongly selected SFP; now it backorders.
+		self.assertEqual(select_strategy(pricing, stock_info=stock_info), pricing.backorder_strategy)
+
+	def test_feed_quantity_not_double_divided(self):
+		pack_uom = ensure_uom(f"NG Pack 6 Feed {frappe.generate_hash(length=6)}")
+		item_code = create_pack_item(pack_uom, 6)
+
+		under_test = create_proxy_sku_for(item_code, pack_uom)
+		for index in range(4):
+			sibling_uom = ensure_uom(f"NG Feed Sibling {index} {frappe.generate_hash(length=6)}")
+			create_proxy_sku_for(item_code, sibling_uom)
+
+		apply_template_to_proxy_sku(self.template_name, under_test)
+
+		pricing = frappe.get_doc("Amazon Product Pricing", {"proxy_sku": under_test})
+		pricing.active_strategy = pricing.default_strategy
+
+		# free_qty 60 / pool 5 / pack 6 -> exactly 2 full packs. The feed must publish 2,
+		# proving mfn_stock reaches the feed raw and is divided once, not twice.
+		with patch(
+			"navgold_custom.navgold_custom.amazon_pricing.strategy_selector.get_free_qty_map",
+			return_value={item_code: {"free_qty": 60, "actual_qty": 60}},
+		):
+			inventory_data = get_sku_inventory_data(pricing)
+
+		self.assertEqual(inventory_data["quantity"], 2)
+
+	def test_select_strategy_backorders_on_zero_total_stock(self):
+		pack_uom = ensure_uom(f"NG Pack 2 {frappe.generate_hash(length=6)}")
+		item_code = create_pack_item(pack_uom, 2)
+		proxy_sku = create_proxy_sku_for(item_code, pack_uom)
+		apply_template_to_proxy_sku(self.template_name, proxy_sku)
+
+		pricing = frappe.get_doc("Amazon Product Pricing", {"proxy_sku": proxy_sku})
+		stock_info = {"fba_stock": 0, "total_stock": 0, "has_restock_date": False}
+		self.assertEqual(select_strategy(pricing, stock_info=stock_info), pricing.backorder_strategy)
 
 
 class TestStrategySelectorAFNBridge(IntegrationTestCase):

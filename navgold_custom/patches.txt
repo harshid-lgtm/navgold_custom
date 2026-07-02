@@ -16,3 +16,4 @@ navgold_custom.patches.v1.drop_obsolete_amazon_price_snapshot
 navgold_custom.patches.v1.set_item_tax_sync_on_template_tax_lines
 navgold_custom.patches.v1.set_shipping_sync_on_template_shipping_lines
 navgold_custom.patches.v1.backfill_proxy_sku_shipping_weight
+navgold_custom.patches.v1.backfill_sfp_eligible_on_supplier_items

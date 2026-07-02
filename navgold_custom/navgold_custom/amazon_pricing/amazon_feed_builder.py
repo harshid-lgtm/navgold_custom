@@ -34,7 +34,7 @@ from navgold_custom.navgold_custom.doctype.supplier_item_price_and_stock.supplie
 	get_supplier_prices,
 )
 from navgold_custom.navgold_custom.erpnext_compat import get_product_bundle_items
-from navgold_custom.navgold_custom.utils import get_conversion_factor
+from navgold_custom.navgold_custom.utils import calculate_adjusted_qty, get_conversion_factor
 
 SHIPPING_GROUPS = {
 	"sfp": "57d54587-7341-4c9f-b3f9-546c8d798b21",
@@ -47,7 +47,7 @@ def get_top_supplier_for_item(item_code: str) -> dict | None:
 	suppliers = frappe.get_all(
 		"Supplier Item Price and Stock",
 		filters={"item": item_code, "purchase_blocked": 0},
-		fields=["supplier", "stock_qty", "rank", "price"],
+		fields=["supplier", "stock_qty", "rank", "price", "sfp"],
 		order_by="rank asc",
 		limit=1,
 	)
@@ -58,7 +58,7 @@ def get_best_in_stock_supplier_for_item(item_code: str) -> dict | None:
 	suppliers = frappe.get_all(
 		"Supplier Item Price and Stock",
 		filters={"item": item_code, "purchase_blocked": 0},
-		fields=["supplier", "stock_qty", "rank", "price"],
+		fields=["supplier", "stock_qty", "rank", "price", "sfp"],
 		order_by="rank asc",
 	)
 	if not suppliers:
@@ -204,7 +204,7 @@ def get_supplier_data_batch(item_codes: list) -> dict:
 	all_suppliers = frappe.get_all(
 		"Supplier Item Price and Stock",
 		filters={"item": ["in", item_codes], "purchase_blocked": 0},
-		fields=["supplier", "stock_qty", "rank", "price", "item"],
+		fields=["supplier", "stock_qty", "rank", "price", "item", "sfp"],
 		order_by="item asc, rank asc",
 	)
 
@@ -246,6 +246,19 @@ def get_lead_time_batch(supplier_names: list) -> dict:
 		row.parent: cint(row.lead_time_before_12 if is_before_noon else row.lead_time_after_12) or 1
 		for row in rows
 	}
+
+
+def get_supplier_sfp_eligible_batch(supplier_names: list) -> dict:
+	if not supplier_names:
+		return {}
+
+	rows = frappe.get_all(
+		"Supplier",
+		filters={"name": ["in", supplier_names]},
+		fields=["name", "custom_sfp_eligible"],
+	)
+
+	return {row.name: bool(row.custom_sfp_eligible) for row in rows}
 
 
 def get_backorder_strategy_map(strategy_names: list) -> dict:
@@ -333,10 +346,13 @@ def build_proxy_sku_info_map(proxy_sku_names: list) -> dict:
 	return result
 
 
-def calculate_adjusted_qty(raw_qty: float, pool_size: int, pack_size: float) -> int:
-	if pool_size <= 0 or pack_size <= 0:
-		return 0
-	return max(math.floor(raw_qty / pool_size / pack_size), 0)
+def apply_stock_guard(qty: int, reserve_percentage: float, max_publish_qty: int) -> int:
+	reserve_percentage = max(0.0, min(flt(reserve_percentage), 100.0))
+	max_publish_qty = cint(max_publish_qty)
+	guarded_qty = max(math.floor(flt(qty) * (1 - reserve_percentage / 100)), 0)
+	if max_publish_qty > 0:
+		guarded_qty = min(guarded_qty, max_publish_qty)
+	return guarded_qty
 
 
 def get_sku_inventory_data(
@@ -347,6 +363,9 @@ def get_sku_inventory_data(
 	supplier_data_map: dict | None = None,
 	lead_time_map: dict | None = None,
 	bundle_buildable_map: dict | None = None,
+	reserve_percentage: float = 0,
+	max_publish_qty: int = 0,
+	supplier_sfp_eligible_map: dict | None = None,
 ) -> dict:
 	stock_info = (
 		stock_info_map.get(pricing.proxy_sku, {})
@@ -423,6 +442,17 @@ def get_sku_inventory_data(
 	else:
 		lead_time_days = get_supplier_lead_time(resolved_supplier.supplier) if resolved_supplier else 1
 
+	if not resolved_supplier:
+		supplier_sfp_eligible = False
+	elif supplier_sfp_eligible_map is not None:
+		supplier_sfp_eligible = bool(supplier_sfp_eligible_map.get(resolved_supplier.supplier))
+	else:
+		supplier_sfp_eligible = get_supplier_sfp_eligible_batch([resolved_supplier.supplier]).get(
+			resolved_supplier.supplier, False
+		)
+
+	resolved_supplier_sfp = bool(resolved_supplier.get("sfp")) if resolved_supplier else False
+
 	resolved_supplier_stock = resolved_supplier.get("stock_qty", 0) if resolved_supplier else 0
 	resolved_supplier_qty = calculate_adjusted_qty(resolved_supplier_stock, pool_size, pack_size)
 
@@ -434,7 +464,12 @@ def get_sku_inventory_data(
 		if buildable_bundles is not None and buildable_bundles < warehouse_qty * pack_size:
 			warehouse_qty = 0
 
-	quantity = resolved_supplier_qty if is_backorder else warehouse_qty
+	# Reserve/cap applies to own warehouse stock only, never to backorder/supplier quantity.
+	quantity = (
+		resolved_supplier_qty
+		if is_backorder
+		else apply_stock_guard(warehouse_qty, reserve_percentage, max_publish_qty)
+	)
 
 	if zero_stock_proxy_skus is not None and pricing.proxy_sku in zero_stock_proxy_skus:
 		quantity = 0
@@ -447,6 +482,13 @@ def get_sku_inventory_data(
 	if is_sfp:
 		is_two_day = (sku_shipping_group_choice or "").strip().lower() == "twoday"
 		shipping_group = SHIPPING_GROUPS["two_day"] if is_two_day else SHIPPING_GROUPS["sfp"]
+	elif (
+		is_backorder
+		and supplier_sfp_eligible
+		and resolved_supplier_sfp
+		and (restock_date or resolved_supplier_stock > 0)
+	):
+		shipping_group = SHIPPING_GROUPS["sfp"]
 	else:
 		shipping_group = SHIPPING_GROUPS["main_revised"]
 
@@ -603,6 +645,9 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 		if entry.get(key)
 	}
 	lead_time_map = get_lead_time_batch(list(all_supplier_names)) if all_supplier_names else {}
+	supplier_sfp_eligible_map = (
+		get_supplier_sfp_eligible_batch(list(all_supplier_names)) if all_supplier_names else {}
+	)
 
 	# used later by recompute_backorder_prices_with_fallback_supplier
 	backorder_strategy_names = list(
@@ -618,9 +663,15 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 
 	bundle_buildable_map = get_buildable_bundle_qty_map(all_item_codes) if all_item_codes else {}
 
-	send_min_price = frappe.get_cached_value(
-		"Navgold Settings", "Navgold Settings", "send_min_price_to_amazon"
+	settings = frappe.get_cached_value(
+		"Navgold Settings",
+		"Navgold Settings",
+		["send_min_price_to_amazon", "stock_reserve_pct", "max_publish_qty"],
+		as_dict=True,
 	)
+	send_min_price = settings.send_min_price_to_amazon
+	reserve_percentage = flt(settings.stock_reserve_pct)
+	max_publish_qty = cint(settings.max_publish_qty)
 
 	for pricing in pricing_records:
 		try:
@@ -632,6 +683,9 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 				supplier_data_map,
 				lead_time_map,
 				bundle_buildable_map,
+				reserve_percentage,
+				max_publish_qty,
+				supplier_sfp_eligible_map,
 			)
 		except Exception as e:
 			frappe.log_error(f"Skipping inventory patches for {pricing.name}: {e!s}", "Amazon Feed Builder")

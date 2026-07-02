@@ -5,11 +5,14 @@
 import frappe
 from frappe import _
 from frappe.query_builder import DocType, Order
+from frappe.query_builder.functions import Count
 from frappe.utils.data import flt
 
 from navgold_custom.navgold_custom.amazon_pricing.purchase_cost_sources import get_buildable_bundle_qty_map
 from navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku import get_proxy_sku_map
 from navgold_custom.navgold_custom.utils import (
+	calculate_adjusted_qty,
+	get_conversion_factor,
 	get_fba_stock_map,
 	get_free_qty_map,
 	get_restock_data_map,
@@ -73,6 +76,17 @@ def get_stock_info(proxy_sku: str) -> dict:
 	"""
 	proxy = frappe.get_cached_doc("Proxy SKU", proxy_sku)
 
+	if not proxy.item:
+		# An item-less Proxy SKU has no item to compute stock/conversion for; treat it as out of
+		# stock (mirrors the item-less guard in get_stock_info_batch).
+		return {
+			"fba_stock": 0,
+			"mfn_stock": 0,
+			"has_restock_date": False,
+			"restock_date": None,
+			"total_stock": 0,
+		}
+
 	sp_api_settings = frappe.get_single("Amazon SP API Settings")
 
 	fba_stock = get_fba_stock_map([proxy.item], sp_api_settings.afn_warehouse).get(proxy.item, 0)
@@ -80,8 +94,13 @@ def get_stock_info(proxy_sku: str) -> dict:
 	buildable_map = get_buildable_bundle_qty_map([proxy.item])
 	if proxy.item in buildable_map:
 		mfn_stock = buildable_map[proxy.item]
+		sellable_mfn_stock = mfn_stock
 	else:
+		# mfn_stock stays the raw base-unit free qty: the feed builder divides it itself.
 		mfn_stock = get_free_qty_map([proxy.item]).get(proxy.item, {}).get("free_qty", 0)
+		pool_size = frappe.db.count("Proxy SKU", {"item": proxy.item, "is_active": 1}) or 1
+		pack_size = get_conversion_factor(proxy.item, proxy.uom)
+		sellable_mfn_stock = calculate_adjusted_qty(mfn_stock, pool_size, pack_size)
 
 	restock_info = check_pending_restock(proxy.item)
 
@@ -90,7 +109,7 @@ def get_stock_info(proxy_sku: str) -> dict:
 		"mfn_stock": mfn_stock,
 		"has_restock_date": restock_info["has_restock"],
 		"restock_date": restock_info["restock_date"],
-		"total_stock": fba_stock + mfn_stock,
+		"total_stock": fba_stock + sellable_mfn_stock,
 	}
 
 
@@ -119,6 +138,23 @@ def get_stock_info_batch(proxy_sku_names: list) -> dict:
 	restock_map = get_restock_data_map(all_item_codes)
 	buildable_map = get_buildable_bundle_qty_map(all_item_codes)
 
+	proxy_sku_dt = DocType("Proxy SKU")
+	pool_counts = (
+		frappe.qb.from_(proxy_sku_dt)
+		.select(proxy_sku_dt.item, Count("*").as_("pool_size"))
+		.where((proxy_sku_dt.item.isin(all_item_codes)) & (proxy_sku_dt.is_active == 1))
+		.groupby(proxy_sku_dt.item)
+	).run(as_dict=True)
+	pool_size_map = {row.item: row.pool_size for row in pool_counts}
+
+	uom_conversion_dt = DocType("UOM Conversion Detail")
+	uom_factors = (
+		frappe.qb.from_(uom_conversion_dt)
+		.select(uom_conversion_dt.parent, uom_conversion_dt.uom, uom_conversion_dt.conversion_factor)
+		.where((uom_conversion_dt.parenttype == "Item") & (uom_conversion_dt.parent.isin(all_item_codes)))
+	).run(as_dict=True)
+	uom_factor_map = {(row.parent, row.uom): flt(row.conversion_factor) or 1.0 for row in uom_factors}
+
 	result = {}
 	for proxy_sku_name in proxy_sku_names:
 		item_code = proxy_sku_item_map.get(proxy_sku_name)
@@ -129,8 +165,13 @@ def get_stock_info_batch(proxy_sku_names: list) -> dict:
 		fba_stock = afn_stock_map.get(item_code, 0)
 		if item_code in buildable_map:
 			mfn_stock = buildable_map[item_code]
+			sellable_mfn_stock = mfn_stock
 		else:
+			# mfn_stock stays the raw base-unit free qty: the feed builder divides it itself.
 			mfn_stock = mfn_stock_data.get(item_code, {}).get("free_qty", 0)
+			pool_size = pool_size_map.get(item_code, 1)
+			pack_size = uom_factor_map.get((item_code, proxy_sku_map[proxy_sku_name]["uom"]), 1.0)
+			sellable_mfn_stock = calculate_adjusted_qty(mfn_stock, pool_size, pack_size)
 		restock_date = restock_map.get(item_code)
 
 		result[proxy_sku_name] = {
@@ -138,7 +179,7 @@ def get_stock_info_batch(proxy_sku_names: list) -> dict:
 			"mfn_stock": mfn_stock,
 			"has_restock_date": bool(restock_date),
 			"restock_date": restock_date,
-			"total_stock": fba_stock + mfn_stock,
+			"total_stock": fba_stock + sellable_mfn_stock,
 		}
 
 	return result

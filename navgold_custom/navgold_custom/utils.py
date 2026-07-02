@@ -1,3 +1,5 @@
+import math
+
 import frappe
 from frappe.query_builder import DocType, Order
 from frappe.query_builder.functions import Sum
@@ -107,6 +109,12 @@ def get_free_qty_map(item_codes: list[str]) -> dict[str, dict[str, float]]:
 		}
 		for r in result
 	}
+
+
+def calculate_adjusted_qty(raw_qty: float, pool_size: int, pack_size: float) -> int:
+	if pool_size <= 0 or pack_size <= 0:
+		return 0
+	return max(math.floor(raw_qty / pool_size / pack_size), 0)
 
 
 @redis_cache()

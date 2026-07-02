@@ -134,8 +134,17 @@
 	],
 	"grid_page_length": 50,
 	"index_web_pages_for_search": 1,
-	"links": [],
-	"modified": "2026-06-11 00:00:00.000000",
+	"links": [
+		{
+			"link_doctype": "Amazon Product Pricing",
+			"link_fieldname": "proxy_sku"
+		},
+		{
+			"link_doctype": "Amazon Product Strategy",
+			"link_fieldname": "proxy_sku"
+		}
+	],
+	"modified": "2026-06-29 17:45:00.000000",
 	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Proxy SKU",

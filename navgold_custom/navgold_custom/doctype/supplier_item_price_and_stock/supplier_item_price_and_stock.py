@@ -7,7 +7,7 @@ import frappe
 from frappe import DoesNotExistError, _
 from frappe.model.document import Document
 from frappe.query_builder import DocType, Order
-from frappe.utils.data import flt
+from frappe.utils.data import cint, flt
 
 
 class SupplierItemPriceandStock(Document):
@@ -29,6 +29,7 @@ class SupplierItemPriceandStock(Document):
 		price: DF.Currency
 		purchase_blocked: DF.Check
 		rank: DF.Int
+		sfp: DF.Check
 		stock_qty: DF.Int
 		supplier: DF.Link
 		supplier_part_number: DF.Data | None
@@ -36,6 +37,7 @@ class SupplierItemPriceandStock(Document):
 	# end: auto-generated types
 
 	def before_insert(self):
+		self.sfp = cint(frappe.get_cached_value("Supplier", self.supplier, "custom_sfp_eligible"))
 		if not frappe.db.exists(
 			"UOM Conversion Detail", {"parenttype": "Item", "parent": self.item, "uom": self.uom}
 		):

@@ -45,6 +45,17 @@ class TestFeedStatusPoller(IntegrationTestCase):
 			.where(submission_log.status == "Submitted")
 		).run()
 
+	def test_poller_kill_switch_off_skips_all_checks(self):
+		# Q9 OFF branch: with SP-API Settings inactive the poller must early-out and never
+		# touch check_feed_status, even when eligible logs exist.
+		frappe.db.set_single_value("Amazon SP API Settings", "is_active", 0)
+		create_submission_log()
+
+		with patch.object(feed_status_poller, "check_feed_status") as mocked_check:
+			feed_status_poller.poll_pending_feed_submissions()
+
+		mocked_check.assert_not_called()
+
 	def test_poller_selects_only_eligible_logs(self):
 		eligible = create_submission_log()
 		wrong_status = create_submission_log(status="Completed")
