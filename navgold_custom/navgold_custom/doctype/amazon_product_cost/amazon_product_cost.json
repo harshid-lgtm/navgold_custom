@@ -39,6 +39,7 @@
 			"in_list_view": 1,
 			"label": "Value",
 			"precision": "4",
+			"read_only_depends_on": "eval:doc.value_mode==\"Auto\"",
 			"reqd": 1
 		},
 		{
@@ -56,13 +57,12 @@
 		},
 		{
 			"default": "Auto",
-			"description": "Auto: value is owned by a feed or the Cost Sub Type default. Manual: a human pinned this value; feeds never overwrite it. Derived from user action — flips to Manual when the value is edited by hand.",
+			"description": "Auto: value is owned by a feed or the Cost Sub Type default (Value is read-only). Manual: select this to pin the value by hand; feeds never overwrite it.",
 			"fieldname": "value_mode",
 			"fieldtype": "Select",
 			"in_list_view": 1,
 			"label": "Value Mode",
-			"options": "Auto\nManual",
-			"read_only": 1
+			"options": "Auto\nManual"
 		},
 		{
 			"default": "1",

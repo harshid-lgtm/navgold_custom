@@ -1,11 +1,12 @@
 // Copyright (c) 2026, developers@buildwithhussain.com and contributors
 // For license information, please see license.txt
 
-// A human editing the value pins it: value_mode flips to Manual so feeds
-// never overwrite the hand-set value (sticky). Feeds stamp Auto server-side.
-frappe.ui.form.on('Amazon Product Cost', 'value', (frm, cdt, cdn) => {
+// Value is editable only under Manual (the field's read_only_depends_on gates it). Switching a
+// row back to Auto hands the value to the feed/default, so clear the stale hand-set number; the
+// server re-derives it on save.
+frappe.ui.form.on('Amazon Product Cost', 'value_mode', (frm, cdt, cdn) => {
 	const row = locals[cdt][cdn];
-	if (row.value_mode !== 'Manual') {
-		frappe.model.set_value(cdt, cdn, 'value_mode', 'Manual');
+	if (row.value_mode === 'Auto' && row.value) {
+		frappe.model.set_value(cdt, cdn, 'value', 0);
 	}
 });
