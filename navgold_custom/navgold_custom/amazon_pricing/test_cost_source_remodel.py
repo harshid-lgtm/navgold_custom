@@ -18,16 +18,18 @@ def ensure_cost_type():
 	if not frappe.db.exists("Cost Type", ABSOLUTE_COST_TYPE):
 		cost_type = frappe.new_doc("Cost Type")
 		cost_type.cost_type_name = ABSOLUTE_COST_TYPE
+		cost_type.is_group = 1
 		cost_type.calculation_type = "Absolute"
 		cost_type.insert()
 
 
 def ensure_sub_type(name, sub_type_name, source="", default_value=0):
-	if frappe.db.exists("Cost Sub Type", name):
+	if frappe.db.exists("Cost Type", name):
 		return name
-	sub_type = frappe.new_doc("Cost Sub Type")
-	sub_type.cost_type = ABSOLUTE_COST_TYPE
-	sub_type.sub_type_name = sub_type_name
+	sub_type = frappe.new_doc("Cost Type")
+	sub_type.is_group = 0
+	sub_type.parent_cost_type = ABSOLUTE_COST_TYPE
+	sub_type.cost_type_name = sub_type_name
 	sub_type.source = source
 	sub_type.default_value = default_value
 	sub_type.insert()

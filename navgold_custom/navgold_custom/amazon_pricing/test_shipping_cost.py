@@ -30,12 +30,14 @@ def create_shipping_cost_type():
 	if not frappe.db.exists("Cost Type", SHIPPING_COST_TYPE):
 		cost_type = frappe.new_doc("Cost Type")
 		cost_type.cost_type_name = SHIPPING_COST_TYPE
+		cost_type.is_group = 1
 		cost_type.calculation_type = "Absolute"
 		cost_type.insert()
-	if not frappe.db.exists("Cost Sub Type", SHIPPING_SUB_TYPE):
-		sub_type = frappe.new_doc("Cost Sub Type")
-		sub_type.cost_type = SHIPPING_COST_TYPE
-		sub_type.sub_type_name = "Shipping"
+	if not frappe.db.exists("Cost Type", SHIPPING_SUB_TYPE):
+		sub_type = frappe.new_doc("Cost Type")
+		sub_type.is_group = 0
+		sub_type.parent_cost_type = SHIPPING_COST_TYPE
+		sub_type.cost_type_name = "Shipping"
 		sub_type.source = "Shipping-Sync"
 		sub_type.insert()
 	return SHIPPING_COST_TYPE

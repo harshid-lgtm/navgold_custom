@@ -10,18 +10,23 @@ VALUE_MODES = {"Auto", "Manual"}
 
 
 @redis_cache()
-def get_cost_sub_type_policy_map() -> dict:
-	# One query feeds every cost row's dispatch; whole table is small (cost sub types are reference data).
+def get_cost_sub_type_map() -> dict:
+	# One query feeds every cost row's dispatch; the leaves are small reference data. Cost sub types are
+	# the leaf nodes (is_group=0) of the Cost Type tree — they carry where a value comes from.
 	return {
 		row.name: {"source": row.source, "default_value": row.default_value}
-		for row in frappe.get_all("Cost Sub Type", fields=["name", "source", "default_value"])
+		for row in frappe.get_all(
+			"Cost Type", filters={"is_group": 0}, fields=["name", "source", "default_value"]
+		)
 	}
 
 
 @redis_cache()
 def get_cost_type_map() -> dict:
+	# Groups (is_group=1) carry the calculation rule; leaves hold no calculation_type.
 	rows = frappe.get_all(
 		"Cost Type",
+		filters={"is_group": 1},
 		fields=["name", "calculation_type"],
 	)
 	return {row.name: row for row in rows}
@@ -58,7 +63,7 @@ def get_cost_data(
 
 	cost_type_map = get_cost_type_map()
 	if policy_map is None:
-		policy_map = get_cost_sub_type_policy_map()
+		policy_map = get_cost_sub_type_map()
 
 	cost_data = []
 	for cost in active_costs:

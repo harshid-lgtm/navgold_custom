@@ -10,7 +10,7 @@ from navgold_custom.navgold_custom.amazon_pricing.price_calculator import (
 	calculate_margin_from_price,
 	calculate_prices,
 	get_cost_data,
-	get_cost_sub_type_policy_map,
+	get_cost_sub_type_map,
 	get_item_tax_rate,
 )
 from navgold_custom.navgold_custom.amazon_pricing.purchase_cost_sources import (
@@ -89,7 +89,7 @@ class AmazonProductStrategy(Document):
 	# end: auto-generated types
 
 	def validate(self):
-		policy_map = get_cost_sub_type_policy_map()
+		policy_map = get_cost_sub_type_map()
 		self.validate_margin()
 		# Must run BEFORE populate_costs: populate_costs rewrites Auto rows from the feed/default on every
 		# save, so a pin run afterwards would see the feed's own write as a change and pin every row. Run

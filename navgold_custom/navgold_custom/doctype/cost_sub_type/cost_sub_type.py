@@ -38,10 +38,10 @@ class CostSubType(Document):
 		# edit here would leave strategies pricing against the stale map for up to the redis_cache TTL.
 		# Imported function-local to keep this controller out of the amazon_pricing import chain at boot.
 		from navgold_custom.navgold_custom.amazon_pricing.price_calculator import (
-			get_cost_sub_type_policy_map,
+			get_cost_sub_type_map,
 		)
 
-		get_cost_sub_type_policy_map.clear_cache()
+		get_cost_sub_type_map.clear_cache()
 
 	def validate_fed_cost_has_no_default(self):
 		# A fed cost derives its value from the feed, so a stray default_value would be misleading/dangerous.

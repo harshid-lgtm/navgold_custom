@@ -29,6 +29,7 @@ def create_purchase_cost_type():
 
 	cost_type = frappe.new_doc("Cost Type")
 	cost_type.cost_type_name = PURCHASE_COST_TYPE
+	cost_type.is_group = 1
 	cost_type.calculation_type = "Absolute"
 	cost_type.is_purchase_cost = 1
 	cost_type.insert()
@@ -62,12 +63,13 @@ def create_proxy_sku(selling_price=None):
 
 
 def ensure_purchase_sub_type(source):
-	# Manual rows need no sub-type policy; a fed row's source lives on its Cost Sub Type now.
+	# Manual rows need no sub-type policy; a fed row's source lives on its cost sub type (tree leaf) now.
 	sub_type_name = f"{PURCHASE_COST_TYPE}-{source}"
-	if not frappe.db.exists("Cost Sub Type", sub_type_name):
-		sub_type = frappe.new_doc("Cost Sub Type")
-		sub_type.cost_type = PURCHASE_COST_TYPE
-		sub_type.sub_type_name = source
+	if not frappe.db.exists("Cost Type", sub_type_name):
+		sub_type = frappe.new_doc("Cost Type")
+		sub_type.is_group = 0
+		sub_type.parent_cost_type = PURCHASE_COST_TYPE
+		sub_type.cost_type_name = source
 		sub_type.source = source
 		sub_type.insert()
 	return sub_type_name

@@ -6,7 +6,7 @@ from frappe.query_builder import DocType
 from frappe.utils.data import flt
 
 from navgold_custom.navgold_custom.amazon_pricing.price_calculator import (
-	get_cost_sub_type_policy_map,
+	get_cost_sub_type_map,
 )
 from navgold_custom.navgold_custom.amazon_pricing.price_guard import (
 	partition_pricing_by_price_deviation,
@@ -40,7 +40,7 @@ def get_push_block_violations(
 	if cost_type_map is None:
 		cost_type_map = get_push_block_cost_type_map()
 	if policy_map is None:
-		policy_map = get_cost_sub_type_policy_map()
+		policy_map = get_cost_sub_type_map()
 
 	cost_rows = frappe.get_all(
 		"Amazon Product Cost",

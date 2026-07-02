@@ -74,9 +74,9 @@ class CostType(NestedSet):
 		# must refresh both or strategies keep pricing against a stale map until the redis_cache TTL.
 		# Imported function-local to keep this controller out of the amazon_pricing import chain at boot.
 		from navgold_custom.navgold_custom.amazon_pricing.price_calculator import (
-			get_cost_sub_type_policy_map,
+			get_cost_sub_type_map,
 			get_cost_type_map,
 		)
 
 		get_cost_type_map.clear_cache()
-		get_cost_sub_type_policy_map.clear_cache()
+		get_cost_sub_type_map.clear_cache()

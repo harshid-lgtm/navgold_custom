@@ -8,7 +8,7 @@ from frappe.utils.data import flt
 
 from navgold_custom.navgold_custom.amazon_pricing.price_calculator import (
 	VALUE_MODES,
-	get_cost_sub_type_policy_map,
+	get_cost_sub_type_map,
 )
 from navgold_custom.navgold_custom.amazon_pricing.purchase_cost_sources import (
 	get_effective_po_purchase_costs,
@@ -111,7 +111,7 @@ def get_data(filters: dict) -> list[dict]:
 
 	supplier_map = get_effective_supplier_purchase_costs(item_uom_pairs)
 	po_map = get_effective_po_purchase_costs(item_uom_pairs)
-	policy = get_cost_sub_type_policy_map()
+	policy = get_cost_sub_type_map()
 
 	for row in rows:
 		key = (row.get("item"), row.get("uom"))
