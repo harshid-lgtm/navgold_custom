@@ -99,7 +99,9 @@ def get_columns() -> list[dict]:
 
 
 def get_data(filters: dict) -> list[dict]:
-	purchase_cost_types = frappe.get_all("Cost Type", filters={"is_purchase_cost": 1}, pluck="name")
+	purchase_cost_types = frappe.get_all(
+		"Cost Type", filters={"is_group": 1, "is_purchase_cost": 1}, pluck="name"
+	)
 	if not purchase_cost_types:
 		return []
 
@@ -185,7 +187,9 @@ def bulk_update_purchase_cost_source(rows: str):
 	if not rows:
 		frappe.throw(_("No rows provided."))
 
-	purchase_cost_types = set(frappe.get_all("Cost Type", filters={"is_purchase_cost": 1}, pluck="name"))
+	purchase_cost_types = set(
+		frappe.get_all("Cost Type", filters={"is_group": 1, "is_purchase_cost": 1}, pluck="name")
+	)
 
 	updated = 0
 	skipped = []

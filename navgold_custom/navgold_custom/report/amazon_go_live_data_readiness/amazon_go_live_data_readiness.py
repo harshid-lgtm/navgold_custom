@@ -110,7 +110,12 @@ def get_purchase_cost_map(strategy_names):
 		.join(cost_type)
 		.on(cost.cost_type == cost_type.name)
 		.select(cost.parent, Max(cost.value).as_("purchase_cost"))
-		.where((cost.parent.isin(strategy_names)) & (cost.is_active == 1) & (cost_type.is_purchase_cost == 1))
+		.where(
+			(cost.parent.isin(strategy_names))
+			& (cost.is_active == 1)
+			& (cost_type.is_group == 1)
+			& (cost_type.is_purchase_cost == 1)
+		)
 		.groupby(cost.parent)
 	).run(as_dict=True)
 	return {row.parent: flt(row.purchase_cost) for row in rows}

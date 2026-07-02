@@ -103,11 +103,11 @@ frappe.ui.form.on('Amazon Product Strategy', {
 			cdn,
 		) => {
 			const row = locals[cdt][cdn];
-			return {
-				filters: {
-					cost_type: row.cost_type,
-				},
-			};
+			const filters = { is_group: 0 };
+			if (row.cost_type) {
+				filters.parent_cost_type = row.cost_type;
+			}
+			return { filters };
 		};
 
 		render_cost_filter_controls(frm);
@@ -151,6 +151,25 @@ frappe.ui.form.on('Amazon Product Strategy', {
 	},
 });
 
+frappe.ui.form.on('Amazon Product Cost', {
+	async cost_sub_type(frm, cdt, cdn) {
+		const row = locals[cdt][cdn];
+		if (!row.cost_sub_type) {
+			return;
+		}
+		// The sub type is a leaf Cost Type; its parent group is the row's cost type.
+		const response = await frappe.db.get_value(
+			'Cost Type',
+			row.cost_sub_type,
+			'parent_cost_type',
+		);
+		const parent_cost_type = response.message?.parent_cost_type;
+		if (parent_cost_type) {
+			frappe.model.set_value(cdt, cdn, 'cost_type', parent_cost_type);
+		}
+	},
+});
+
 function render_cost_filter_controls(frm) {
 	const grid_field = frm.fields_dict.costs;
 	if (!grid_field) {
@@ -189,6 +208,7 @@ function render_cost_filter_controls(frm) {
 				fieldname: 'cost_type_filter',
 				label: __('Filter by Cost Type'),
 				options: 'Cost Type',
+				get_query: () => ({ filters: { is_group: 1 } }),
 				change: () => {
 					frm.cost_filter_state.cost_type = cstr(
 						frm.cost_type_filter_control.get_value(),
@@ -208,11 +228,11 @@ function render_cost_filter_controls(frm) {
 				fieldtype: 'Link',
 				fieldname: 'cost_sub_type_filter',
 				label: __('Filter by Cost Sub Type'),
-				options: 'Cost Sub Type',
+				options: 'Cost Type',
 				get_query: () => {
-					const filters = {};
+					const filters = { is_group: 0 };
 					if (frm.cost_filter_state.cost_type) {
-						filters.cost_type = frm.cost_filter_state.cost_type;
+						filters.parent_cost_type = frm.cost_filter_state.cost_type;
 					}
 					return { filters };
 				},
