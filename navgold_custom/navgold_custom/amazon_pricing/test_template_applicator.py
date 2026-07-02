@@ -13,6 +13,65 @@ from navgold_custom.navgold_custom.amazon_pricing.template_applicator import (
 TEMPLATE_NAME = "Test Bulk Template"
 STRATEGY_TYPES = ["FBA", "SFP", "Backorder", "Default"]
 
+TREE_GROUP = "Test Template Absolute"
+TREE_LEAF = f"{TREE_GROUP}-Overhead"
+COST_SET_TEMPLATE = "Test Template Cost Set"
+COST_SET_STRATEGY_TEMPLATE = "Test Cost Set Strategy Template"
+LEAF_DEFAULT_VALUE = 5.0
+
+
+def ensure_cost_tree_leaf():
+	if not frappe.db.exists("Cost Type", TREE_GROUP):
+		group = frappe.new_doc("Cost Type")
+		group.cost_type_name = TREE_GROUP
+		group.is_group = 1
+		group.calculation_type = "Absolute"
+		group.insert()
+	if not frappe.db.exists("Cost Type", TREE_LEAF):
+		# Self-contained leaf (no source): Auto resolves to default_value, keeps the fixture offline-safe.
+		leaf = frappe.new_doc("Cost Type")
+		leaf.cost_type_name = "Overhead"
+		leaf.is_group = 0
+		leaf.parent_cost_type = TREE_GROUP
+		leaf.default_value = LEAF_DEFAULT_VALUE
+		leaf.insert()
+
+
+def create_cost_set_strategy_template():
+	if frappe.db.exists("Amazon Strategy Template", COST_SET_STRATEGY_TEMPLATE):
+		return COST_SET_STRATEGY_TEMPLATE
+
+	ensure_cost_tree_leaf()
+
+	if not frappe.db.exists("Amazon Cost Set Template", COST_SET_TEMPLATE):
+		cost_set = frappe.new_doc("Amazon Cost Set Template")
+		cost_set.template_name = COST_SET_TEMPLATE
+		cost_set.append(
+			"costs",
+			{
+				"cost_type": TREE_GROUP,
+				"cost_sub_type": TREE_LEAF,
+				"default_value": LEAF_DEFAULT_VALUE,
+				"rank": 1,
+			},
+		)
+		cost_set.insert()
+
+	template = frappe.new_doc("Amazon Strategy Template")
+	template.template_name = COST_SET_STRATEGY_TEMPLATE
+	template.append(
+		"strategies",
+		{
+			"strategy_type": "FBA",
+			"strategy_name": "FBA",
+			"min_margin": 10,
+			"max_margin": 20,
+			"cost_set_template": COST_SET_TEMPLATE,
+		},
+	)
+	template.insert()
+	return template.name
+
 
 def create_strategy_template():
 	if frappe.db.exists("Amazon Strategy Template", TEMPLATE_NAME):
@@ -119,6 +178,26 @@ class TestTemplateApplicator(IntegrationTestCase):
 
 		is_active = frappe.db.get_value("Amazon Product Pricing", {"proxy_sku": proxy_sku}, "is_active")
 		self.assertEqual(is_active, 0)
+
+	def test_template_seeds_cost_rows_pointing_at_the_cost_type_tree(self):
+		# A cost-set-backed template must land cost rows on the tree: cost_type = group node,
+		# cost_sub_type = leaf node, value_mode Auto derives from the leaf default, price derives.
+		template_name = create_cost_set_strategy_template()
+		proxy_sku = create_proxy_sku()
+
+		apply_template_to_proxy_sku(template_name, proxy_sku)
+
+		strategy_name = frappe.db.get_value("Amazon Product Strategy", {"proxy_sku": proxy_sku}, "name")
+		strategy = frappe.get_doc("Amazon Product Strategy", strategy_name)
+
+		self.assertEqual(len(strategy.costs), 1)
+		cost = strategy.costs[0]
+		self.assertEqual(cost.cost_type, TREE_GROUP)
+		self.assertEqual(cost.cost_sub_type, TREE_LEAF)
+		self.assertEqual(frappe.db.get_value("Cost Type", cost.cost_sub_type, "is_group"), 0)
+		self.assertEqual(cost.value_mode, "Auto")
+		self.assertEqual(cost.value, LEAF_DEFAULT_VALUE)
+		self.assertGreater(strategy.calculated_min_price, 0)
 
 	def test_run_bulk_rolls_back_failed_item_without_poisoning_batch(self):
 		# A bad item (non-existent Proxy SKU) must roll back to its own savepoint and leave the

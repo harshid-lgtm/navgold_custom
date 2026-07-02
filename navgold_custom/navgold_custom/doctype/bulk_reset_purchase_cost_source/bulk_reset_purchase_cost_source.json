@@ -26,6 +26,7 @@
 			"fieldname": "cost_type",
 			"fieldtype": "Link",
 			"label": "Cost Type",
+			"link_filters": "[[\"Cost Type\",\"is_group\",\"=\",1]]",
 			"options": "Cost Type",
 			"reqd": 1
 		},
@@ -70,7 +71,7 @@
 		},
 		{
 			"default": "Auto",
-			"description": "Auto hands the cost back to its Cost Sub Type source (feed-owned or self-contained default). Manual pins a fixed value.",
+			"description": "Auto hands the cost back to its cost sub type source (feed-owned or self-contained default). Manual pins a fixed value.",
 			"fieldname": "target_mode",
 			"fieldtype": "Select",
 			"label": "Target Mode",

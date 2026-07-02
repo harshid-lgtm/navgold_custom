@@ -20,6 +20,7 @@
 			"fieldtype": "Link",
 			"in_list_view": 1,
 			"label": "Cost Type",
+			"link_filters": "[[\"Cost Type\",\"is_group\",\"=\",1]]",
 			"options": "Cost Type",
 			"reqd": 1
 		},
@@ -28,7 +29,8 @@
 			"fieldtype": "Link",
 			"in_list_view": 1,
 			"label": "Cost Sub Type",
-			"options": "Cost Sub Type"
+			"link_filters": "[[\"Cost Type\",\"is_group\",\"=\",0]]",
+			"options": "Cost Type"
 		},
 		{
 			"default": "0",
