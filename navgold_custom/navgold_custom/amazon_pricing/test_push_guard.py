@@ -333,6 +333,10 @@ class TestPushGuardBulkPush(IntegrationTestCase):
 			def create_feed(self, feed_type, feed_document_id):
 				return {"feedId": "FEED-1"}
 
+		# Amazon SP API Settings is empty on a bare CI site; pin seller/marketplace so the feed
+		# header validates. set_single_value (not change_settings) because this doctype's save()
+		# override rejects ignore_permissions; the test transaction rolls it back.
+		frappe.db.set_single_value("Amazon SP API Settings", {"merchant_id": "TEST-SELLER", "country": "GB"})
 		with change_settings(
 			"Navgold Settings",
 			{
