@@ -105,7 +105,7 @@ def create_strategy_from_template(template_strategy, proxy_sku: str):
 					"value": cost.default_value or 0,
 					"is_active": cost.is_active,
 					"rank": cost.rank or 1,
-					"source": cost.source,
+					"value_mode": "Auto",
 				},
 			)
 

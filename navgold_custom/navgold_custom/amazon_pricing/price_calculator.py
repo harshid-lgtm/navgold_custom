@@ -1,10 +1,21 @@
 # Copyright (c) 2026, developers@buildwithhussain.com and contributors
 # For license information, please see license.txt
 
-
 import frappe
 from frappe.utils.caching import redis_cache
 from frappe.utils.data import flt
+
+# The only two value modes a cost row can carry: Auto (sub-type resolves the feed) or Manual (pinned value).
+VALUE_MODES = {"Auto", "Manual"}
+
+
+@redis_cache()
+def get_cost_sub_type_policy_map() -> dict:
+	# One query feeds every cost row's dispatch; whole table is small (cost sub types are reference data).
+	return {
+		row.name: {"source": row.source, "default_value": row.default_value}
+		for row in frappe.get_all("Cost Sub Type", fields=["name", "source", "default_value"])
+	}
 
 
 @redis_cache()
@@ -38,12 +49,16 @@ def get_item_tax_rate(item_code: str) -> float:
 	return flt(rate)
 
 
-def get_cost_data(strategy, override_supplier_price: float | None = None) -> list[dict]:
+def get_cost_data(
+	strategy, override_supplier_price: float | None = None, policy_map: dict | None = None
+) -> list[dict]:
 	active_costs = [cost for cost in strategy.costs if cost.is_active]
 	if not active_costs:
 		return []
 
 	cost_type_map = get_cost_type_map()
+	if policy_map is None:
+		policy_map = get_cost_sub_type_policy_map()
 
 	cost_data = []
 	for cost in active_costs:
@@ -51,7 +66,9 @@ def get_cost_data(strategy, override_supplier_price: float | None = None) -> lis
 		if not cost_type:
 			continue
 
-		if cost.source == "Supplier-Sync" and override_supplier_price is not None:
+		sub_type_source = (policy_map.get(cost.cost_sub_type) or {}).get("source")
+		is_supplier_fed = sub_type_source == "Supplier-Sync" and cost.value_mode != "Manual"
+		if is_supplier_fed and override_supplier_price is not None:
 			value = flt(override_supplier_price)
 		else:
 			value = flt(cost.value)

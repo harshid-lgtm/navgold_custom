@@ -1,0 +1,115 @@
+meta:
+  theme: tech-blue
+  layout: horizontal
+  routing: orthogonal
+  canvas: 1280x820
+  title: "Amazon Product Cost — Proposed Data Model"
+  description: "Resolver promoted to a master (Cost Source); allowed resolvers bound to Cost Sub Type; Static/Resolved split replaces default_value."
+  legend: "Green = NEW doctype/field. Amber = CHANGED field. Dashed = link constrained by allowed_sources."
+
+modules:
+  - id: config
+    label: "Configuration / Master Data"
+  - id: txn
+    label: "Per-SKU Strategy (transactional)"
+
+nodes:
+  - id: cost_type
+    label: "Cost Type  «master»\n──────────────\ncost_type_name (PK)\ncalculation_type  [Absolute|Relative|VAT]\nis_purchase_cost  (deprecate → derivable)"
+    type: service
+    module: config
+    bounds: { x: 60, y: 80, width: 300, height: 110 }
+
+  - id: cost_sub_type
+    label: "Cost Sub Type «master»\nsub_type_name (PK)\ncost_type → Cost Type\nvalue_origin [Static|Resolved] ◆NEW\nstatic_value (if Static) ◆NEW\ndefault_source → Cost Source ◆NEW\nremoved: default_value"
+    type: service
+    module: config
+    bounds: { x: 60, y: 270, width: 300, height: 150 }
+    style:
+      fillColor: "#FEF3C7"
+      strokeColor: "#D97706"
+
+  - id: allowed_sources
+    label: "Allowed Sources  «child of Cost Sub Type»   ◆NEW\n──────────────\ncost_source → Cost Source"
+    type: document
+    module: config
+    bounds: { x: 440, y: 470, width: 280, height: 90 }
+    style:
+      fillColor: "#DCFCE7"
+      strokeColor: "#16A34A"
+
+  - id: cost_source
+    label: "Cost Source  «master»   ◆NEW\n──────────────\nsource_name (PK)\nresolver_key  (dotted path / dispatch)\nis_manual  (never auto-overwritten)\nis_static  (constant resolver)"
+    type: service
+    module: config
+    bounds: { x: 60, y: 600, width: 300, height: 130 }
+    style:
+      fillColor: "#DCFCE7"
+      strokeColor: "#16A34A"
+
+  - id: legend
+    label: "LEGEND\nGreen box = NEW doctype/field\nAmber box = CHANGED\nDashed → = constrained link\n(source ⊆ allowed_sources)"
+    type: text
+    bounds: { x: 400, y: 600, width: 300, height: 120 }
+    style:
+      fillColor: "#F1F5F9"
+      strokeColor: "#94A3B8"
+      align: left
+      verticalAlign: top
+      spacingLeft: 10
+      spacingTop: 8
+
+  - id: strategy
+    label: "Amazon Product Strategy\n──────────────\nproxy_sku → Proxy SKU\nmin_margin / max_margin\ncalculated_min_price / max_price (RO)"
+    type: service
+    module: txn
+    bounds: { x: 880, y: 90, width: 320, height: 120 }
+
+  - id: product_cost
+    label: "Amazon Product Cost «child»\ncost_type → Cost Type\ncost_sub_type → Cost Sub Type\nsource → Cost Source (filtered) ◆CHG\nvalue (read-only if Resolved) ◆CHG\nrank / is_active (lowest wins)"
+    type: document
+    module: txn
+    bounds: { x: 860, y: 360, width: 360, height: 160 }
+    style:
+      fillColor: "#FEF3C7"
+      strokeColor: "#D97706"
+
+edges:
+  - from: cost_type
+    to: cost_sub_type
+    type: primary
+    label: "1 : N"
+  - from: cost_sub_type
+    to: allowed_sources
+    type: primary
+    label: "1 : N"
+  - from: cost_source
+    to: allowed_sources
+    type: primary
+    label: "1 : N"
+  - from: cost_sub_type
+    to: cost_source
+    type: dependency
+    label: "default_source"
+  - from: strategy
+    to: product_cost
+    type: primary
+    label: "1 : N  (costs table)"
+  - from: product_cost
+    to: cost_type
+    type: data
+    label: "link"
+    style:
+      dashed: false
+  - from: product_cost
+    to: cost_sub_type
+    type: data
+    label: "link"
+    style:
+      dashed: false
+  - from: product_cost
+    to: cost_source
+    type: data
+    label: "source ⊆ allowed_sources (constrained)"
+    style:
+      dashed: true

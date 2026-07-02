@@ -7,6 +7,10 @@ from frappe.query_builder import DocType
 from frappe.query_builder.functions import Max
 from frappe.utils.data import cint, flt
 
+from navgold_custom.navgold_custom.amazon_pricing.pricing_validators import (
+	get_push_block_violations,
+)
+
 
 def execute(filters=None):
 	filters = frappe._dict(filters or {})
@@ -81,10 +85,13 @@ def get_data(filters):
 		)
 	}
 	purchase_cost_map = get_purchase_cost_map(strategy_names)
+	push_block_map = get_push_block_violations(strategy_names)
 
 	rows = []
 	for proxy in proxies:
-		row = build_readiness_row(proxy, pricing_map.get(proxy.name), strategy_map, purchase_cost_map)
+		row = build_readiness_row(
+			proxy, pricing_map.get(proxy.name), strategy_map, purchase_cost_map, push_block_map
+		)
 		rows.append(row)
 
 	if cint(filters.get("only_issues", 1)):
@@ -109,7 +116,7 @@ def get_purchase_cost_map(strategy_names):
 	return {row.parent: flt(row.purchase_cost) for row in rows}
 
 
-def build_readiness_row(proxy, pricing, strategy_map, purchase_cost_map):
+def build_readiness_row(proxy, pricing, strategy_map, purchase_cost_map, push_block_map):
 	issues = []
 	strategy = None
 	purchase_cost = 0.0
@@ -136,6 +143,7 @@ def build_readiness_row(proxy, pricing, strategy_map, purchase_cost_map):
 				purchase_cost = purchase_cost_map.get(strategy.name, 0.0)
 				if purchase_cost <= 0:
 					issues.append(_("purchase cost missing or 0"))
+				issues.extend(push_block_map.get(strategy.name, []))
 
 		min_price = flt(pricing.current_min_price)
 		max_price = flt(pricing.current_max_price)

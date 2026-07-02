@@ -5,6 +5,10 @@ import frappe
 
 
 def execute():
+	# The `source` field on this child table was removed in the cost-source remodel; nothing to do then.
+	if not frappe.get_meta("Amazon Cost Set Template Item").get_field("source"):
+		return
+
 	# Repoint template VAT lines from Manual to Item-Tax-Sync so new strategies pick up each item's real VAT.
 	vat_cost_types = frappe.get_all("Cost Type", filters={"calculation_type": "VAT"}, pluck="name")
 	if not vat_cost_types:

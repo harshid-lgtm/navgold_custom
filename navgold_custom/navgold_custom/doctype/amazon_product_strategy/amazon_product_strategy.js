@@ -34,7 +34,7 @@ frappe.ui.form.on('Amazon Product Strategy', {
 									row.value = cost.default_value;
 									row.is_active = cost.is_active;
 									row.rank = cost.rank;
-									row.source = cost.source;
+									row.value_mode = 'Auto';
 								}
 
 								frm.refresh_field('costs');

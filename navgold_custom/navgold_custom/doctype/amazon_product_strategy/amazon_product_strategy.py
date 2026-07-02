@@ -10,6 +10,7 @@ from navgold_custom.navgold_custom.amazon_pricing.price_calculator import (
 	calculate_margin_from_price,
 	calculate_prices,
 	get_cost_data,
+	get_cost_sub_type_policy_map,
 	get_item_tax_rate,
 )
 from navgold_custom.navgold_custom.amazon_pricing.purchase_cost_sources import (
@@ -58,6 +59,10 @@ ITEM_SYNCED_SOURCE_RESOLVERS = {
 	"Shipping-Sync": resolve_shipping,
 }
 
+# Sources written by another process (the FBA fee fetcher owns Amazon-Sync). We never resolve these
+# here — the row value is left exactly as the owning process wrote it.
+EXTERNALLY_OWNED_SOURCES = {"Amazon-Sync"}
+
 
 class AmazonProductStrategy(Document):
 	# begin: auto-generated types
@@ -84,10 +89,42 @@ class AmazonProductStrategy(Document):
 	# end: auto-generated types
 
 	def validate(self):
+		policy_map = get_cost_sub_type_policy_map()
 		self.validate_margin()
-		self.populate_costs()
-		self.calculate_prices()
-		self.calculate_reverse_margin()
+		# Must run BEFORE populate_costs: populate_costs rewrites Auto rows from the feed/default on every
+		# save, so a pin run afterwards would see the feed's own write as a change and pin every row. Run
+		# here and cost.value still holds the externally-written value vs the last-saved one — only a
+		# genuine external edit (REST, db.set_value, import, script) differs and gets pinned to Manual.
+		self.pin_external_value_overrides(policy_map)
+		self.populate_costs(policy_map)
+		self.calculate_prices(policy_map)
+		self.calculate_reverse_margin(policy_map)
+
+	def pin_external_value_overrides(self, policy_map: dict):
+		before = self.get_doc_before_save()
+		if before is None:
+			return
+
+		precision = frappe.get_meta("Amazon Product Cost").get_field("value").precision or 4
+
+		before_values = {row.name: row.value for row in before.costs}
+
+		for cost in self.costs:
+			if cost.value_mode == "Manual":
+				continue
+
+			source = (policy_map.get(cost.cost_sub_type) or {}).get("source")
+			if source in EXTERNALLY_OWNED_SOURCES:
+				# Written by the owning process (FBA fee fetcher keeps value_mode=Auto) — a value change
+				# here is not a human override, so it must not be pinned.
+				continue
+
+			previous = before_values.get(cost.name)
+			if previous is None:
+				continue
+
+			if flt(cost.value, precision) != flt(previous, precision):
+				cost.value_mode = "Manual"
 
 	def on_update(self):
 		pricing = frappe.db.get_value(
@@ -113,8 +150,8 @@ class AmazonProductStrategy(Document):
 		if self.min_margin > self.max_margin:
 			frappe.throw(_("Min Margin cannot be greater than Max Margin"))
 
-	def calculate_prices(self):
-		cost_data = get_cost_data(self)
+	def calculate_prices(self, policy_map: dict):
+		cost_data = get_cost_data(self, policy_map=policy_map)
 
 		if not cost_data:
 			self.calculated_min_price = 0
@@ -128,13 +165,13 @@ class AmazonProductStrategy(Document):
 		self.calculated_min_price = prices.get("min_price", 0)
 		self.calculated_max_price = prices.get("max_price", 0)
 
-	def calculate_reverse_margin(self):
+	def calculate_reverse_margin(self, policy_map: dict):
 		if not self.target_price:
 			self.calculated_margin = 0
 			self.calculated_profit = 0
 			return
 
-		cost_data = get_cost_data(self)
+		cost_data = get_cost_data(self, policy_map=policy_map)
 
 		if not cost_data:
 			self.calculated_margin = 0
@@ -146,27 +183,50 @@ class AmazonProductStrategy(Document):
 		self.calculated_margin = result.get("margin", 0)
 		self.calculated_profit = result.get("profit", 0)
 
-	def populate_costs(self):
-		synced_sources = {cost.source for cost in self.costs if cost.source not in (None, "", "Manual")}
-
-		synced_values = self.resolve_synced_source_values(synced_sources)
-		sub_type_defaults = self.get_auto_sync_defaults()
+	def populate_costs(self, policy_map: dict):
+		# The sub-type's source (not the row) decides resolution; the row's value_mode only gates stickiness.
+		# Externally-owned sources are left to their owning process, so they never enter the resolver dispatch.
+		fed_sub_types = {
+			cost.cost_sub_type
+			for cost in self.costs
+			if cost.value_mode != "Manual"
+			and policy_map.get(cost.cost_sub_type, {}).get("source") in ITEM_SYNCED_SOURCE_RESOLVERS
+		}
+		fed_values = self.resolve_fed_sub_type_values(fed_sub_types, policy_map)
 
 		for cost in self.costs:
 			cost.is_active = 1 if cost.rank == 1 else 0
 
-			if cost.source in synced_values:
-				cost.value = flt(synced_values[cost.source])
-			elif cost.source == "Auto-Sync":
-				cost.value = flt(sub_type_defaults.get(cost.cost_sub_type))
+			if cost.value_mode == "Manual":
+				continue
 
-	def resolve_synced_source_values(self, synced_sources) -> dict:
-		active_resolvers = {
-			source: resolver
-			for source, resolver in ITEM_SYNCED_SOURCE_RESOLVERS.items()
-			if source in synced_sources
-		}
-		if not active_resolvers:
+			policy = policy_map.get(cost.cost_sub_type)
+			source = policy.get("source") if policy else None
+
+			if not source:
+				cost.value = flt(policy.get("default_value")) if policy else 0
+			elif source in EXTERNALLY_OWNED_SOURCES:
+				# Owned by another process (e.g. the FBA fee fetcher) — leave the value untouched.
+				continue
+			elif source not in ITEM_SYNCED_SOURCE_RESOLVERS:
+				# A source value with no resolver and not externally-owned is a misconfiguration. Don't
+				# throw (that would abort a whole bulk refresh run); log once and leave the value untouched.
+				frappe.log_error(
+					f"Cost Sub Type {cost.cost_sub_type} has unregistered source {source!r}",
+					"Amazon Product Strategy Cost Source",
+				)
+				continue
+			elif cost.cost_sub_type in fed_values:
+				resolved = fed_values[cost.cost_sub_type]
+				# Resolver returned None → feed not ready; leave at 0 (unsynced) rather than a stale value.
+				cost.value = flt(resolved) if resolved is not None else 0
+			else:
+				cost.value = 0
+
+	def resolve_fed_sub_type_values(self, fed_sub_types, policy_map: dict) -> dict:
+		# fed_sub_types already excludes Manual rows and externally-owned/unresolved sources.
+		active_sources = {policy_map[sub_type]["source"] for sub_type in fed_sub_types}
+		if not active_sources:
 			return {}
 
 		proxy_sku_row = frappe.db.get_value(
@@ -176,7 +236,7 @@ class AmazonProductStrategy(Document):
 			as_dict=True,
 		)
 		if not proxy_sku_row or not proxy_sku_row.item:
-			return dict.fromkeys(active_resolvers, 0)
+			return dict.fromkeys(fed_sub_types, 0)
 
 		context = {
 			"item_code": proxy_sku_row.item,
@@ -187,25 +247,15 @@ class AmazonProductStrategy(Document):
 			"missing_component_rates": self.flags.get("missing_bundle_component_rates"),
 		}
 
-		if "Shipping-Sync" in active_resolvers:
+		if "Shipping-Sync" in active_sources:
 			fba_strategy = frappe.db.get_value("Amazon Product Pricing", self.proxy_sku, "fba_strategy")
 			context["is_fba_strategy"] = fba_strategy == self.name
 
-		return {source: resolver(context) for source, resolver in active_resolvers.items()}
-
-	def get_auto_sync_defaults(self) -> dict:
-		sub_type_names = [
-			cost.cost_sub_type for cost in self.costs if cost.source == "Auto-Sync" and cost.cost_sub_type
-		]
-		if not sub_type_names:
-			return {}
+		resolved_by_source = {
+			source: ITEM_SYNCED_SOURCE_RESOLVERS[source](context) for source in active_sources
+		}
 		return {
-			row.name: row.default_value
-			for row in frappe.get_all(
-				"Cost Sub Type",
-				filters={"name": ["in", sub_type_names]},
-				fields=["name", "default_value"],
-			)
+			sub_type: resolved_by_source.get(policy_map[sub_type]["source"]) for sub_type in fed_sub_types
 		}
 
 

@@ -5,9 +5,78 @@ import frappe
 from frappe.query_builder import DocType
 from frappe.utils.data import flt
 
+from navgold_custom.navgold_custom.amazon_pricing.price_calculator import (
+	get_cost_sub_type_policy_map,
+)
 from navgold_custom.navgold_custom.amazon_pricing.price_guard import (
 	partition_pricing_by_price_deviation,
 )
+
+
+def get_push_block_cost_type_map() -> dict[str, dict]:
+	# Push-block rules need is_purchase_cost too, which the price-calculator's cost-type map omits;
+	# keep that shared map's shape untouched and read both fields here in one query.
+	return {
+		row.name: row
+		for row in frappe.get_all(
+			"Cost Type",
+			fields=["name", "calculation_type", "is_purchase_cost"],
+		)
+	}
+
+
+def get_push_block_violations(
+	strategy_names: list[str],
+	cost_type_map: dict | None = None,
+	policy_map: dict | None = None,
+) -> dict[str, list[str]]:
+	# Per-strategy push blockers driven purely by the active cost rows. A row blocks if it is either
+	# (a) a percentage cost (Relative/VAT) sitting at 0 — percentages are never legitimately 0; or
+	# (b) a fed purchase cost (is_purchase_cost, sub-type source set) on Auto resolving to 0 — unsynced.
+	# Absolute non-purchase zeros (e.g. FBA shipping resolving to 0) are allowed and never block.
+	if not strategy_names:
+		return {}
+
+	if cost_type_map is None:
+		cost_type_map = get_push_block_cost_type_map()
+	if policy_map is None:
+		policy_map = get_cost_sub_type_policy_map()
+
+	cost_rows = frappe.get_all(
+		"Amazon Product Cost",
+		filters={
+			"parenttype": "Amazon Product Strategy",
+			"parent": ["in", strategy_names],
+			"is_active": 1,
+		},
+		fields=["parent", "cost_type", "cost_sub_type", "value", "value_mode"],
+		order_by="idx asc",
+	)
+
+	violations: dict[str, list[str]] = {}
+	for cost in cost_rows:
+		cost_type = cost_type_map.get(cost.cost_type)
+		if not cost_type:
+			continue
+
+		value = flt(cost.value)
+		sub_type_label = cost.cost_sub_type or cost.cost_type
+		calculation_type = cost_type.calculation_type
+
+		if calculation_type in ("Relative", "VAT") and value == 0:
+			violations.setdefault(cost.parent, []).append(
+				f"{sub_type_label}: zero percentage cost ({calculation_type})"
+			)
+			continue
+
+		if cost_type.get("is_purchase_cost") and cost.value_mode == "Auto" and value == 0:
+			sub_type_source = (policy_map.get(cost.cost_sub_type) or {}).get("source")
+			if sub_type_source:
+				violations.setdefault(cost.parent, []).append(
+					f"{sub_type_label}: unsynced purchase cost (source {sub_type_source})"
+				)
+
+	return violations
 
 
 def get_purchase_cost_map(strategy_names: list[str]) -> dict[str, dict]:
@@ -20,7 +89,7 @@ def get_purchase_cost_map(strategy_names: list[str]) -> dict[str, dict]:
 		frappe.qb.from_(cost)
 		.join(cost_type)
 		.on(cost.cost_type == cost_type.name)
-		.select(cost.parent, cost.value, cost.source)
+		.select(cost.parent, cost.value, cost.value_mode)
 		.where(
 			(cost.parenttype == "Amazon Product Strategy")
 			& (cost.parent.isin(strategy_names))
@@ -30,7 +99,7 @@ def get_purchase_cost_map(strategy_names: list[str]) -> dict[str, dict]:
 		)
 	).run(as_dict=True)
 
-	return {row.parent: {"value": flt(row.value), "source": row.source} for row in rows}
+	return {row.parent: {"value": flt(row.value), "value_mode": row.value_mode} for row in rows}
 
 
 def collect_pricing_violations(
@@ -64,6 +133,7 @@ def collect_pricing_violations(
 			)
 		}
 	purchase_cost_map = get_purchase_cost_map(strategy_names)
+	push_block_map = get_push_block_violations(strategy_names)
 
 	violations: dict[str, list[str]] = {}
 
@@ -85,10 +155,13 @@ def collect_pricing_violations(
 			elif purchase_cost["value"] <= 0:
 				add_violation(
 					pricing.name,
-					f"Purchase cost is {purchase_cost['value']:g} (source: {purchase_cost['source']})",
+					f"Purchase cost is {purchase_cost['value']:g} (value mode: {purchase_cost['value_mode']})",
 				)
 			else:
 				purchase_cost_value = flt(purchase_cost["value"])
+
+			for reason in push_block_map.get(pricing.active_strategy, []):
+				add_violation(pricing.name, reason)
 
 		min_price = flt(pricing.current_min_price)
 		max_price = flt(pricing.current_max_price)

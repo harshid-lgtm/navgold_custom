@@ -53,12 +53,21 @@ def create_item(item_code, tax_template=None):
 	return item.name
 
 
+VAT_SUB_TYPE = f"{VAT_COST_TYPE}-VAT"
+
+
 def create_vat_cost_type():
 	if not frappe.db.exists("Cost Type", VAT_COST_TYPE):
 		cost_type = frappe.new_doc("Cost Type")
 		cost_type.cost_type_name = VAT_COST_TYPE
 		cost_type.calculation_type = "VAT"
 		cost_type.insert()
+	if not frappe.db.exists("Cost Sub Type", VAT_SUB_TYPE):
+		sub_type = frappe.new_doc("Cost Sub Type")
+		sub_type.cost_type = VAT_COST_TYPE
+		sub_type.sub_type_name = "VAT"
+		sub_type.source = "Item-Tax-Sync"
+		sub_type.insert()
 	return VAT_COST_TYPE
 
 
@@ -79,7 +88,8 @@ def create_strategy_with_tax_sync(item_code):
 		"costs",
 		{
 			"cost_type": VAT_COST_TYPE,
-			"source": "Item-Tax-Sync",
+			"cost_sub_type": VAT_SUB_TYPE,
+			"value_mode": "Auto",
 			"rank": 1,
 			# Bogus value that populate_costs must overwrite from the item's tax template.
 			"value": 999,

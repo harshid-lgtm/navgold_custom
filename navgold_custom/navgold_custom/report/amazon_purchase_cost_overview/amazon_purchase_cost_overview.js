@@ -24,9 +24,9 @@ frappe.query_reports['Amazon Purchase Cost Overview'] = {
 	formatter(value, row, column, data, default_formatter) {
 		const formatted = default_formatter(value, row, column, data);
 
-		if (column.fieldname === 'current_source' && data) {
+		if (column.fieldname === 'current_mode' && data) {
 			const staged = staged_pricing_changes.get_staged(data.strategy);
-			return format_cost_source_cell(data.strategy, value, staged);
+			return format_cost_mode_cell(data.strategy, value, staged);
 		}
 
 		if (column.fieldname === 'current_value' && data) {
@@ -34,7 +34,7 @@ frappe.query_reports['Amazon Purchase Cost Overview'] = {
 			return format_cost_value_cell(
 				data.strategy,
 				cint(data.is_fba),
-				data.current_source,
+				data.current_mode,
 				flt(data.current_value),
 				staged,
 			);
@@ -95,12 +95,12 @@ const staged_pricing_changes = {
 function format_cost_value_cell(
 	strategy,
 	is_fba,
-	current_source,
+	current_mode,
 	current_value,
 	staged,
 ) {
-	const edit_icon = `<span class="edit-btn" data-strategy="${strategy}" data-is-fba="${is_fba}" data-current-source="${
-		current_source || ''
+	const edit_icon = `<span class="edit-btn" data-strategy="${strategy}" data-is-fba="${is_fba}" data-current-mode="${
+		current_mode || ''
 	}" data-current-value="${current_value}" title="${__(
 		'Edit override',
 	)}">${frappe.utils.icon('edit', 'sm')}</span>`;
@@ -119,15 +119,15 @@ function format_cost_value_cell(
 	return `<div class="edit-btn-wrapper">${value_html}${edit_icon}</div>`;
 }
 
-function format_cost_source_cell(strategy, current_source, staged) {
+function format_cost_mode_cell(strategy, current_mode, staged) {
 	let inner = '';
 	if (staged) {
 		inner = `<span style="color:#b54708;font-weight:600">${staged.source} <small>(staged)</small></span>`;
-	} else if (current_source) {
-		const color = current_source === 'Manual' ? '#b54708' : '#067647';
-		inner = `<span style="color:${color};font-weight:500">${current_source}</span>`;
+	} else if (current_mode) {
+		const color = current_mode === 'Manual' ? '#b54708' : '#067647';
+		inner = `<span style="color:${color};font-weight:500">${current_mode}</span>`;
 	}
-	return `<span class="source-cell-content" data-strategy="${strategy}">${inner}</span>`;
+	return `<span class="mode-cell-content" data-strategy="${strategy}">${inner}</span>`;
 }
 
 function refresh_strategy_row(strategy) {
@@ -138,7 +138,7 @@ function refresh_strategy_row(strategy) {
 	if (!pencil) return;
 
 	const is_fba = cint(pencil.getAttribute('data-is-fba'));
-	const current_source = pencil.getAttribute('data-current-source');
+	const current_mode = pencil.getAttribute('data-current-mode');
 	const current_value = flt(pencil.getAttribute('data-current-value'));
 
 	const wrapper = pencil.closest('.edit-btn-wrapper');
@@ -146,21 +146,17 @@ function refresh_strategy_row(strategy) {
 		wrapper.outerHTML = format_cost_value_cell(
 			strategy,
 			is_fba,
-			current_source,
+			current_mode,
 			current_value,
 			staged,
 		);
 	}
 
-	const source_span = document.querySelector(
-		`.source-cell-content[data-strategy="${CSS.escape(strategy)}"]`,
+	const mode_span = document.querySelector(
+		`.mode-cell-content[data-strategy="${CSS.escape(strategy)}"]`,
 	);
-	if (source_span) {
-		source_span.outerHTML = format_cost_source_cell(
-			strategy,
-			current_source,
-			staged,
-		);
+	if (mode_span) {
+		mode_span.outerHTML = format_cost_mode_cell(strategy, current_mode, staged);
 	}
 }
 
@@ -196,13 +192,13 @@ function add_edit_event_listener(report) {
 		.on('click.purchase_cost_override', '.edit-btn', function () {
 			const strategy = $(this).data('strategy');
 			const is_fba = cint($(this).data('is-fba'));
-			const current_source = $(this).data('current-source');
+			const current_mode = $(this).data('current-mode');
 			const current_value = flt($(this).data('current-value'));
 			open_per_row_edit_dialog(
 				report,
 				strategy,
 				is_fba,
-				current_source,
+				current_mode,
 				current_value,
 			);
 		});
@@ -212,7 +208,7 @@ function open_per_row_edit_dialog(
 	report,
 	strategy,
 	is_fba,
-	current_source,
+	current_mode,
 	current_value,
 ) {
 	const existing_staged = staged_pricing_changes.get_staged(strategy);
@@ -226,16 +222,16 @@ function open_per_row_edit_dialog(
 				options: `<p class="text-muted">${__(
 					'Current',
 				)}: <strong>${frappe.utils.escape_html(
-					current_source || '-',
+					current_mode || '-',
 				)}</strong> @ ${format_currency(current_value)}</p>`,
 			},
 			{
 				fieldname: 'source',
 				fieldtype: 'Select',
-				label: __('Source'),
+				label: __('Mode'),
 				reqd: 1,
-				options: 'Manual\nSupplier-Sync\nPO-Sync\nFBA-Transfer',
-				default: existing_staged?.source || current_source || 'Manual',
+				options: 'Auto\nManual',
+				default: existing_staged?.source || current_mode || 'Auto',
 			},
 			{
 				fieldname: 'value',
@@ -251,10 +247,6 @@ function open_per_row_edit_dialog(
 		],
 		primary_action_label: existing_staged ? __('Update Stage') : __('Stage'),
 		primary_action: (values) => {
-			if (values.source === 'FBA-Transfer' && !is_fba) {
-				frappe.msgprint(__('FBA-Transfer can only be set on FBA strategies.'));
-				return;
-			}
 			staged_pricing_changes.set_staged(
 				strategy,
 				values.source,
@@ -354,9 +346,9 @@ async function open_bulk_update_dialog(report) {
 			{
 				fieldname: 'source',
 				fieldtype: 'Select',
-				label: __('Source'),
+				label: __('Mode'),
 				reqd: 1,
-				options: 'Manual\nSupplier-Sync\nPO-Sync\nFBA-Transfer',
+				options: 'Auto\nManual',
 			},
 			{
 				fieldname: 'value',
@@ -368,17 +360,8 @@ async function open_bulk_update_dialog(report) {
 		],
 		primary_action_label: __('Apply'),
 		primary_action: async (values) => {
-			const validation_error = validate_source_against_rows(
-				values.source,
-				selected_rows,
-			);
-			if (validation_error) {
-				frappe.msgprint(validation_error);
-				return;
-			}
-
 			const confirmed = await navgold.confirm_dialog(
-				__("Update {0} row(s) to source '{1}'?", [
+				__("Update {0} row(s) to mode '{1}'?", [
 					selected_rows.length,
 					values.source,
 				]),
@@ -391,21 +374,6 @@ async function open_bulk_update_dialog(report) {
 	});
 
 	dialog.show();
-}
-
-function validate_source_against_rows(source, selected_rows) {
-	if (source !== 'FBA-Transfer') return null;
-
-	const non_fba_rows = selected_rows.filter((row) => !cint(row.is_fba));
-	if (non_fba_rows.length === 0) return null;
-
-	const sample = non_fba_rows
-		.slice(0, 5)
-		.map((row) => row.strategy)
-		.join(', ');
-	return __('FBA-Transfer can only be set on FBA strategies. Conflicts: {0}', [
-		sample,
-	]);
 }
 
 async function save_bulk_update(report, selected_rows, values) {

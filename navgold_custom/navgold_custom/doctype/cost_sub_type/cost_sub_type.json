@@ -9,9 +9,9 @@
 	"field_order": [
 		"sub_type_name",
 		"cost_type",
+		"source",
 		"column_break_subtype",
-		"default_value",
-		"is_default"
+		"default_value"
 	],
 	"fields": [
 		{
@@ -37,7 +37,7 @@
 		},
 		{
 			"default": "0",
-			"description": "Default value when creating costs",
+			"description": "Self-contained value, used only when Source is empty. A fed cost (Source set) must leave this 0.",
 			"fieldname": "default_value",
 			"fieldtype": "Float",
 			"in_list_view": 1,
@@ -45,12 +45,12 @@
 			"precision": "4"
 		},
 		{
-			"default": "0",
-			"description": "Default subtype for this cost type",
-			"fieldname": "is_default",
-			"fieldtype": "Check",
+			"description": "The feed that owns this cost's value. Empty = self-contained (uses Default Value). Set = fed by that source; the value is derived, not entered.",
+			"fieldname": "source",
+			"fieldtype": "Select",
 			"in_standard_filter": 1,
-			"label": "Is Default"
+			"label": "Source",
+			"options": "\nSupplier-Sync\nPO-Sync\nFBA-Transfer\nAmazon-Sync\nItem-Tax-Sync\nShipping-Sync"
 		}
 	],
 	"grid_page_length": 50,

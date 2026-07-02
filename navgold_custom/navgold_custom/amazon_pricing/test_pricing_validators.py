@@ -61,6 +61,18 @@ def create_proxy_sku(selling_price=None):
 	return proxy_sku.name
 
 
+def ensure_purchase_sub_type(source):
+	# Manual rows need no sub-type policy; a fed row's source lives on its Cost Sub Type now.
+	sub_type_name = f"{PURCHASE_COST_TYPE}-{source}"
+	if not frappe.db.exists("Cost Sub Type", sub_type_name):
+		sub_type = frappe.new_doc("Cost Sub Type")
+		sub_type.cost_type = PURCHASE_COST_TYPE
+		sub_type.sub_type_name = source
+		sub_type.source = source
+		sub_type.insert()
+	return sub_type_name
+
+
 def create_strategy(proxy_sku, purchase_cost_value=5.0, cost_source="Manual", is_active=1):
 	strategy = frappe.new_doc("Amazon Product Strategy")
 	strategy.proxy_sku = proxy_sku
@@ -68,16 +80,19 @@ def create_strategy(proxy_sku, purchase_cost_value=5.0, cost_source="Manual", is
 	strategy.is_active = is_active
 	strategy.min_margin = 10
 	strategy.max_margin = 20
-	strategy.append(
-		"costs",
-		{
-			"cost_type": PURCHASE_COST_TYPE,
-			"value": purchase_cost_value,
-			"source": cost_source,
-			"rank": 1,
-			"is_active": 1,
-		},
-	)
+
+	row = {
+		"cost_type": PURCHASE_COST_TYPE,
+		"value": purchase_cost_value,
+		"rank": 1,
+		"is_active": 1,
+	}
+	if cost_source == "Manual":
+		row["value_mode"] = "Manual"
+	else:
+		row["value_mode"] = "Auto"
+		row["cost_sub_type"] = ensure_purchase_sub_type(cost_source)
+	strategy.append("costs", row)
 	strategy.insert()
 	return strategy
 

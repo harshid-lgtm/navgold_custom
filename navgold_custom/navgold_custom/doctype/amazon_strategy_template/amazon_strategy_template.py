@@ -74,7 +74,7 @@ class AmazonStrategyTemplate(Document):
 							"value": cost_item.default_value,
 							"is_active": cost_item.is_active,
 							"rank": cost_item.rank,
-							"source": "Manual",
+							"value_mode": "Auto",
 						},
 					)
 

@@ -7,6 +7,7 @@ from frappe.tests import IntegrationTestCase
 from navgold_custom.navgold_custom.amazon_pricing.shipping_cost import get_shipping_cost
 
 SHIPPING_COST_TYPE = "Test Shipping Weight Cost"
+SHIPPING_SUB_TYPE = f"{SHIPPING_COST_TYPE}-Shipping"
 SHIPPING_ITEM_CODE = "TEST-SHIPPING-COST-ITEM"
 
 # (upper_weight_g, shipping_cost) — the live UK bands.
@@ -31,6 +32,12 @@ def create_shipping_cost_type():
 		cost_type.cost_type_name = SHIPPING_COST_TYPE
 		cost_type.calculation_type = "Absolute"
 		cost_type.insert()
+	if not frappe.db.exists("Cost Sub Type", SHIPPING_SUB_TYPE):
+		sub_type = frappe.new_doc("Cost Sub Type")
+		sub_type.cost_type = SHIPPING_COST_TYPE
+		sub_type.sub_type_name = "Shipping"
+		sub_type.source = "Shipping-Sync"
+		sub_type.insert()
 	return SHIPPING_COST_TYPE
 
 
@@ -68,7 +75,8 @@ def create_shipping_strategy(proxy_sku, strategy_name="Shipping-Test"):
 		"costs",
 		{
 			"cost_type": SHIPPING_COST_TYPE,
-			"source": "Shipping-Sync",
+			"cost_sub_type": SHIPPING_SUB_TYPE,
+			"value_mode": "Auto",
 			"rank": 1,
 			# Bogus value that populate_costs must overwrite from the tier table.
 			"value": 999,
@@ -79,7 +87,7 @@ def create_shipping_strategy(proxy_sku, strategy_name="Shipping-Test"):
 
 
 def shipping_value(strategy):
-	return next(cost for cost in strategy.costs if cost.source == "Shipping-Sync").value
+	return next(cost for cost in strategy.costs if cost.cost_sub_type == SHIPPING_SUB_TYPE).value
 
 
 class TestShippingCost(IntegrationTestCase):

@@ -6,13 +6,15 @@ from frappe import _
 from frappe.query_builder import DocType
 from frappe.utils.data import flt
 
+from navgold_custom.navgold_custom.amazon_pricing.price_calculator import (
+	VALUE_MODES,
+	get_cost_sub_type_policy_map,
+)
 from navgold_custom.navgold_custom.amazon_pricing.purchase_cost_sources import (
 	get_effective_po_purchase_costs,
 	get_effective_supplier_purchase_costs,
 )
 from navgold_custom.navgold_custom.utils import get_conversion_factor
-
-ALLOWED_BULK_SOURCES = {"Manual", "Supplier-Sync", "PO-Sync", "FBA-Transfer"}
 
 
 def execute(filters: dict | None = None):
@@ -52,8 +54,14 @@ def get_columns() -> list[dict]:
 			"width": 110,
 		},
 		{
-			"label": _("Current Source"),
-			"fieldname": "current_source",
+			"label": _("Mode"),
+			"fieldname": "current_mode",
+			"fieldtype": "Data",
+			"width": 130,
+		},
+		{
+			"label": _("Feed Source"),
+			"fieldname": "feed_source",
 			"fieldtype": "Data",
 			"width": 130,
 		},
@@ -103,9 +111,11 @@ def get_data(filters: dict) -> list[dict]:
 
 	supplier_map = get_effective_supplier_purchase_costs(item_uom_pairs)
 	po_map = get_effective_po_purchase_costs(item_uom_pairs)
+	policy = get_cost_sub_type_policy_map()
 
 	for row in rows:
 		key = (row.get("item"), row.get("uom"))
+		row["feed_source"] = (policy.get(row.get("cost_sub_type")) or {}).get("source")
 		row["supplier_sync_preview"] = supplier_map.get(key)
 		row["po_sync_preview"] = po_map.get(key)
 		row["fba_transfer_preview"] = (
@@ -116,9 +126,9 @@ def get_data(filters: dict) -> list[dict]:
 
 	source_type = filters.get("source_type") or "All"
 	if source_type == "Manual":
-		rows = [row for row in rows if row["current_source"] == "Manual"]
+		rows = [row for row in rows if row["current_mode"] == "Manual"]
 	elif source_type == "Auto":
-		rows = [row for row in rows if row["current_source"] != "Manual"]
+		rows = [row for row in rows if row["current_mode"] != "Manual"]
 
 	return rows
 
@@ -145,7 +155,8 @@ def fetch_active_purchase_cost_rows(filters: dict, purchase_cost_types: list[str
 			proxy_sku.last_transfer_rate.as_("last_transfer_rate"),
 			strategy.name.as_("strategy"),
 			strategy.strategy_name.as_("strategy_name"),
-			cost.source.as_("current_source"),
+			cost.cost_sub_type.as_("cost_sub_type"),
+			cost.value_mode.as_("current_mode"),
 			cost.value.as_("current_value"),
 			cost.modified.as_("last_updated"),
 		)
@@ -158,8 +169,6 @@ def fetch_active_purchase_cost_rows(filters: dict, purchase_cost_types: list[str
 
 	if filters.get("strategy_name"):
 		query = query.where(strategy.strategy_name == filters["strategy_name"])
-	if filters.get("current_source"):
-		query = query.where(cost.source == filters["current_source"])
 	if filters.get("proxy_sku"):
 		query = query.where(strategy.proxy_sku == filters["proxy_sku"])
 	if filters.get("item"):
@@ -183,14 +192,14 @@ def bulk_update_purchase_cost_source(rows: str):
 
 	for row in rows:
 		strategy_name = row.get("strategy")
-		source = row.get("source")
+		value_mode = row.get("source")
 		value = row.get("value")
 
-		if source not in ALLOWED_BULK_SOURCES:
-			skipped.append({"strategy": strategy_name, "reason": _("Invalid source")})
+		if value_mode not in VALUE_MODES:
+			skipped.append({"strategy": strategy_name, "reason": _("Value Mode must be Auto or Manual")})
 			continue
 
-		if source == "Manual" and (value in (None, "")):
+		if value_mode == "Manual" and (value in (None, "")):
 			skipped.append({"strategy": strategy_name, "reason": _("Manual requires a value")})
 			continue
 
@@ -200,8 +209,8 @@ def bulk_update_purchase_cost_source(rows: str):
 			skipped.append({"strategy": strategy_name, "reason": _("No active purchase cost row")})
 			continue
 
-		purchase_cost_row.source = source
-		if source == "Manual":
+		purchase_cost_row.value_mode = value_mode
+		if value_mode == "Manual":
 			purchase_cost_row.value = flt(value)
 
 		strategy.save()
