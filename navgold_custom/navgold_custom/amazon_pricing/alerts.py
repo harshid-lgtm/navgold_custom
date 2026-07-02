@@ -97,10 +97,7 @@ def send_telegram_message(
 	dedupe_key: str | None = None,
 	dedupe_seconds: int = 600,
 ) -> None:
-	# Whitelisted so Server Scripts can enqueue it — the sandbox only allows whitelisted
-	# methods. Body is passed through unescaped so callers may use HTML. With a title it
-	# renders as a structured alert (severity prefix + bold header); without one the
-	# caller's pre-formatted message is sent verbatim.
+	# Whitelisted so Server Scripts can enqueue it — the sandbox only allows whitelisted methods.
 	lines = message if isinstance(message, list) else [cstr(message)]
 	if title:
 		notify(
