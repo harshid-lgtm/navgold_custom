@@ -4,7 +4,7 @@
 import frappe
 from frappe import _
 from frappe.integrations.utils import make_get_request, make_post_request
-from frappe.utils.data import add_to_date, cint, flt, fmt_money, get_datetime, now_datetime
+from frappe.utils.data import add_to_date, cint, cstr, flt, fmt_money, get_datetime, now_datetime
 
 from navgold_custom.navgold_custom.report.below_min_price_sales.below_min_price_sales import (
 	get_min_price_map,
@@ -80,6 +80,26 @@ def notify(
 	body = "\n".join(lines)
 	text = f"{prefix}<b>{frappe.utils.escape_html(title)}</b>\n{body}"
 	send_telegram(text, config, silent=silent)
+
+
+@frappe.whitelist()
+def send_telegram_message(
+	message,
+	title: str | None = None,
+	severity: str = "info",
+	dedupe_key: str | None = None,
+	dedupe_seconds=600,
+) -> None:
+	# Whitelisted so Server Scripts can enqueue it — the sandbox only allows whitelisted
+	# methods. Body is passed through unescaped so callers may use HTML.
+	lines = message if isinstance(message, list) else [cstr(message)]
+	notify(
+		title or _("Alert"),
+		lines,
+		severity=severity,
+		dedupe_key=dedupe_key,
+		dedupe_seconds=cint(dedupe_seconds) or 600,
+	)
 
 
 def format_money(amount) -> str:
