@@ -62,7 +62,7 @@ def create_strategy(proxy_sku, purchase_cost_value=5.0, min_margin=10, max_margi
 		{
 			"cost_type": PURCHASE_COST_TYPE,
 			"value": purchase_cost_value,
-			"source": "Manual",
+			"value_mode": "Manual",
 			"rank": 1,
 			"is_active": 1,
 		},
