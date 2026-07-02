@@ -77,25 +77,6 @@ class TestCostSourceRemodel(IntegrationTestCase):
 		ensure_sub_type(FED_SUB_TYPE, "Top Supplier", source="Supplier-Sync")
 		ensure_sub_type(DEFAULTED_SUB_TYPE, "Overhead", source="", default_value=3.5)
 
-	def test_validate_rejects_source_with_default_value(self):
-		sub_type = frappe.new_doc("Cost Sub Type")
-		sub_type.cost_type = ABSOLUTE_COST_TYPE
-		sub_type.sub_type_name = "Bad Fed"
-		sub_type.source = "Supplier-Sync"
-		sub_type.default_value = 12
-		with self.assertRaises(frappe.ValidationError):
-			sub_type.insert()
-
-	def test_validate_allows_default_value_when_self_contained(self):
-		sub_type = frappe.new_doc("Cost Sub Type")
-		sub_type.cost_type = ABSOLUTE_COST_TYPE
-		sub_type.sub_type_name = "Good Overhead"
-		sub_type.source = ""
-		sub_type.default_value = 9
-		sub_type.insert()
-		self.assertEqual(sub_type.default_value, 9)
-		frappe.delete_doc("Cost Sub Type", sub_type.name, force=True)
-
 	def test_defaulted_sub_type_uses_default_value(self):
 		strategy = build_strategy(
 			[{"cost_type": ABSOLUTE_COST_TYPE, "cost_sub_type": DEFAULTED_SUB_TYPE, "value": 0, "rank": 1}]
@@ -118,9 +99,9 @@ class TestCostSourceRemodel(IntegrationTestCase):
 		self.assertEqual(cost.value, 7.25)
 
 	def test_source_options_match_registered_resolvers(self):
-		# Guards against drift: a new Cost Sub Type.source option with no resolver (and not externally
+		# Guards against drift: a new Cost Type.source option with no resolver (and not externally
 		# owned) would silently log-and-skip at runtime. Catch it here instead.
-		options = frappe.get_meta("Cost Sub Type").get_field("source").options or ""
+		options = frappe.get_meta("Cost Type").get_field("source").options or ""
 		source_options = {option for option in options.split("\n") if option}
 		resolvable = source_options - amazon_product_strategy.EXTERNALLY_OWNED_SOURCES
 		self.assertEqual(resolvable, set(amazon_product_strategy.ITEM_SYNCED_SOURCE_RESOLVERS))

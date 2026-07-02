@@ -227,7 +227,7 @@ function render_cost_filter_controls(frm) {
 			df: {
 				fieldtype: 'Link',
 				fieldname: 'cost_sub_type_filter',
-				label: __('Filter by Cost Sub Type'),
+				label: __('Filter by Sub Type'),
 				options: 'Cost Type',
 				get_query: () => {
 					const filters = { is_group: 0 };

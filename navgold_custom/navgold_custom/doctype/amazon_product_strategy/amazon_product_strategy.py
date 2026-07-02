@@ -212,7 +212,7 @@ class AmazonProductStrategy(Document):
 				# A source value with no resolver and not externally-owned is a misconfiguration. Don't
 				# throw (that would abort a whole bulk refresh run); log once and leave the value untouched.
 				frappe.log_error(
-					f"Cost Sub Type {cost.cost_sub_type} has unregistered source {source!r}",
+					f"Cost row {cost.cost_sub_type} has unregistered source {source!r}",
 					"Amazon Product Strategy Cost Source",
 				)
 				continue

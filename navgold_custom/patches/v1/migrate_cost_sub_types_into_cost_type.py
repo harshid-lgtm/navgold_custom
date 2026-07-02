@@ -6,6 +6,11 @@ from frappe.utils.nestedset import rebuild_tree
 
 
 def execute():
+	# The Cost Sub Type doctype is dropped in a later patch; a re-run (or fresh branch) must no-op
+	# rather than query a missing table.
+	if not frappe.db.table_exists("Cost Sub Type"):
+		return
+
 	# Shadow every Cost Sub Type as a leaf Cost Type with the same name so existing
 	# Amazon Product Cost.cost_sub_type links and future readers resolve against the tree.
 	sub_types = frappe.get_all(

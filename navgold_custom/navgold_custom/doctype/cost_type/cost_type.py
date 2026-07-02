@@ -56,7 +56,7 @@ class CostType(NestedSet):
 		# A fed cost derives its value from the feed, so a stray default_value would be misleading/dangerous.
 		if self.source and flt(self.default_value):
 			frappe.throw(
-				_("Default Value must be 0 for a fed cost. Cost Sub Type '{0}' is fed by '{1}'.").format(
+				_("Default Value must be 0 for a fed cost. '{0}' is fed by '{1}'.").format(
 					self.name, self.source
 				)
 			)
