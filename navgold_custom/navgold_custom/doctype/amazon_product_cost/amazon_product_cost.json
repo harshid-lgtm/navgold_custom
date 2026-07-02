@@ -39,7 +39,6 @@
 			"in_list_view": 1,
 			"label": "Value",
 			"precision": "4",
-			"read_only_depends_on": "eval:doc.value_mode==\"Auto\"",
 			"reqd": 1
 		},
 		{
