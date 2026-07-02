@@ -20,7 +20,7 @@ def backorder_pricing():
 	)
 
 
-def inventory_for_backorder(supplier_sfp_eligible, row_sfp, has_restock_date):
+def inventory_for_backorder(supplier_sfp_eligible, row_sfp, has_restock_date, supplier_stock=5):
 	proxy_sku_info = {
 		"TEST-PROXY-SKU": {
 			"item": "TEST-ITEM",
@@ -38,7 +38,7 @@ def inventory_for_backorder(supplier_sfp_eligible, row_sfp, has_restock_date):
 		}
 	}
 	resolved_supplier = frappe._dict(
-		supplier="TEST-SUPPLIER", stock_qty=5, rank=1, price=10, sfp=1 if row_sfp else 0
+		supplier="TEST-SUPPLIER", stock_qty=supplier_stock, rank=1, price=10, sfp=1 if row_sfp else 0
 	)
 	supplier_data_map = {
 		"TEST-ITEM": {"top_supplier": resolved_supplier, "in_stock_supplier": resolved_supplier}
@@ -71,8 +71,17 @@ class TestSfpBackorderItemOptOut(IntegrationTestCase):
 		inventory = inventory_for_backorder(supplier_sfp_eligible=False, row_sfp=True, has_restock_date=True)
 		self.assertEqual(inventory["shipping_group"], SHIPPING_GROUPS["main_revised"])
 
-	def test_no_restock_date_stays_main_revised(self):
-		inventory = inventory_for_backorder(supplier_sfp_eligible=True, row_sfp=True, has_restock_date=False)
+	def test_no_restock_but_supplier_in_stock_lists_as_sfp(self):
+		inventory = inventory_for_backorder(
+			supplier_sfp_eligible=True, row_sfp=True, has_restock_date=False, supplier_stock=5
+		)
+		self.assertEqual(inventory["shipping_group"], SHIPPING_GROUPS["sfp"])
+
+	def test_no_restock_and_no_supplier_stock_stays_main_revised(self):
+		# Neither a restock date nor supplier stock => unfulfillable now, so Main Revised.
+		inventory = inventory_for_backorder(
+			supplier_sfp_eligible=True, row_sfp=True, has_restock_date=False, supplier_stock=0
+		)
 		self.assertEqual(inventory["shipping_group"], SHIPPING_GROUPS["main_revised"])
 
 
