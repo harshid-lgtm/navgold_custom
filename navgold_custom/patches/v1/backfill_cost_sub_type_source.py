@@ -28,6 +28,9 @@ NON_MANUAL_SYNC_SOURCES = {
 
 
 def execute():
+	if not frappe.db.table_exists("Cost Sub Type"):
+		return
+
 	# Capture historical per-sub-type source spread BEFORE value_mode is collapsed to Auto/Manual.
 	log_conflicting_historical_sources()
 

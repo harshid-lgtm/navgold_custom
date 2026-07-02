@@ -67,8 +67,8 @@ const staged_pricing_changes = {
 		return this.staged[strategy_name] || null;
 	},
 
-	set_staged(strategy_name, source, value) {
-		this.staged[strategy_name] = { source, value };
+	set_staged(strategy_name, value_mode, value) {
+		this.staged[strategy_name] = { value_mode, value };
 	},
 
 	clear_staged(strategy_name) {
@@ -78,7 +78,7 @@ const staged_pricing_changes = {
 	get_all_staged() {
 		return Object.entries(this.staged).map(([strategy, edit]) => ({
 			strategy,
-			source: edit.source,
+			value_mode: edit.value_mode,
 			value: edit.value,
 		}));
 	},
@@ -108,7 +108,9 @@ function format_cost_value_cell(
 	let value_html;
 	if (staged) {
 		const display_value =
-			staged.source === 'Manual' ? format_currency(staged.value) : __('(auto)');
+			staged.value_mode === 'Manual'
+				? format_currency(staged.value)
+				: __('(auto)');
 		value_html = `<span style="color:#b54708;font-weight:600">${display_value}</span>`;
 	} else {
 		value_html = `<div style="text-align: right">${format_currency(
@@ -122,7 +124,7 @@ function format_cost_value_cell(
 function format_cost_mode_cell(strategy, current_mode, staged) {
 	let inner = '';
 	if (staged) {
-		inner = `<span style="color:#b54708;font-weight:600">${staged.source} <small>(staged)</small></span>`;
+		inner = `<span style="color:#b54708;font-weight:600">${staged.value_mode} <small>(staged)</small></span>`;
 	} else if (current_mode) {
 		const color = current_mode === 'Manual' ? '#b54708' : '#067647';
 		inner = `<span style="color:${color};font-weight:500">${current_mode}</span>`;
@@ -226,21 +228,21 @@ function open_per_row_edit_dialog(
 				)}</strong> @ ${format_currency(current_value)}</p>`,
 			},
 			{
-				fieldname: 'source',
+				fieldname: 'value_mode',
 				fieldtype: 'Select',
 				label: __('Mode'),
 				reqd: 1,
 				options: 'Auto\nManual',
-				default: existing_staged?.source || current_mode || 'Auto',
+				default: existing_staged?.value_mode || current_mode || 'Auto',
 			},
 			{
 				fieldname: 'value',
 				fieldtype: 'Currency',
 				label: __('Value'),
-				depends_on: "eval:doc.source == 'Manual'",
-				mandatory_depends_on: "eval:doc.source == 'Manual'",
+				depends_on: "eval:doc.value_mode == 'Manual'",
+				mandatory_depends_on: "eval:doc.value_mode == 'Manual'",
 				default:
-					existing_staged?.source === 'Manual'
+					existing_staged?.value_mode === 'Manual'
 						? existing_staged.value
 						: current_value,
 			},
@@ -249,8 +251,8 @@ function open_per_row_edit_dialog(
 		primary_action: (values) => {
 			staged_pricing_changes.set_staged(
 				strategy,
-				values.source,
-				values.source === 'Manual' ? flt(values.value) : null,
+				values.value_mode,
+				values.value_mode === 'Manual' ? flt(values.value) : null,
 			);
 			refresh_strategy_row(strategy);
 			dialog.hide();
@@ -344,7 +346,7 @@ async function open_bulk_update_dialog(report) {
 				])}</p>`,
 			},
 			{
-				fieldname: 'source',
+				fieldname: 'value_mode',
 				fieldtype: 'Select',
 				label: __('Mode'),
 				reqd: 1,
@@ -354,8 +356,8 @@ async function open_bulk_update_dialog(report) {
 				fieldname: 'value',
 				fieldtype: 'Currency',
 				label: __('Value'),
-				depends_on: "eval:doc.source == 'Manual'",
-				mandatory_depends_on: "eval:doc.source == 'Manual'",
+				depends_on: "eval:doc.value_mode == 'Manual'",
+				mandatory_depends_on: "eval:doc.value_mode == 'Manual'",
 			},
 		],
 		primary_action_label: __('Apply'),
@@ -363,7 +365,7 @@ async function open_bulk_update_dialog(report) {
 			const confirmed = await navgold.confirm_dialog(
 				__("Update {0} row(s) to mode '{1}'?", [
 					selected_rows.length,
-					values.source,
+					values.value_mode,
 				]),
 			);
 			if (!confirmed) return;
@@ -379,8 +381,8 @@ async function open_bulk_update_dialog(report) {
 async function save_bulk_update(report, selected_rows, values) {
 	const payload = selected_rows.map((row) => ({
 		strategy: row.strategy,
-		source: values.source,
-		value: values.source === 'Manual' ? flt(values.value) : null,
+		value_mode: values.value_mode,
+		value: values.value_mode === 'Manual' ? flt(values.value) : null,
 	}));
 
 	await save_purchase_cost_updates(

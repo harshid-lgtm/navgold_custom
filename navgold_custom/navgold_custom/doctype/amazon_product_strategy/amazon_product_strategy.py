@@ -6,6 +6,7 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils.data import flt
 
+from navgold_custom.navgold_custom.amazon_pricing.fba_fee_fetcher import FEE_SOURCE
 from navgold_custom.navgold_custom.amazon_pricing.price_calculator import (
 	calculate_margin_from_price,
 	calculate_prices,
@@ -61,7 +62,7 @@ ITEM_SYNCED_SOURCE_RESOLVERS = {
 
 # Sources written by another process (the FBA fee fetcher owns Amazon-Sync). We never resolve these
 # here — the row value is left exactly as the owning process wrote it.
-EXTERNALLY_OWNED_SOURCES = {"Amazon-Sync"}
+EXTERNALLY_OWNED_SOURCES = {FEE_SOURCE}
 
 
 class AmazonProductStrategy(Document):

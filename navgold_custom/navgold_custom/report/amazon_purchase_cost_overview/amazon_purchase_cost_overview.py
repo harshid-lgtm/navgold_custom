@@ -196,7 +196,7 @@ def bulk_update_purchase_cost_source(rows: str):
 
 	for row in rows:
 		strategy_name = row.get("strategy")
-		value_mode = row.get("source")
+		value_mode = row.get("value_mode")
 		value = row.get("value")
 
 		if value_mode not in VALUE_MODES:
