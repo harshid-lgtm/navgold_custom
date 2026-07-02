@@ -72,8 +72,6 @@ class TestSfpBackorderItemOptOut(IntegrationTestCase):
 		self.assertEqual(inventory["shipping_group"], SHIPPING_GROUPS["main_revised"])
 
 	def test_no_restock_but_supplier_in_stock_lists_as_sfp(self):
-		# Backorder triggered by no OWN stock, no restock PO — but the prime + SFP supplier has
-		# stock and can ship now, so it must list SFP (not Main Revised).
 		inventory = inventory_for_backorder(
 			supplier_sfp_eligible=True, row_sfp=True, has_restock_date=False, supplier_stock=5
 		)
