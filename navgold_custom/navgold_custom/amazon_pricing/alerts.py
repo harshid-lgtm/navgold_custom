@@ -84,11 +84,11 @@ def notify(
 
 @frappe.whitelist()
 def send_telegram_message(
-	message,
+	message: str | list,
 	title: str | None = None,
 	severity: str = "info",
 	dedupe_key: str | None = None,
-	dedupe_seconds=600,
+	dedupe_seconds: int = 600,
 ) -> None:
 	# Whitelisted so Server Scripts can enqueue it — the sandbox only allows whitelisted
 	# methods. Body is passed through unescaped so callers may use HTML.
