@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import frappe
+import requests
 from frappe import _
 from frappe.model.document import Document
 from frappe.utils.background_jobs import enqueue, is_job_enqueued
@@ -332,6 +333,25 @@ def fetch_clf_stock():
 
 
 def run_clf_fetch(user):
+	try:
+		fetch_and_import_clf_stock(user)
+	except frappe.ValidationError as validation_error:
+		frappe.publish_realtime("clf_stock_fetched", {"error": str(validation_error)}, user=user)
+	except requests.exceptions.RequestException:
+		frappe.publish_realtime(
+			"clf_stock_fetched",
+			{"error": _("CLF endpoint is unreachable. It may be down — try again later.")},
+			user=user,
+		)
+	except Exception:
+		frappe.publish_realtime(
+			"clf_stock_fetched",
+			{"error": _("CLF stock fetch failed unexpectedly.")},
+			user=user,
+		)
+
+
+def fetch_and_import_clf_stock(user):
 	records = frappe.get_all(
 		"Supplier Item Price and Stock",
 		filters={"supplier": CLF_SUPPLIER, "supplier_part_number": ["is", "set"]},

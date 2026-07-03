@@ -14,6 +14,7 @@ frappe.listview_settings['Supplier Stock Import'] = {
 			});
 		});
 
+		frappe.realtime.off('clf_stock_fetched');
 		frappe.realtime.on('clf_stock_fetched', ({ docname, error }) => {
 			if (error) {
 				frappe.msgprint({
