@@ -3,6 +3,8 @@
 
 import frappe
 
+from navgold_custom.navgold_custom.amazon_pricing.alerts import alert_feed_error
+
 
 def record_submission_error(
 	log,
@@ -25,8 +27,6 @@ def record_submission_error(
 	log.save()
 
 	if alert:
-		from navgold_custom.navgold_custom.amazon_pricing.alerts import alert_feed_error
-
 		alert_feed_error(log.name, message, channel)
 
 	if not frappe.flags.in_test:
