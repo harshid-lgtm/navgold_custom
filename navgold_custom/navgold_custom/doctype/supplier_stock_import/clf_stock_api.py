@@ -33,8 +33,6 @@ def get_endpoint():
 	return endpoint
 
 
-# The SOAP namespace is the endpoint without its port and without the .asmx
-# filename, e.g. .../CLFWebOrdering/WebOrdering.asmx → .../CLFWebOrdering.
 def get_namespace(endpoint):
 	parsed = urlparse(endpoint)
 	path = parsed.path.rsplit("/", 1)[0]
@@ -42,8 +40,6 @@ def get_namespace(endpoint):
 
 
 def build_envelope(operation, body_inner, namespace, token=None):
-	# WebServiceHeader must ALWAYS be present, even for GetAuthenticationToken —
-	# omitting it makes the server throw a NullReferenceException.
 	token_node = f"<AuthenticationToken>{escape(token)}</AuthenticationToken>" if token else ""
 	header = (
 		f'<soap:Header><WebServiceHeader xmlns="{namespace}">{token_node}</WebServiceHeader></soap:Header>'
@@ -70,9 +66,7 @@ def call(operation, params=None, token=None):
 		"Content-Type": "text/xml; charset=utf-8",
 		"SOAPAction": f'"{namespace}/{operation}"',
 	}
-	# Not make_post_request: it accepts no timeout and raise_for_status()es away SOAP fault bodies.
 	response = requests.post(endpoint, data=envelope.encode("utf-8"), headers=headers, timeout=TIMEOUT)
-	# SOAP faults come back as HTTP 500 with a fault body — keep the body, don't raise.
 	if response.status_code >= 400 and "Fault" not in response.text:
 		response.raise_for_status()
 	return response.text
