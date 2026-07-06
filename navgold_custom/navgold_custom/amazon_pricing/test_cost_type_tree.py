@@ -4,24 +4,16 @@
 import frappe
 from frappe.tests import IntegrationTestCase
 
+from navgold_custom.navgold_custom.amazon_pricing.cost_tree_test_fixtures import ensure_cost_group
+
 GROUP_NAME = "Test Tree Absolute"
-
-
-def ensure_group():
-	if not frappe.db.exists("Cost Type", GROUP_NAME):
-		group = frappe.new_doc("Cost Type")
-		group.cost_type_name = GROUP_NAME
-		group.is_group = 1
-		group.calculation_type = "Absolute"
-		group.insert()
-	return GROUP_NAME
 
 
 class TestCostTypeTree(IntegrationTestCase):
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
-		ensure_group()
+		ensure_cost_group(GROUP_NAME)
 
 	def test_leaf_autoname_matches_old_sub_type_format(self):
 		leaf = frappe.new_doc("Cost Type")

@@ -52,17 +52,21 @@ def resolve_shipping(context):
 	return get_shipping_cost(context["shipping_weight_g"])
 
 
-ITEM_SYNCED_SOURCE_RESOLVERS = {
+# The single registry of every source a Cost Type leaf can carry. A callable resolves the value on
+# save; None marks an externally-owned source (the FBA fee fetcher owns Amazon-Sync) whose row value
+# is left exactly as the owning process wrote it. A source missing here is a misconfiguration.
+SOURCE_RESOLVERS = {
 	"Supplier-Sync": resolve_supplier_sync,
 	"PO-Sync": resolve_po_sync,
 	"FBA-Transfer": resolve_fba_transfer,
 	"Item-Tax-Sync": resolve_item_tax_sync,
 	"Shipping-Sync": resolve_shipping,
+	FEE_SOURCE: None,
 }
 
-# Sources written by another process (the FBA fee fetcher owns Amazon-Sync). We never resolve these
-# here — the row value is left exactly as the owning process wrote it.
-EXTERNALLY_OWNED_SOURCES = {FEE_SOURCE}
+
+def is_externally_owned(source) -> bool:
+	return source in SOURCE_RESOLVERS and SOURCE_RESOLVERS[source] is None
 
 
 class AmazonProductStrategy(Document):
@@ -106,7 +110,7 @@ class AmazonProductStrategy(Document):
 		if before is None:
 			return
 
-		precision = frappe.get_meta("Amazon Product Cost").get_field("value").precision or 4
+		precision = self.precision("value", "costs")
 
 		before_values = {row.name: row.value for row in before.costs}
 
@@ -115,7 +119,7 @@ class AmazonProductStrategy(Document):
 				continue
 
 			source = (policy_map.get(cost.cost_sub_type) or {}).get("source")
-			if source in EXTERNALLY_OWNED_SOURCES:
+			if is_externally_owned(source):
 				# Written by the owning process (FBA fee fetcher keeps value_mode=Auto) — a value change
 				# here is not a human override, so it must not be pinned.
 				continue
@@ -191,7 +195,7 @@ class AmazonProductStrategy(Document):
 			cost.cost_sub_type
 			for cost in self.costs
 			if cost.value_mode != "Manual"
-			and policy_map.get(cost.cost_sub_type, {}).get("source") in ITEM_SYNCED_SOURCE_RESOLVERS
+			and SOURCE_RESOLVERS.get(policy_map.get(cost.cost_sub_type, {}).get("source")) is not None
 		}
 		fed_values = self.resolve_fed_sub_type_values(fed_sub_types, policy_map)
 
@@ -206,23 +210,21 @@ class AmazonProductStrategy(Document):
 
 			if not source:
 				cost.value = flt(policy.get("default_value")) if policy else 0
-			elif source in EXTERNALLY_OWNED_SOURCES:
-				# Owned by another process (e.g. the FBA fee fetcher) — leave the value untouched.
-				continue
-			elif source not in ITEM_SYNCED_SOURCE_RESOLVERS:
-				# A source value with no resolver and not externally-owned is a misconfiguration. Don't
-				# throw (that would abort a whole bulk refresh run); log once and leave the value untouched.
+			elif source not in SOURCE_RESOLVERS:
+				# A source with no registry entry is a misconfiguration. Don't throw (that would abort
+				# a whole bulk refresh run); log once and leave the value untouched.
 				frappe.log_error(
 					f"Cost row {cost.cost_sub_type} has unregistered source {source!r}",
 					"Amazon Product Strategy Cost Source",
 				)
 				continue
-			elif cost.cost_sub_type in fed_values:
-				resolved = fed_values[cost.cost_sub_type]
+			elif is_externally_owned(source):
+				# Owned by another process (e.g. the FBA fee fetcher) — leave the value untouched.
+				continue
+			else:
+				resolved = fed_values.get(cost.cost_sub_type)
 				# Resolver returned None → feed not ready; leave at 0 (unsynced) rather than a stale value.
 				cost.value = flt(resolved) if resolved is not None else 0
-			else:
-				cost.value = 0
 
 	def resolve_fed_sub_type_values(self, fed_sub_types, policy_map: dict) -> dict:
 		# fed_sub_types already excludes Manual rows and externally-owned/unresolved sources.
@@ -252,9 +254,7 @@ class AmazonProductStrategy(Document):
 			fba_strategy = frappe.db.get_value("Amazon Product Pricing", self.proxy_sku, "fba_strategy")
 			context["is_fba_strategy"] = fba_strategy == self.name
 
-		resolved_by_source = {
-			source: ITEM_SYNCED_SOURCE_RESOLVERS[source](context) for source in active_sources
-		}
+		resolved_by_source = {source: SOURCE_RESOLVERS[source](context) for source in active_sources}
 		return {
 			sub_type: resolved_by_source.get(policy_map[sub_type]["source"]) for sub_type in fed_sub_types
 		}

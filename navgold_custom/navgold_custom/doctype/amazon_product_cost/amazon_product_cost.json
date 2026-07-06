@@ -16,6 +16,8 @@
 	],
 	"fields": [
 		{
+			"fetch_from": "cost_sub_type.parent_cost_type",
+			"fetch_if_empty": 0,
 			"fieldname": "cost_type",
 			"fieldtype": "Link",
 			"in_list_view": 1,

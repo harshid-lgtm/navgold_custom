@@ -7,29 +7,14 @@ from frappe.utils.data import flt
 
 from navgold_custom.navgold_custom.amazon_pricing.price_calculator import (
 	get_cost_sub_type_map,
+	get_cost_type_map,
 )
 from navgold_custom.navgold_custom.amazon_pricing.price_guard import (
 	partition_pricing_by_price_deviation,
 )
 
 
-def get_push_block_cost_type_map() -> dict[str, dict]:
-	# Push-block rules need is_purchase_cost too, which the price-calculator's cost-type map omits;
-	# keep that shared map's shape untouched and read both fields here in one query.
-	return {
-		row.name: row
-		for row in frappe.get_all(
-			"Cost Type",
-			fields=["name", "calculation_type", "is_purchase_cost"],
-		)
-	}
-
-
-def get_push_block_violations(
-	strategy_names: list[str],
-	cost_type_map: dict | None = None,
-	policy_map: dict | None = None,
-) -> dict[str, list[str]]:
+def get_push_block_violations(strategy_names: list[str]) -> dict[str, list[str]]:
 	# Per-strategy push blockers driven purely by the active cost rows. A row blocks if it is either
 	# (a) a percentage cost (Relative/VAT) sitting at 0 — percentages are never legitimately 0; or
 	# (b) a fed purchase cost (is_purchase_cost, sub-type source set) on Auto resolving to 0 — unsynced.
@@ -37,10 +22,8 @@ def get_push_block_violations(
 	if not strategy_names:
 		return {}
 
-	if cost_type_map is None:
-		cost_type_map = get_push_block_cost_type_map()
-	if policy_map is None:
-		policy_map = get_cost_sub_type_map()
+	cost_type_map = get_cost_type_map()
+	policy_map = get_cost_sub_type_map()
 
 	cost_rows = frappe.get_all(
 		"Amazon Product Cost",

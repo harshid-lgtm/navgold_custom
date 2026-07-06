@@ -4,6 +4,11 @@
 import frappe
 from frappe.tests import IntegrationTestCase
 
+from navgold_custom.navgold_custom.amazon_pricing.cost_tree_test_fixtures import (
+	create_proxy_sku,
+	ensure_cost_group,
+	ensure_cost_leaf,
+)
 from navgold_custom.navgold_custom.amazon_pricing.template_applicator import (
 	apply_template_to_pricing,
 	apply_template_to_proxy_sku,
@@ -21,20 +26,9 @@ LEAF_DEFAULT_VALUE = 5.0
 
 
 def ensure_cost_tree_leaf():
-	if not frappe.db.exists("Cost Type", TREE_GROUP):
-		group = frappe.new_doc("Cost Type")
-		group.cost_type_name = TREE_GROUP
-		group.is_group = 1
-		group.calculation_type = "Absolute"
-		group.insert()
-	if not frappe.db.exists("Cost Type", TREE_LEAF):
-		# Self-contained leaf (no source): Auto resolves to default_value, keeps the fixture offline-safe.
-		leaf = frappe.new_doc("Cost Type")
-		leaf.cost_type_name = "Overhead"
-		leaf.is_group = 0
-		leaf.parent_cost_type = TREE_GROUP
-		leaf.default_value = LEAF_DEFAULT_VALUE
-		leaf.insert()
+	ensure_cost_group(TREE_GROUP)
+	# Self-contained leaf (no source): Auto resolves to default_value, keeps the fixture offline-safe.
+	ensure_cost_leaf(TREE_GROUP, "Overhead", default_value=LEAF_DEFAULT_VALUE)
 
 
 def create_cost_set_strategy_template():
@@ -92,14 +86,6 @@ def create_strategy_template():
 		)
 	template.insert()
 	return template.name
-
-
-def create_proxy_sku(is_active=1):
-	# asin left unset so Proxy SKU.validate's duplicate-active check never trips.
-	proxy_sku = frappe.new_doc("Proxy SKU")
-	proxy_sku.is_active = is_active
-	proxy_sku.insert()
-	return proxy_sku.name
 
 
 class TestTemplateApplicator(IntegrationTestCase):

@@ -76,7 +76,7 @@
 		},
 		{
 			"default": "0",
-			"depends_on": "eval:!doc.is_group",
+			"depends_on": "eval:!doc.is_group && !doc.source",
 			"description": "Self-contained value, used only when Source is empty. A fed cost (Source set) must leave this 0.",
 			"fieldname": "default_value",
 			"fieldtype": "Float",

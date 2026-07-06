@@ -14,7 +14,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.tests.utils import change_settings
 
-from navgold_custom.navgold_custom.amazon_pricing import price_calculator
+from navgold_custom.navgold_custom.amazon_pricing import cost_tree_test_fixtures, price_calculator
 from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import build_pricing_feed
 
 # Pin the Navgold Settings knobs so the band is decided by the formula, not by the restored site.
@@ -28,106 +28,42 @@ PO_SYNC_LEAF = f"{PURCHASE_GROUP}-POSync"
 ITEM_CODE = "TEST-COST-TREE-FLOW-ITEM"
 
 
-def ensure_group(name, calculation_type, is_purchase_cost=0):
-	if frappe.db.exists("Cost Type", name):
-		return name
-	group = frappe.new_doc("Cost Type")
-	group.cost_type_name = name
-	group.is_group = 1
-	group.calculation_type = calculation_type
-	group.is_purchase_cost = is_purchase_cost
-	group.insert()
-	return group.name
-
-
-def ensure_fed_leaf(parent, leaf_name, source):
-	full_name = f"{parent}-{leaf_name}"
-	if frappe.db.exists("Cost Type", full_name):
-		return full_name
-	leaf = frappe.new_doc("Cost Type")
-	leaf.cost_type_name = leaf_name
-	leaf.is_group = 0
-	leaf.parent_cost_type = parent
-	leaf.source = source
-	leaf.insert()
-	return full_name
-
-
-def ensure_defaulted_leaf(parent, leaf_name, default_value):
-	full_name = f"{parent}-{leaf_name}"
-	if frappe.db.exists("Cost Type", full_name):
-		return full_name
-	leaf = frappe.new_doc("Cost Type")
-	leaf.cost_type_name = leaf_name
-	leaf.is_group = 0
-	leaf.parent_cost_type = parent
-	leaf.default_value = default_value
-	leaf.insert()
-	return full_name
-
-
 def ensure_cost_tree():
-	ensure_group(PURCHASE_GROUP, "Absolute", is_purchase_cost=1)
-	ensure_group(VAT_GROUP, "VAT")
-	ensure_fed_leaf(PURCHASE_GROUP, "FBATransfer", "FBA-Transfer")
-	ensure_fed_leaf(PURCHASE_GROUP, "POSync", "PO-Sync")
-	ensure_defaulted_leaf(VAT_GROUP, "StdRate", 20)
+	cost_tree_test_fixtures.ensure_cost_group(PURCHASE_GROUP, "Absolute", is_purchase_cost=1)
+	cost_tree_test_fixtures.ensure_cost_group(VAT_GROUP, "VAT")
+	cost_tree_test_fixtures.ensure_cost_leaf(PURCHASE_GROUP, "FBATransfer", source="FBA-Transfer")
+	cost_tree_test_fixtures.ensure_cost_leaf(PURCHASE_GROUP, "POSync", source="PO-Sync")
+	cost_tree_test_fixtures.ensure_cost_leaf(VAT_GROUP, "StdRate", default_value=20)
 
 
 def ensure_item():
-	if frappe.db.exists("Item", ITEM_CODE):
-		return ITEM_CODE
-	item = frappe.new_doc("Item")
-	item.item_code = ITEM_CODE
-	item.item_name = ITEM_CODE
-	item.item_group = "All Item Groups"
-	item.stock_uom = "Nos"
-	item.is_stock_item = 1
-	item.insert()
-	return item.name
+	return cost_tree_test_fixtures.ensure_item(ITEM_CODE, is_stock_item=1)
 
 
 def create_proxy_sku(last_transfer_rate=4.0, selling_price=None):
-	# asin left unset so Proxy SKU.validate's duplicate-active check never trips.
-	proxy_sku = frappe.new_doc("Proxy SKU")
-	proxy_sku.is_active = 1
-	proxy_sku.item = ITEM_CODE
-	proxy_sku.uom = "Nos"
-	proxy_sku.last_transfer_rate = last_transfer_rate
-	if selling_price is not None:
-		proxy_sku.current_selling_price = selling_price
-	proxy_sku.insert()
-	return proxy_sku.name
+	return cost_tree_test_fixtures.create_proxy_sku(
+		item=ITEM_CODE, uom="Nos", last_transfer_rate=last_transfer_rate, selling_price=selling_price
+	)
 
 
 def build_tree_strategy(proxy_sku):
 	# Three rank-1 (active) rows across the tree: a fed leaf, a defaulted leaf under a VAT group,
 	# and a pinned Manual row. All three enter the price formula.
-	strategy = frappe.new_doc("Amazon Product Strategy")
-	strategy.proxy_sku = proxy_sku
-	strategy.strategy_name = "default"
-	strategy.is_active = 1
-	strategy.min_margin = 10
-	strategy.max_margin = 20
-	strategy.append(
-		"costs",
-		{"cost_type": PURCHASE_GROUP, "cost_sub_type": FED_LEAF, "value_mode": "Auto", "rank": 1},
+	return cost_tree_test_fixtures.build_strategy(
+		proxy_sku,
+		[
+			{"cost_type": PURCHASE_GROUP, "cost_sub_type": FED_LEAF, "value_mode": "Auto", "rank": 1},
+			{"cost_type": VAT_GROUP, "cost_sub_type": DEFAULTED_VAT_LEAF, "value_mode": "Auto", "rank": 1},
+			{"cost_type": PURCHASE_GROUP, "value_mode": "Manual", "value": 1.0, "rank": 1},
+		],
+		min_margin=10,
+		max_margin=20,
+		insert=False,
 	)
-	strategy.append(
-		"costs",
-		{"cost_type": VAT_GROUP, "cost_sub_type": DEFAULTED_VAT_LEAF, "value_mode": "Auto", "rank": 1},
-	)
-	strategy.append(
-		"costs",
-		{"cost_type": PURCHASE_GROUP, "value_mode": "Manual", "value": 1.0, "rank": 1},
-	)
-	return strategy
 
 
 def insert_with_fixed_settings(strategy):
-	with patch.object(price_calculator, "get_pricing_settings", return_value=FIXED_SETTINGS):
-		strategy.insert()
-	return strategy
+	return cost_tree_test_fixtures.insert_with_fixed_settings(strategy, FIXED_SETTINGS)
 
 
 def persisted_costs(strategy_name):
@@ -213,21 +149,20 @@ class TestCostTreeFlow(IntegrationTestCase):
 		# A fed leaf whose resolver has no data (PO-Sync, no purchase history) must land at 0, and the
 		# row must stay Auto (unsynced) rather than being pinned Manual or holding a stale value.
 		proxy_sku = create_proxy_sku(last_transfer_rate=4.0)
-		strategy = frappe.new_doc("Amazon Product Strategy")
-		strategy.proxy_sku = proxy_sku
-		strategy.strategy_name = "default"
-		strategy.is_active = 1
-		strategy.min_margin = 10
-		strategy.max_margin = 20
-		strategy.append(
-			"costs",
-			{
-				"cost_type": PURCHASE_GROUP,
-				"cost_sub_type": PO_SYNC_LEAF,
-				"value": 99,
-				"value_mode": "Auto",
-				"rank": 1,
-			},
+		strategy = cost_tree_test_fixtures.build_strategy(
+			proxy_sku,
+			[
+				{
+					"cost_type": PURCHASE_GROUP,
+					"cost_sub_type": PO_SYNC_LEAF,
+					"value": 99,
+					"value_mode": "Auto",
+					"rank": 1,
+				}
+			],
+			min_margin=10,
+			max_margin=20,
+			insert=False,
 		)
 		insert_with_fixed_settings(strategy)
 

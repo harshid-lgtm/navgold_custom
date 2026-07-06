@@ -39,6 +39,7 @@ frappe.ui.form.on('Amazon Product Strategy', {
 								}
 
 								frm.refresh_field('costs');
+								refresh_value_editability(frm);
 								frappe.msgprint(
 									__('Cost template applied. Please save to confirm.'),
 								);
@@ -162,22 +163,6 @@ frappe.ui.form.on('Amazon Product Cost', {
 		}
 		refresh_value_editability(frm);
 	},
-	async cost_sub_type(frm, cdt, cdn) {
-		const row = locals[cdt][cdn];
-		if (!row.cost_sub_type) {
-			return;
-		}
-		// The sub type is a leaf Cost Type; its parent group is the row's cost type.
-		const response = await frappe.db.get_value(
-			'Cost Type',
-			row.cost_sub_type,
-			'parent_cost_type',
-		);
-		const parent_cost_type = response.message?.parent_cost_type;
-		if (parent_cost_type) {
-			frappe.model.set_value(cdt, cdn, 'cost_type', parent_cost_type);
-		}
-	},
 });
 
 function refresh_value_editability(frm) {
@@ -188,14 +173,8 @@ function refresh_value_editability(frm) {
 		return;
 	}
 	for (const grid_row of grid.grid_rows) {
-		const value_field = (grid_row.docfields || []).find(
-			(field) => field.fieldname === 'value',
-		);
-		if (value_field) {
-			value_field.read_only = grid_row.doc.value_mode === 'Auto' ? 1 : 0;
-		}
+		grid_row.toggle_editable('value', grid_row.doc.value_mode !== 'Auto');
 	}
-	grid.refresh();
 }
 
 function render_cost_filter_controls(frm) {

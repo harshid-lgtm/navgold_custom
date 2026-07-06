@@ -107,7 +107,7 @@ frappe.ui.form.on('Navgold Settings', {
 				async () => {
 					const confirmed = await navgold.confirm_dialog(
 						__(
-							'This will re-pull synced cost values (PO-Sync, Supplier-Sync, FBA-Transfer, Auto-Sync) into every active strategy and recalculate min/max prices. Continue?',
+							'This will re-pull fed cost values (PO-Sync, Supplier-Sync, FBA-Transfer, Item-Tax-Sync, Shipping-Sync) and sub-type defaults into every active strategy and recalculate min/max prices. Manual rows are left untouched. Continue?',
 						),
 					);
 					if (!confirmed) return;

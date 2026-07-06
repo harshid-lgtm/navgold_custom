@@ -24,10 +24,11 @@ def get_cost_sub_type_map() -> dict:
 @redis_cache()
 def get_cost_type_map() -> dict:
 	# Groups (is_group=1) carry the calculation rule; leaves hold no calculation_type.
+	# is_purchase_cost rides along for the push-block rules in pricing_validators.
 	rows = frappe.get_all(
 		"Cost Type",
 		filters={"is_group": 1},
-		fields=["name", "calculation_type"],
+		fields=["name", "calculation_type", "is_purchase_cost"],
 	)
 	return {row.name: row for row in rows}
 
@@ -148,8 +149,12 @@ def calculate_single_price(numerator: float, denominator: float, margin: float, 
 	return initial_price
 
 
-def calculate_prices_with_purchase_cost_override(strategy, override_purchase_cost: float) -> dict:
-	cost_data = get_cost_data(strategy, override_supplier_price=flt(override_purchase_cost))
+def calculate_prices_with_purchase_cost_override(
+	strategy, override_purchase_cost: float, policy_map: dict | None = None
+) -> dict:
+	cost_data = get_cost_data(
+		strategy, override_supplier_price=flt(override_purchase_cost), policy_map=policy_map
+	)
 	if not cost_data:
 		return {"min_price": 0, "max_price": 0}
 

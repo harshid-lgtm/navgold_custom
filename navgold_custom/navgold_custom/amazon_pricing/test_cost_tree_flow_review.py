@@ -3,7 +3,7 @@
 
 # Wired-flow teeth for the two review-fix behaviours settled after the first cost-tree flow run:
 #   2a) bulk-reset-to-Auto must NOT zero an externally-owned (Amazon-Sync / FBA-fee) cost value —
-#       populate_costs skips EXTERNALLY_OWNED_SOURCES, so the fee the fetcher wrote survives the
+#       populate_costs skips externally-owned sources (None in SOURCE_RESOLVERS), so the fee survives the
 #       reset + the enqueued strategy recompute. We drive the real background job.
 #   2b) the Purchase Cost Overview report bulk-update reads the RENAMED payload key `value_mode`
 #       (was `source`); we prove the new key updates + re-prices and the old key is inert.
@@ -17,15 +17,18 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from navgold_custom.navgold_custom.amazon_pricing import price_calculator
+from navgold_custom.navgold_custom.amazon_pricing.cost_tree_test_fixtures import (
+	build_strategy,
+	ensure_cost_leaf,
+)
 from navgold_custom.navgold_custom.amazon_pricing.fba_fee_fetcher import FEE_SOURCE
 from navgold_custom.navgold_custom.amazon_pricing.test_cost_tree_flow import (
 	FED_LEAF,
-	FIXED_SETTINGS,
 	PURCHASE_GROUP,
 	create_proxy_sku,
 	ensure_cost_tree,
-	ensure_fed_leaf,
 	ensure_item,
+	insert_with_fixed_settings,
 	persisted_costs,
 )
 from navgold_custom.navgold_custom.doctype.bulk_reset_purchase_cost_source.bulk_reset_purchase_cost_source import (
@@ -40,51 +43,39 @@ FEE_VALUE = 5.0
 
 
 def ensure_fee_leaf():
-	# A leaf whose source is Amazon-Sync (owned by the FBA fee fetcher, in EXTERNALLY_OWNED_SOURCES).
-	ensure_fed_leaf(PURCHASE_GROUP, "AmazonFee", FEE_SOURCE)
-
-
-def insert_with_fixed_settings(strategy):
-	with patch.object(price_calculator, "get_pricing_settings", return_value=FIXED_SETTINGS):
-		strategy.insert()
-	return strategy
+	# A leaf whose source is Amazon-Sync (owned by the FBA fee fetcher: None in SOURCE_RESOLVERS).
+	ensure_cost_leaf(PURCHASE_GROUP, "AmazonFee", source=FEE_SOURCE)
 
 
 def build_fee_strategy(proxy_sku):
 	# One rank-1 Amazon-Sync row carrying a fetcher-written value, pinned Manual to mimic the
 	# stored fee. On insert populate_costs skips it (Manual), so the value persists as-is.
-	strategy = frappe.new_doc("Amazon Product Strategy")
-	strategy.proxy_sku = proxy_sku
-	strategy.strategy_name = "default"
-	strategy.is_active = 1
-	strategy.min_margin = 10
-	strategy.max_margin = 20
-	strategy.append(
-		"costs",
-		{
-			"cost_type": PURCHASE_GROUP,
-			"cost_sub_type": FEE_LEAF,
-			"value_mode": "Manual",
-			"value": FEE_VALUE,
-			"rank": 1,
-		},
+	return build_strategy(
+		proxy_sku,
+		[
+			{
+				"cost_type": PURCHASE_GROUP,
+				"cost_sub_type": FEE_LEAF,
+				"value_mode": "Manual",
+				"value": FEE_VALUE,
+				"rank": 1,
+			}
+		],
+		min_margin=10,
+		max_margin=20,
+		insert=False,
 	)
-	return strategy
 
 
 def build_fed_purchase_strategy(proxy_sku):
 	# One rank-1 fed purchase row (FBA-Transfer → last_transfer_rate) — the report's bulk-update target.
-	strategy = frappe.new_doc("Amazon Product Strategy")
-	strategy.proxy_sku = proxy_sku
-	strategy.strategy_name = "default"
-	strategy.is_active = 1
-	strategy.min_margin = 10
-	strategy.max_margin = 20
-	strategy.append(
-		"costs",
-		{"cost_type": PURCHASE_GROUP, "cost_sub_type": FED_LEAF, "value_mode": "Auto", "rank": 1},
+	return build_strategy(
+		proxy_sku,
+		[{"cost_type": PURCHASE_GROUP, "cost_sub_type": FED_LEAF, "value_mode": "Auto", "rank": 1}],
+		min_margin=10,
+		max_margin=20,
+		insert=False,
 	)
-	return strategy
 
 
 def run_reset_to_auto(proxy_sku):

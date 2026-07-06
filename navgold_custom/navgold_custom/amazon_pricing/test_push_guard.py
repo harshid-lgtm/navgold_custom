@@ -8,6 +8,13 @@ from frappe.tests import IntegrationTestCase
 from frappe.tests.utils import change_settings
 
 from navgold_custom.navgold_custom.amazon_pricing import amazon_feed_submitter
+from navgold_custom.navgold_custom.amazon_pricing.cost_tree_test_fixtures import (
+	build_strategy,
+	create_proxy_sku,
+	ensure_cost_group,
+	ensure_cost_leaf,
+	ensure_item,
+)
 from navgold_custom.navgold_custom.amazon_pricing.pricing_validators import (
 	collect_pricing_violations,
 	get_push_block_violations,
@@ -19,64 +26,14 @@ PERCENT_COST_TYPE = "Test Push Guard Percent"
 FBA_SHIPPING_COST_TYPE = "Test Push Guard FBA Shipping"
 
 
-def ensure_item():
-	if not frappe.db.exists("Item", ITEM_CODE):
-		item = frappe.new_doc("Item")
-		item.item_code = ITEM_CODE
-		item.item_name = ITEM_CODE
-		item.item_group = "All Item Groups"
-		item.stock_uom = "Nos"
-		item.is_stock_item = 0
-		item.insert()
-	return ITEM_CODE
-
-
-def ensure_cost_type(name, calculation_type, is_purchase_cost=0):
-	if not frappe.db.exists("Cost Type", name):
-		cost_type = frappe.new_doc("Cost Type")
-		cost_type.cost_type_name = name
-		cost_type.is_group = 1
-		cost_type.calculation_type = calculation_type
-		cost_type.is_purchase_cost = is_purchase_cost
-		cost_type.insert()
-	return name
-
-
-def ensure_sub_type(cost_type, sub_type_name, source=""):
-	name = f"{cost_type}-{sub_type_name}"
-	if not frappe.db.exists("Cost Type", name):
-		sub_type = frappe.new_doc("Cost Type")
-		sub_type.is_group = 0
-		sub_type.parent_cost_type = cost_type
-		sub_type.cost_type_name = sub_type_name
-		sub_type.source = source
-		sub_type.insert()
-	return name
-
-
-def build_strategy(rows):
-	proxy_sku = frappe.new_doc("Proxy SKU")
-	proxy_sku.item = ITEM_CODE
-	proxy_sku.uom = "Nos"
-	proxy_sku.is_active = 1
-	proxy_sku.insert()
-
-	strategy = frappe.new_doc("Amazon Product Strategy")
-	strategy.proxy_sku = proxy_sku.name
-	strategy.strategy_name = "default"
-	strategy.is_active = 1
-	strategy.min_margin = 5
-	strategy.max_margin = 10
-	for row in rows:
-		strategy.append("costs", row)
-	strategy.insert()
-	return strategy
+def build_guard_strategy(rows):
+	return build_strategy(create_proxy_sku(item=ITEM_CODE, uom="Nos"), rows)
 
 
 def healthy_purchase_row(value=5.0):
 	return {
 		"cost_type": PURCHASE_COST_TYPE,
-		"cost_sub_type": ensure_sub_type(PURCHASE_COST_TYPE, "Top Supplier", source="Supplier-Sync"),
+		"cost_sub_type": ensure_cost_leaf(PURCHASE_COST_TYPE, "Top Supplier", source="Supplier-Sync"),
 		"value": value,
 		"value_mode": "Manual",
 		"rank": 1,
@@ -88,14 +45,14 @@ class TestPushGuardHelper(IntegrationTestCase):
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
-		ensure_item()
-		ensure_cost_type(PURCHASE_COST_TYPE, "Absolute", is_purchase_cost=1)
-		ensure_cost_type(PERCENT_COST_TYPE, "Relative")
-		ensure_cost_type(f"{PERCENT_COST_TYPE} VAT", "VAT")
-		ensure_cost_type(FBA_SHIPPING_COST_TYPE, "Absolute")
+		ensure_item(ITEM_CODE)
+		ensure_cost_group(PURCHASE_COST_TYPE, "Absolute", is_purchase_cost=1)
+		ensure_cost_group(PERCENT_COST_TYPE, "Relative")
+		ensure_cost_group(f"{PERCENT_COST_TYPE} VAT", "VAT")
+		ensure_cost_group(FBA_SHIPPING_COST_TYPE, "Absolute")
 
 	def test_zero_relative_percentage_blocks(self):
-		strategy = build_strategy(
+		strategy = build_guard_strategy(
 			[
 				healthy_purchase_row(),
 				{
@@ -116,7 +73,7 @@ class TestPushGuardHelper(IntegrationTestCase):
 		)
 
 	def test_zero_vat_percentage_blocks(self):
-		strategy = build_strategy(
+		strategy = build_guard_strategy(
 			[
 				healthy_purchase_row(),
 				{
@@ -137,11 +94,11 @@ class TestPushGuardHelper(IntegrationTestCase):
 		)
 
 	def test_fed_auto_purchase_cost_at_zero_blocks(self):
-		strategy = build_strategy(
+		strategy = build_guard_strategy(
 			[
 				{
 					"cost_type": PURCHASE_COST_TYPE,
-					"cost_sub_type": ensure_sub_type(
+					"cost_sub_type": ensure_cost_leaf(
 						PURCHASE_COST_TYPE, "Auto Supplier", source="Supplier-Sync"
 					),
 					"value": 0,
@@ -161,7 +118,7 @@ class TestPushGuardHelper(IntegrationTestCase):
 
 	def test_absolute_non_purchase_zero_is_allowed(self):
 		# FBA shipping legitimately resolves to 0 on FBA strategies — must never block.
-		strategy = build_strategy(
+		strategy = build_guard_strategy(
 			[
 				healthy_purchase_row(),
 				{
@@ -180,11 +137,11 @@ class TestPushGuardHelper(IntegrationTestCase):
 
 	def test_manual_purchase_cost_at_zero_is_allowed(self):
 		# Rule (b) only catches Auto-fed purchase costs; a Manual 0 is the seller's call.
-		strategy = build_strategy(
+		strategy = build_guard_strategy(
 			[
 				{
 					"cost_type": PURCHASE_COST_TYPE,
-					"cost_sub_type": ensure_sub_type(
+					"cost_sub_type": ensure_cost_leaf(
 						PURCHASE_COST_TYPE, "Manual Supplier", source="Supplier-Sync"
 					),
 					"value": 0,
@@ -201,7 +158,7 @@ class TestPushGuardHelper(IntegrationTestCase):
 
 	def test_manual_percentage_at_zero_still_blocks(self):
 		# Rule (a) is unconditional on value_mode: a hand-pinned 0% is still wrong.
-		strategy = build_strategy(
+		strategy = build_guard_strategy(
 			[
 				healthy_purchase_row(),
 				{
@@ -219,7 +176,7 @@ class TestPushGuardHelper(IntegrationTestCase):
 		self.assertIn(strategy.name, violations)
 
 	def test_healthy_strategy_is_pushable(self):
-		strategy = build_strategy(
+		strategy = build_guard_strategy(
 			[
 				healthy_purchase_row(value=5),
 				{
@@ -239,7 +196,7 @@ class TestPushGuardHelper(IntegrationTestCase):
 	def test_inactive_cost_row_does_not_block(self):
 		# rank>1 rows are deactivated by the strategy's populate_costs, so a 0% sitting on an
 		# inactive (superseded) row must never block the push.
-		strategy = build_strategy(
+		strategy = build_guard_strategy(
 			[
 				healthy_purchase_row(),
 				{"cost_type": PERCENT_COST_TYPE, "value": 0, "value_mode": "Manual", "rank": 2},
@@ -261,9 +218,9 @@ class TestPushGuardBulkPush(IntegrationTestCase):
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
-		ensure_item()
-		ensure_cost_type(PURCHASE_COST_TYPE, "Absolute", is_purchase_cost=1)
-		ensure_cost_type(PERCENT_COST_TYPE, "Relative")
+		ensure_item(ITEM_CODE)
+		ensure_cost_group(PURCHASE_COST_TYPE, "Absolute", is_purchase_cost=1)
+		ensure_cost_group(PERCENT_COST_TYPE, "Relative")
 
 	def create_pricing(self, strategy, selling_price=20):
 		frappe.db.set_value("Proxy SKU", strategy.proxy_sku, "current_selling_price", selling_price)
@@ -282,7 +239,7 @@ class TestPushGuardBulkPush(IntegrationTestCase):
 		return pricing.name
 
 	def test_bulk_push_skips_violator_pushes_healthy(self):
-		healthy_strategy = build_strategy(
+		healthy_strategy = build_guard_strategy(
 			[
 				healthy_purchase_row(value=5),
 				{
@@ -294,7 +251,7 @@ class TestPushGuardBulkPush(IntegrationTestCase):
 				},
 			]
 		)
-		violator_strategy = build_strategy(
+		violator_strategy = build_guard_strategy(
 			[
 				healthy_purchase_row(value=5),
 				{
