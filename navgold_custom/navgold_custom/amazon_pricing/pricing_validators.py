@@ -15,10 +15,12 @@ from navgold_custom.navgold_custom.amazon_pricing.price_guard import (
 
 
 def get_push_block_violations(strategy_names: list[str]) -> dict[str, list[str]]:
-	# Per-strategy push blockers driven purely by the active cost rows. A row blocks if it is either
-	# (a) a percentage cost (Relative/VAT) sitting at 0 — percentages are never legitimately 0; or
-	# (b) a fed purchase cost (is_purchase_cost, sub-type source set) on Auto resolving to 0 — unsynced.
-	# Absolute non-purchase zeros (e.g. FBA shipping resolving to 0) are allowed and never block.
+	# Per-strategy push blockers driven purely by the active cost rows. A row blocks if it is
+	# (a) a percentage cost (Relative/VAT) sitting at 0 — percentages are never legitimately 0;
+	# (b) a fed purchase cost (is_purchase_cost, sub-type source set) on Auto resolving to 0 — unsynced; or
+	# (c) a defaulted cost (no sub-type source) on Auto sitting at 0 — the leaf default is missing/0.
+	# FED absolute non-purchase zeros (e.g. FBA shipping resolving to 0) are allowed, as is any
+	# Manual 0 — pinning a zero by hand is the seller's call.
 	if not strategy_names:
 		return {}
 
@@ -52,9 +54,11 @@ def get_push_block_violations(strategy_names: list[str]) -> dict[str, list[str]]
 			)
 			continue
 
-		if cost_type.get("is_purchase_cost") and cost.value_mode == "Auto" and value == 0:
+		if cost.value_mode == "Auto" and value == 0:
 			sub_type_source = (policy_map.get(cost.cost_sub_type) or {}).get("source")
-			if sub_type_source:
+			if not sub_type_source:
+				violations.setdefault(cost.parent, []).append(f"{sub_type_label}: defaulted cost at 0")
+			elif cost_type.get("is_purchase_cost"):
 				violations.setdefault(cost.parent, []).append(
 					f"{sub_type_label}: unsynced purchase cost (source {sub_type_source})"
 				)

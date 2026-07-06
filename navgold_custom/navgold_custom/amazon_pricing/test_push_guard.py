@@ -156,6 +156,76 @@ class TestPushGuardHelper(IntegrationTestCase):
 
 		self.assertNotIn(strategy.name, violations)
 
+	def test_defaulted_leaf_at_zero_blocks(self):
+		# Rule (c): an Auto row on a self-contained leaf whose default is 0 resolves to 0 —
+		# never a legitimate cost, so the item must not ship.
+		strategy = build_guard_strategy(
+			[
+				healthy_purchase_row(),
+				{
+					"cost_type": FBA_SHIPPING_COST_TYPE,
+					"cost_sub_type": ensure_cost_leaf(
+						FBA_SHIPPING_COST_TYPE, "Zero Default", default_value=0
+					),
+					"value": 0,
+					"value_mode": "Auto",
+					"rank": 1,
+					"is_active": 1,
+				},
+			]
+		)
+
+		violations = get_push_block_violations([strategy.name])
+
+		self.assertTrue(
+			any("defaulted cost at 0" in reason for reason in violations.get(strategy.name, [])),
+			violations.get(strategy.name),
+		)
+
+	def test_defaulted_leaf_with_nonzero_default_is_allowed(self):
+		# populate_costs writes the leaf default onto the Auto row; a real default never blocks.
+		strategy = build_guard_strategy(
+			[
+				healthy_purchase_row(),
+				{
+					"cost_type": FBA_SHIPPING_COST_TYPE,
+					"cost_sub_type": ensure_cost_leaf(
+						FBA_SHIPPING_COST_TYPE, "Real Default", default_value=0.45
+					),
+					"value": 0,
+					"value_mode": "Auto",
+					"rank": 1,
+					"is_active": 1,
+				},
+			]
+		)
+
+		violations = get_push_block_violations([strategy.name])
+
+		self.assertNotIn(strategy.name, violations)
+
+	def test_manual_zero_on_defaulted_leaf_is_allowed(self):
+		# Rule (c) is Auto-only: pinning a 0 by hand on a defaulted leaf is the seller's call.
+		strategy = build_guard_strategy(
+			[
+				healthy_purchase_row(),
+				{
+					"cost_type": FBA_SHIPPING_COST_TYPE,
+					"cost_sub_type": ensure_cost_leaf(
+						FBA_SHIPPING_COST_TYPE, "Zero Default", default_value=0
+					),
+					"value": 0,
+					"value_mode": "Manual",
+					"rank": 1,
+					"is_active": 1,
+				},
+			]
+		)
+
+		violations = get_push_block_violations([strategy.name])
+
+		self.assertNotIn(strategy.name, violations)
+
 	def test_manual_percentage_at_zero_still_blocks(self):
 		# Rule (a) is unconditional on value_mode: a hand-pinned 0% is still wrong.
 		strategy = build_guard_strategy(
