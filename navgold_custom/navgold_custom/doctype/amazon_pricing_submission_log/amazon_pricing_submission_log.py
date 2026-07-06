@@ -24,6 +24,7 @@ class AmazonPricingSubmissionLog(Document):
 		blocked_count: DF.Int
 		blocked_records: DF.SmallText | None
 		completed_at: DF.Datetime | None
+		error_log: DF.Link | None
 		error_message: DF.LongText | None
 		feed_content: DF.Code | None
 		feed_document_id: DF.Data | None

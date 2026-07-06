@@ -13,6 +13,8 @@ from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_submitter import (
 	PRICING_FEED_TYPE,
 	get_feeds_client,
 )
+from navgold_custom.navgold_custom.amazon_pricing.submission_log import record_submission_error
+from navgold_custom.navgold_custom.utils import AmazonFrozenError, PricingNotApprovedError
 
 # Absolute fat-finger ceiling: a typo like 886.0 for 8.86 gets blocked before it reaches Amazon.
 SANE_MAX_PRICE = 5000.0
@@ -217,24 +219,37 @@ def submit_feed(updates: list, settings) -> dict:
 	log.feed_content = json_content
 	log.insert()
 
-	feeds_client = get_feeds_client(settings)
+	try:
+		feeds_client = get_feeds_client(settings)
 
-	doc_result = feeds_client.create_feed_document()
-	feed_document_id = doc_result.get("feedDocumentId")
-	upload_url = doc_result.get("url")
-	log.feed_document_id = feed_document_id
-	log.save()
+		doc_result = feeds_client.create_feed_document()
+		feed_document_id = doc_result.get("feedDocumentId")
+		upload_url = doc_result.get("url")
+		log.feed_document_id = feed_document_id
+		log.save()
 
-	feeds_client.upload_feed_content(upload_url, json_content)
+		feeds_client.upload_feed_content(upload_url, json_content)
 
-	create_result = feeds_client.create_feed(feed_type=PRICING_FEED_TYPE, feed_document_id=feed_document_id)
-	feed_id = create_result.get("feedId")
-	log.feed_id = feed_id
-	log.status = "Submitted"
-	log.submitted_at = now_datetime()
-	log.save()
+		create_result = feeds_client.create_feed(
+			feed_type=PRICING_FEED_TYPE, feed_document_id=feed_document_id
+		)
+		feed_id = create_result.get("feedId")
+		log.feed_id = feed_id
+		log.status = "Submitted"
+		log.submitted_at = now_datetime()
+		log.save()
 
-	synced = sync_pricing_band(updates)
+		synced = sync_pricing_band(updates)
+	except (AmazonFrozenError, PricingNotApprovedError) as e:
+		# Intentional gate, not a failure — keep it out of the error queue.
+		log.status = "Skipped"
+		log.error_message = str(e)
+		log.save()
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit
+		raise
+	except Exception as e:
+		record_submission_error(log, channel="Amazon", exception=e)
+		raise
 
 	# Persist the submission log + band before returning to the caller.
 	frappe.db.commit()  # nosemgrep: frappe-manual-commit
