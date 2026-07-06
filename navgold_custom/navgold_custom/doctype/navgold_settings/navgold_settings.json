@@ -79,6 +79,11 @@
 		"column_break_afn_stock",
 		"last_afn_stock_proxy_count",
 		"last_afn_stock_items_count",
+		"clf_credential_section",
+		"clf_username",
+		"clf_endpoint",
+		"column_break_hxgs",
+		"clf_password",
 		"fba_inbound_tab",
 		"fba_inbound_enabled",
 		"fba_source_address",
@@ -559,6 +564,26 @@
 			"read_only": 1
 		},
 		{
+			"fieldname": "clf_credential_section",
+			"fieldtype": "Section Break",
+			"label": "CLF Credential"
+		},
+		{
+			"fieldname": "clf_endpoint",
+			"fieldtype": "Data",
+			"label": "CLF Stock Import Endpoint"
+		},
+		{
+			"fieldname": "clf_username",
+			"fieldtype": "Data",
+			"label": "Username"
+		},
+		{
+			"fieldname": "clf_password",
+			"fieldtype": "Password",
+			"label": "Password"
+		},
+		{
 			"fieldname": "fba_inbound_tab",
 			"fieldtype": "Tab Break",
 			"label": "FBA Inbound"
@@ -661,6 +686,10 @@
 			"fieldtype": "Currency",
 			"label": "Loss Circuit Breaker Threshold",
 			"options": "GBP"
+		},
+		{
+			"fieldname": "column_break_hxgs",
+			"fieldtype": "Column Break"
 		}
 	],
 	"grid_page_length": 50,

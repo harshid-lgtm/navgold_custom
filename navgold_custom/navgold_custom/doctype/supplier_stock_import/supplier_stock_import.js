@@ -40,6 +40,7 @@ frappe.ui.form.on('Supplier Stock Import', {
 
 	refresh(frm) {
 		frm.trigger('update_status_indicator');
+
 		const has_import_source = frm.doc.entry_list || frm.doc.google_sheets_url;
 		if (!frm.is_new() && frm.doc.status === 'Pending' && has_import_source) {
 			frm.add_custom_button(

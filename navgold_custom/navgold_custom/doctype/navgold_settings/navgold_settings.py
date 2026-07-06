@@ -34,6 +34,9 @@ class NavgoldSettings(Document):
 		amazon_pricing_enabled: DF.Check
 		amazon_publishing_mode: DF.Literal["Stock Only", "Stock and Prices"]
 		buying_price_list: DF.Link | None
+		clf_endpoint: DF.Data | None
+		clf_password: DF.Password | None
+		clf_username: DF.Data | None
 		commission_threshold: DF.Float
 		default_label_owner: DF.Literal["AMAZON", "SELLER", "NONE"]
 		default_prep_owner: DF.Literal["AMAZON", "SELLER", "NONE"]
