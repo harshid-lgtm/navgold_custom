@@ -6,7 +6,7 @@ frappe.listview_settings['Supplier Stock Import'] = {
 		listview.page.add_inner_button(__('Fetch CLF Stock'), async () => {
 			await frappe.call({
 				method:
-					'navgold_custom.navgold_custom.doctype.supplier_stock_import.supplier_stock_import.fetch_clf_stock',
+					'navgold_custom.navgold_custom.doctype.supplier_stock_import.clf_stock_api.fetch_clf_stock',
 			});
 			frappe.show_alert({
 				message: __('Fetching CLF stock in the background...'),

@@ -2,7 +2,6 @@
 # For license information, please see license.txt
 
 import frappe
-import requests
 from frappe import _
 from frappe.model.document import Document
 from frappe.utils.background_jobs import enqueue, is_job_enqueued
@@ -11,19 +10,14 @@ from frappe.utils.csvutils import (
 	build_csv_response,
 	get_csv_content_from_google_sheets,
 	read_csv_content,
-	to_csv,
 )
-from frappe.utils.file_manager import save_file
 from frappe.utils.xlsxutils import read_xlsx_file_from_attached_file
 
 from navgold_custom.navgold_custom.doctype.supplier_item_price_and_stock.supplier_item_price_and_stock import (
 	update_supplier_rank,
 )
-from navgold_custom.navgold_custom.doctype.supplier_stock_import import clf_stock_api
 
 TEMPLATE_COLUMNS = ("Supplier Part Number", "Stock Qty", "UOM", "Price", "Barcode")
-CLF_SUPPLIER = "CLF Distribution"
-CLF_FETCH_JOB_ID = "clf_stock_fetch"
 
 
 class SupplierStockImport(Document):
@@ -317,106 +311,3 @@ def run_import(docname):
 	doc.save()
 	update_supplier_rank()
 	frappe.publish_realtime("supplier_import_refresh", {"docname": docname}, user=frappe.session.user)
-
-
-@frappe.whitelist()
-def fetch_clf_stock():
-	if is_job_enqueued(CLF_FETCH_JOB_ID):
-		frappe.throw(_("A CLF stock fetch is already in progress"))
-
-	enqueue(
-		run_clf_fetch,
-		queue="long",
-		job_id=CLF_FETCH_JOB_ID,
-		user=frappe.session.user,
-	)
-
-
-def run_clf_fetch(user):
-	try:
-		fetch_and_import_clf_stock(user)
-	except frappe.ValidationError as validation_error:
-		frappe.publish_realtime("clf_stock_fetched", {"error": str(validation_error)}, user=user)
-	except requests.exceptions.RequestException:
-		frappe.publish_realtime(
-			"clf_stock_fetched",
-			{"error": _("CLF endpoint is unreachable. It may be down — try again later.")},
-			user=user,
-		)
-	except Exception:
-		frappe.publish_realtime(
-			"clf_stock_fetched",
-			{"error": _("CLF stock fetch failed unexpectedly.")},
-			user=user,
-		)
-
-
-def fetch_and_import_clf_stock(user):
-	records = frappe.get_all(
-		"Supplier Item Price and Stock",
-		filters={"supplier": CLF_SUPPLIER, "supplier_part_number": ["is", "set"]},
-		fields=["supplier_part_number", "uom", "barcode"],
-	)
-	if not records:
-		frappe.publish_realtime(
-			"clf_stock_fetched",
-			{"error": _("No {0} records with a Supplier Part Number to fetch").format(CLF_SUPPLIER)},
-			user=user,
-		)
-		return
-
-	stock_map = clf_stock_api.get_product_stock([record.supplier_part_number for record in records])
-
-	csv_rows = []
-	for record in records:
-		# Skip SKUs CLF did not return so the existing stock is left untouched.
-		if record.supplier_part_number not in stock_map:
-			continue
-		csv_rows.append(
-			[
-				record.supplier_part_number,
-				stock_map[record.supplier_part_number],
-				record.uom,
-				"",
-				record.barcode or "",
-			]
-		)
-
-	if not csv_rows:
-		frappe.publish_realtime(
-			"clf_stock_fetched",
-			{"error": _("CLF returned no stock for any {0} part number").format(CLF_SUPPLIER)},
-			user=user,
-		)
-		return
-
-	doc = frappe.get_doc(
-		{
-			"doctype": "Supplier Stock Import",
-			"supplier": CLF_SUPPLIER,
-			"currency": frappe.db.get_value("Supplier", CLF_SUPPLIER, "default_currency"),
-			"use_supplier_part_number": 1,
-			"import_stock": 1,
-			"import_price": 0,
-		}
-	).insert(ignore_permissions=True)
-
-	file_doc = save_file(
-		f"CLF Stock {doc.name}.csv",
-		build_clf_csv(csv_rows),
-		doc.doctype,
-		doc.name,
-		is_private=1,
-	)
-	doc.entry_list = file_doc.file_url
-	doc.save(ignore_permissions=True)
-
-	doc.process_import()
-	doc.save(ignore_permissions=True)
-	update_supplier_rank()
-
-	frappe.publish_realtime("clf_stock_fetched", {"docname": doc.name}, user=user)
-
-
-def build_clf_csv(rows):
-	return to_csv([TEMPLATE_COLUMNS, *rows])
