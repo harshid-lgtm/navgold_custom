@@ -56,15 +56,15 @@ def get_item_tax_rate(item_code: str) -> float:
 
 
 def get_cost_data(
-	strategy, override_supplier_price: float | None = None, policy_map: dict | None = None
+	strategy, override_supplier_price: float | None = None, cost_sub_type_map: dict | None = None
 ) -> list[dict]:
 	active_costs = [cost for cost in strategy.costs if cost.is_active]
 	if not active_costs:
 		return []
 
 	cost_type_map = get_cost_type_map()
-	if policy_map is None:
-		policy_map = get_cost_sub_type_map()
+	if cost_sub_type_map is None:
+		cost_sub_type_map = get_cost_sub_type_map()
 
 	cost_data = []
 	for cost in active_costs:
@@ -72,7 +72,7 @@ def get_cost_data(
 		if not cost_type:
 			continue
 
-		sub_type_source = (policy_map.get(cost.cost_sub_type) or {}).get("source")
+		sub_type_source = (cost_sub_type_map.get(cost.cost_sub_type) or {}).get("source")
 		is_supplier_fed = sub_type_source == "Supplier-Sync" and cost.value_mode != "Manual"
 		if is_supplier_fed and override_supplier_price is not None:
 			value = flt(override_supplier_price)
@@ -150,10 +150,10 @@ def calculate_single_price(numerator: float, denominator: float, margin: float, 
 
 
 def calculate_prices_with_purchase_cost_override(
-	strategy, override_purchase_cost: float, policy_map: dict | None = None
+	strategy, override_purchase_cost: float, cost_sub_type_map: dict | None = None
 ) -> dict:
 	cost_data = get_cost_data(
-		strategy, override_supplier_price=flt(override_purchase_cost), policy_map=policy_map
+		strategy, override_supplier_price=flt(override_purchase_cost), cost_sub_type_map=cost_sub_type_map
 	)
 	if not cost_data:
 		return {"min_price": 0, "max_price": 0}

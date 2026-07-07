@@ -6,6 +6,11 @@ from frappe import _
 from frappe.utils.data import flt
 from frappe.utils.nestedset import NestedSet
 
+from navgold_custom.navgold_custom.amazon_pricing.price_calculator import (
+	get_cost_sub_type_map,
+	get_cost_type_map,
+)
+
 
 class CostType(NestedSet):
 	# begin: auto-generated types
@@ -39,8 +44,6 @@ class CostType(NestedSet):
 	nsm_parent_field = "parent_cost_type"
 
 	def autoname(self):
-		# A node with no parent can only be a group, so it keeps the flat cost-type name; only a parented
-		# leaf gets the "{parent}-{name}" shape (identical to the old Cost Sub Type name).
 		if self.is_group or not self.parent_cost_type:
 			self.name = self.cost_type_name
 		else:
@@ -70,13 +73,6 @@ class CostType(NestedSet):
 		self.clear_pricing_caches()
 
 	def clear_pricing_caches(self):
-		# Group calc rules and leaf value policy both feed cached maps in price_calculator; a change here
-		# must refresh both or strategies keep pricing against a stale map until the redis_cache TTL.
-		# Imported function-local to keep this controller out of the amazon_pricing import chain at boot.
-		from navgold_custom.navgold_custom.amazon_pricing.price_calculator import (
-			get_cost_sub_type_map,
-			get_cost_type_map,
-		)
-
+		# A cost-type change must refresh both cached maps or strategies keep pricing against a stale map.
 		get_cost_type_map.clear_cache()
 		get_cost_sub_type_map.clear_cache()

@@ -25,7 +25,7 @@ def get_push_block_violations(strategy_names: list[str]) -> dict[str, list[str]]
 		return {}
 
 	cost_type_map = get_cost_type_map()
-	policy_map = get_cost_sub_type_map()
+	cost_sub_type_map = get_cost_sub_type_map()
 
 	cost_rows = frappe.get_all(
 		"Amazon Product Cost",
@@ -55,7 +55,7 @@ def get_push_block_violations(strategy_names: list[str]) -> dict[str, list[str]]
 			continue
 
 		if cost.value_mode == "Auto" and value == 0:
-			sub_type_source = (policy_map.get(cost.cost_sub_type) or {}).get("source")
+			sub_type_source = (cost_sub_type_map.get(cost.cost_sub_type) or {}).get("source")
 			if not sub_type_source:
 				violations.setdefault(cost.parent, []).append(f"{sub_type_label}: defaulted cost at 0")
 			elif cost_type.get("is_purchase_cost"):

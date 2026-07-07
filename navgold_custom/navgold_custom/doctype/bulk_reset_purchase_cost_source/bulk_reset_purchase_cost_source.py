@@ -59,10 +59,7 @@ def reset_purchase_cost_sources(
 ):
 	if target_mode not in VALUE_MODES:
 		frappe.throw(_("Target Mode must be Auto or Manual."))
-	# ponytail: bulk-reset to Auto leaves the FBA-fee value in place (Amazon-Sync is externally-owned,
-	# populate_costs skips it), and the daily bulk_fetch_fba_fees refresh re-derives it. Re-wire an
-	# immediate fetch only if a same-day reset must reflect the fee instantly.
-
+	# ponytail: reset-to-Auto leaves the externally-owned FBA fee value untouched; the daily fee refresh re-derives it.
 	matching = get_matching_cost_rows(frappe._dict(filters))
 	if not matching:
 		frappe.log_error(
