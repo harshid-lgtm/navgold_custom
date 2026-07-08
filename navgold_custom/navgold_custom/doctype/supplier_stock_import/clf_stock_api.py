@@ -131,8 +131,8 @@ def _child_text(node, tag):
 	return None
 
 
-# The CLF catalogue is sparse: SKUs it does not recognise are simply omitted from
-# the response, so callers must treat a missing SKU as "unknown", not zero.
+# CLF omits SKUs it does not recognise from the response, so the map only holds SKUs it
+# returned; the caller decides how to treat a missing one (stock -> out of stock, price -> keep).
 def get_product_field(skus, operation, result_tag, field, cast, fault_label, batch_size):
 	unique_skus = list(dict.fromkeys(sku for sku in skus if sku))
 	token = get_token()
@@ -246,16 +246,23 @@ def fetch_and_import_clf(metric):
 
 	csv_rows = []
 	for record in records:
-		# Skip SKUs CLF did not return so the existing values are left untouched.
-		if record.supplier_part_number not in value_map:
-			continue
-		value = value_map[record.supplier_part_number]
+		in_clf = record.supplier_part_number in value_map
+
+		if metric == "price":
+			# Only update prices CLF returned; a missing SKU must not zero its price.
+			if not in_clf:
+				continue
+			stock_value, price_value = "", value_map[record.supplier_part_number]
+		else:
+			# A SKU CLF no longer lists is out of stock, so default missing ones to 0.
+			stock_value, price_value = value_map.get(record.supplier_part_number, 0), ""
+
 		csv_rows.append(
 			[
 				record.supplier_part_number,
-				value if metric == "stock" else "",
+				stock_value,
 				record.uom,
-				value if metric == "price" else "",
+				price_value,
 				record.barcode or "",
 			]
 		)
