@@ -437,6 +437,11 @@ function show_pack_qty_dialog(frm, matching_rows, item_code, options = {}) {
 		total_required_uom += flt(row.qty);
 	}
 
+	// summing pack qtys * conversion accumulates float dust (6.000000000000001)
+	const qty_precision = precision('qty', matching_rows[0]);
+	total_required_nos = flt(total_required_nos, qty_precision);
+	total_packed_nos = flt(total_packed_nos, qty_precision);
+
 	const remaining_nos = total_required_nos - total_packed_nos;
 	const show_original_uom =
 		original_uom !== 'Nos' && total_required_uom !== total_required_nos;
@@ -546,7 +551,10 @@ function distribute_packed_qty(frm, rows, total_packed_nos) {
 		const row_capacity_nos = flt(row.qty) * conversion_factor;
 		const packed_nos_for_row = Math.min(remaining_nos, row_capacity_nos);
 
-		row.custom_packed_qty = packed_nos_for_row / conversion_factor;
+		row.custom_packed_qty = flt(
+			packed_nos_for_row / conversion_factor,
+			precision('custom_packed_qty', row),
+		);
 		row.custom_is_scanned = packed_nos_for_row > 0 ? 1 : 0;
 		remaining_nos -= packed_nos_for_row;
 	}
