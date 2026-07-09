@@ -226,8 +226,14 @@ class SPAPI:
 			try:
 				body = e.response.json()
 				errors = body.get("errors", [])
+				# details carries the actionable reason (e.g. weight mismatch); message is often generic
 				description = (
-					"; ".join(f"{err.get('code', '')}: {err.get('message', '')}" for err in errors)
+					"; ".join(
+						": ".join(
+							part for part in (err.get("code"), err.get("message"), err.get("details")) if part
+						)
+						for err in errors
+					)
 					if errors
 					else cstr(body)
 				)

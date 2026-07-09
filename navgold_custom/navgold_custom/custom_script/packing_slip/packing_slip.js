@@ -65,10 +65,7 @@ function add_sfp_label_button(frm) {
 
 			show_sfp_rate_dialog(frm, rates);
 		} catch {
-			frappe.show_alert(
-				{ message: __('Failed to fetch SFP rates.'), indicator: 'red' },
-				5,
-			);
+			// frappe.call already shows the server error dialog
 		}
 	});
 }
@@ -90,10 +87,7 @@ function add_sfp_cancel_button(frm) {
 				5,
 			);
 		} catch {
-			frappe.show_alert(
-				{ message: __('Failed to cancel SFP shipment.'), indicator: 'red' },
-				5,
-			);
+			// frappe.call already shows the server error dialog
 		}
 	});
 }
@@ -183,10 +177,7 @@ function show_sfp_rate_dialog(frm, rates) {
 					window.open(result.file_url, '_blank');
 				}
 			} catch {
-				frappe.show_alert(
-					{ message: __('Failed to generate SFP label.'), indicator: 'red' },
-					5,
-				);
+				// frappe.call already shows the server error dialog
 			}
 		},
 	});
@@ -321,7 +312,8 @@ async function set_delivery_note_and_load_items(
 		}
 
 		if (item.weight_per_unit) {
-			row.net_weight = flt(item.weight_per_unit) * flt(item.qty);
+			// net_weight is per unit; the server sums net_weight * qty into net_weight_pkg
+			row.net_weight = flt(item.weight_per_unit);
 			row.weight_uom = item.weight_uom;
 		}
 	}
