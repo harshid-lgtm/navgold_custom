@@ -84,7 +84,6 @@ def set_gross_weight_from_parcel(doc):
 	if flt(doc.gross_weight_pkg) or not doc.get("custom_shipment_parcel_template"):
 		return
 
-	# Shipment Parcel Template weight is in kg (ERPNext Shipment convention)
 	parcel_weight_kg = flt(
 		frappe.db.get_value("Shipment Parcel Template", doc.custom_shipment_parcel_template, "weight")
 	)

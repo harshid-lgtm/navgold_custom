@@ -75,8 +75,6 @@ def auto_create_sales_invoice(delivery_note_name):
 
 def validate_packed_qty(doc):
 	for item in doc.items:
-		# compare at field precision: pack<->Nos conversion in the scan dialog
-		# leaves float dust (0.667 * 6 / 6 == 0.6670000000000001)
 		precision = item.precision("qty")
 		packed_qty = flt(item.custom_packed_qty, precision)
 		qty = flt(item.qty, precision)

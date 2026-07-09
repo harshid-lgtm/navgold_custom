@@ -437,7 +437,6 @@ function show_pack_qty_dialog(frm, matching_rows, item_code, options = {}) {
 		total_required_uom += flt(row.qty);
 	}
 
-	// summing pack qtys * conversion accumulates float dust (6.000000000000001)
 	const qty_precision = precision('qty', matching_rows[0]);
 	total_required_nos = flt(total_required_nos, qty_precision);
 	total_packed_nos = flt(total_packed_nos, qty_precision);
