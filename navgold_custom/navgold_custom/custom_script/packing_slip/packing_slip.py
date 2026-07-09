@@ -6,12 +6,16 @@ from erpnext.stock.doctype.packed_item.packed_item import is_product_bundle
 from frappe import _
 from frappe.utils import flt
 
-from navgold_custom.navgold_custom.custom_script.packing_slip.packing_utils import recalculate_net_weight
+from navgold_custom.navgold_custom.custom_script.packing_slip.packing_utils import (
+	recalculate_net_weight,
+	set_gross_weight_from_parcel,
+)
 from navgold_custom.navgold_custom.erpnext_compat import make_sales_invoice
 
 
 def before_validate(doc, method):
 	recalculate_net_weight(doc)
+	set_gross_weight_from_parcel(doc)
 	validate_packed_qty(doc)
 
 
