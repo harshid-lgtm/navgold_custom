@@ -229,7 +229,9 @@ class SPAPI:
 				# details carries the actionable reason (e.g. weight mismatch); message is often generic
 				description = (
 					"; ".join(
-						": ".join(filter(None, [err.get("code"), err.get("message"), err.get("details")]))
+						": ".join(
+							part for part in (err.get("code"), err.get("message"), err.get("details")) if part
+						)
 						for err in errors
 					)
 					if errors
