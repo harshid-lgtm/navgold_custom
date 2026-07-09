@@ -28,7 +28,7 @@ def sort_item_locations_by_walk_route(doc, method):
 		row.custom_walk_route = flt(walk_route_map.get(row.warehouse))
 
 	# Bins without a walk route sort to the end of the picking path
-	doc.locations.sort(key=lambda row: flt(row.custom_walk_route) or float("inf"))
+	doc.locations.sort(key=lambda row: row.custom_walk_route or float("inf"))
 	for idx, row in enumerate(doc.locations, start=1):
 		row.idx = idx
 

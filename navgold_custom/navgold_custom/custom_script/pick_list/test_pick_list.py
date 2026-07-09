@@ -4,26 +4,29 @@
 import frappe
 from frappe.tests import IntegrationTestCase
 
-from navgold_custom.navgold_custom.amazon_pricing.test_bundle_stock import make_item, receive_stock
+from navgold_custom.navgold_custom.amazon_pricing.test_bundle_stock import make_item
+
+# erpnext.stock.doctype.warehouse.test_warehouse.create_warehouse is deliberately NOT
+# reused: importing erpnext test modules triggers their test-record chain, which creates
+# a Supplier that fails this app's lead-time validation hook during test discovery.
 
 
-def make_warehouse(warehouse_name, company, walk_route):
-	existing = frappe.db.exists("Warehouse", {"warehouse_name": warehouse_name, "company": company})
-	if existing:
-		return existing
-	parent_warehouse = frappe.get_all(
-		"Warehouse",
-		filters={"company": company, "is_group": 1},
-		limit=1,
-		pluck="name",
-	)[0]
-	warehouse = frappe.new_doc("Warehouse")
-	warehouse.warehouse_name = warehouse_name
-	warehouse.company = company
-	warehouse.parent_warehouse = parent_warehouse
-	warehouse.custom_walk_route = walk_route
-	warehouse.insert()
-	return warehouse.name
+def receive_stock(item_code, qty_per_warehouse, warehouses, company):
+	stock_entry = frappe.new_doc("Stock Entry")
+	stock_entry.stock_entry_type = "Material Receipt"
+	stock_entry.company = company
+	for warehouse in warehouses:
+		stock_entry.append(
+			"items",
+			{
+				"item_code": item_code,
+				"qty": qty_per_warehouse,
+				"t_warehouse": warehouse,
+				"basic_rate": 10,
+			},
+		)
+	stock_entry.insert()
+	stock_entry.submit()
 
 
 def make_pick_list(company, item_code, qty):
@@ -53,21 +56,36 @@ class TestPickListWalkRouteSort(IntegrationTestCase):
 			frappe.defaults.get_global_default("company")
 			or frappe.get_all("Company", limit=1, pluck="name")[0]
 		)
-		# Receipt order deliberately differs from walk-route order so FIFO
-		# allocation alone cannot produce the expected sequence.
-		cls.warehouse_late = make_warehouse("Walk Route Test Late", cls.company, 30)
-		cls.warehouse_mid = make_warehouse("Walk Route Test Mid", cls.company, 10.5)
-		cls.warehouse_early = make_warehouse("Walk Route Test Early", cls.company, 10)
-		cls.warehouse_unrouted = make_warehouse("Walk Route Test Unrouted", cls.company, 0)
+		parent_warehouse = frappe.get_all(
+			"Warehouse",
+			filters={"company": cls.company, "is_group": 1},
+			limit=1,
+			pluck="name",
+		)[0]
 
+		def make_test_warehouse(warehouse_name, walk_route):
+			warehouse = frappe.new_doc("Warehouse")
+			warehouse.warehouse_name = warehouse_name
+			warehouse.company = cls.company
+			warehouse.parent_warehouse = parent_warehouse
+			warehouse.custom_walk_route = walk_route
+			warehouse.insert()
+			return warehouse.name
+
+		cls.warehouse_late = make_test_warehouse("Walk Route Test Late", 30)
+		cls.warehouse_mid = make_test_warehouse("Walk Route Test Mid", 10.5)
+		cls.warehouse_early = make_test_warehouse("Walk Route Test Early", 10)
+		cls.warehouse_unrouted = make_test_warehouse("Walk Route Test Unrouted", 0)
+
+		# Receipt row order deliberately differs from walk-route order so FIFO
+		# allocation alone cannot produce the expected sequence.
 		cls.routed_item = make_item("WALK-ROUTE-ITEM", 1)
-		receive_stock(cls.routed_item, 5, cls.warehouse_late, cls.company)
-		receive_stock(cls.routed_item, 5, cls.warehouse_mid, cls.company)
-		receive_stock(cls.routed_item, 5, cls.warehouse_early, cls.company)
+		receive_stock(
+			cls.routed_item, 5, [cls.warehouse_late, cls.warehouse_mid, cls.warehouse_early], cls.company
+		)
 
 		cls.partly_routed_item = make_item("WALK-ROUTE-ITEM-UNROUTED", 1)
-		receive_stock(cls.partly_routed_item, 5, cls.warehouse_unrouted, cls.company)
-		receive_stock(cls.partly_routed_item, 5, cls.warehouse_late, cls.company)
+		receive_stock(cls.partly_routed_item, 5, [cls.warehouse_unrouted, cls.warehouse_late], cls.company)
 
 	def test_locations_sorted_by_walk_route_with_decimal_routes(self):
 		pick_list = make_pick_list(self.company, self.routed_item, 12)
