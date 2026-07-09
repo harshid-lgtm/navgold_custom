@@ -159,9 +159,10 @@ def get_product_stock(skus):
 
 
 def get_product_prices(skus):
-	return get_product_field(
+	prices = get_product_field(
 		skus, "GetProductData", "GetProductDataResult", "price", flt, _("price"), CLF_PRICE_BATCH_SIZE
 	)
+	return {sku: price for sku, price in prices.items() if price > 0}
 
 
 @frappe.whitelist()
@@ -249,7 +250,7 @@ def fetch_and_import_clf(metric):
 		in_clf = record.supplier_part_number in value_map
 
 		if metric == "price":
-			# Only update prices CLF returned; a missing SKU must not zero its price.
+			# Only update prices CLF returned; a missing or unpriced SKU keeps its current price.
 			if not in_clf:
 				continue
 			stock_value, price_value = "", value_map[record.supplier_part_number]
