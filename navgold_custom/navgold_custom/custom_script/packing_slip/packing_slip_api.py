@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import base64
+import math
 
 import frappe
 from erpnext.stock.doctype.item.item import get_uom_conv_factor
@@ -399,20 +400,23 @@ def build_package_items(orders, amazon_order_id, currency, weight_in_grams):
 		if not next_token:
 			break
 
+	valid_order_items = [item for item in order_items if item.get("OrderItemId")]
+	total_quantity = sum(max(1, int(flt(item.get("QuantityOrdered")) or 0)) for item in valid_order_items)
+	# Amazon treats item weight as per-unit and multiplies it by quantity; round down so
+	# the summed item weights never exceed the declared package weight (InvalidInput 400)
+	unit_weight_grams = math.floor(weight_in_grams / max(total_quantity, 1) * 100) / 100
+
 	total_item_value = 0
 	package_items = []
-	for item in order_items:
-		order_item_id = item.get("OrderItemId")
-		if not order_item_id:
-			continue
+	for item in valid_order_items:
 		quantity = max(1, int(flt(item.get("QuantityOrdered")) or 0))
 		item_price = flt((item.get("ItemPrice") or {}).get("Amount")) or 1.0
 		total_item_value += item_price
 		package_item = {
-			"itemIdentifier": order_item_id,
+			"itemIdentifier": item.get("OrderItemId"),
 			"quantity": quantity,
 			"itemValue": {"unit": currency, "value": round(item_price, 2)},
-			"weight": {"unit": "GRAM", "value": round(weight_in_grams / max(len(order_items), 1), 2)},
+			"weight": {"unit": "GRAM", "value": unit_weight_grams},
 		}
 		description = item.get("Title") or ""
 		if description:

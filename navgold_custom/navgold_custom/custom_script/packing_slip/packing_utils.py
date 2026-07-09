@@ -67,9 +67,10 @@ def recalculate_net_weight(doc):
 		if weight_per_unit:
 			uom = item.stock_uom or "Nos"
 			conversion_factor = conversion_map.get((item.item_code, uom), 1.0)
-			item.net_weight = weight_per_unit * flt(item.qty) * conversion_factor
+			# net_weight is per unit: core Packing Slip sums net_weight * qty into net_weight_pkg
+			item.net_weight = weight_per_unit * conversion_factor
 			item.weight_uom = weight_info.get("weight_uom", "")
-			total_net_weight += flt(item.net_weight)
+			total_net_weight += flt(item.net_weight) * flt(item.qty)
 			if not net_weight_uom:
 				net_weight_uom = item.weight_uom
 

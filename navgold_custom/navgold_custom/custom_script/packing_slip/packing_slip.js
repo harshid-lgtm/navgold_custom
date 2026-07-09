@@ -321,7 +321,8 @@ async function set_delivery_note_and_load_items(
 		}
 
 		if (item.weight_per_unit) {
-			row.net_weight = flt(item.weight_per_unit) * flt(item.qty);
+			// net_weight is per unit; the server sums net_weight * qty into net_weight_pkg
+			row.net_weight = flt(item.weight_per_unit);
 			row.weight_uom = item.weight_uom;
 		}
 	}
