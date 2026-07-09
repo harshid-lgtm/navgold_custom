@@ -149,7 +149,6 @@ async function set_stock_entry_and_load_items(
 		row.stock_uom = item.uom;
 		row.custom_packed_qty = 0;
 		if (item.weight_per_unit) {
-			// net_weight is per unit; the server sums net_weight * qty into net_weight_pkg
 			row.net_weight = flt(item.weight_per_unit);
 			row.weight_uom = item.weight_uom;
 		}
