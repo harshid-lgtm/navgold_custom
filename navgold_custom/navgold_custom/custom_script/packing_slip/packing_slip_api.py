@@ -19,6 +19,7 @@ from navgold_custom.navgold_custom.custom_script.packing_slip.packing_utils impo
 from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import (
 	Orders,
 	Shipping,
+	SPAPIError,
 )
 from navgold_custom.navgold_custom.erpnext_compat import make_packing_slip
 
@@ -141,10 +142,17 @@ def get_delivery_note_items(delivery_note: str):
 @frappe.whitelist()
 def get_sfp_shipping_rates(packing_slip: str):
 	packing_slip_doc = frappe.get_cached_doc("Packing Slip", packing_slip)
-	shipping_payload = build_shipping_payload(packing_slip_doc)
 	shipping = Shipping.from_amazon_settings()
 
-	response = shipping.get_shipping_rates(payload=shipping_payload)
+	try:
+		shipping_payload = build_shipping_payload(packing_slip_doc)
+		response = shipping.get_shipping_rates(payload=shipping_payload)
+	except SPAPIError as error:
+		frappe.throw(
+			_("Amazon rejected the shipping rate request: {0}").format(error.error_description),
+			title=_("Could Not Fetch SFP Rates"),
+		)
+
 	rates_payload = response.get("payload")
 	rates = rates_payload.get("rates") or []
 	if not rates:
@@ -205,12 +213,19 @@ def purchase_sfp_shipping_label(
 	packing_slip_doc = frappe.get_cached_doc("Packing Slip", packing_slip)
 	shipping = Shipping.from_amazon_settings()
 
-	response = shipping.purchase_shipment(
-		rate_id=rate_id,
-		request_token=request_token,
-		document_spec=document_spec,
-		value_added_services=value_added_services or [],
-	)
+	try:
+		response = shipping.purchase_shipment(
+			rate_id=rate_id,
+			request_token=request_token,
+			document_spec=document_spec,
+			value_added_services=value_added_services or [],
+		)
+	except SPAPIError as error:
+		frappe.throw(
+			_("Amazon rejected the label purchase: {0}").format(error.error_description),
+			title=_("Could Not Purchase SFP Label"),
+		)
+
 	purchase_payload = response.get("payload")
 	shipment_id = purchase_payload.get("shipmentId")
 	if not shipment_id:
@@ -256,7 +271,13 @@ def cancel_sfp_shipment(packing_slip: str):
 		frappe.throw(_("No SFP shipment to cancel."))
 
 	shipping = Shipping.from_amazon_settings()
-	shipping.cancel_shipment(shipment_id=packing_slip_doc.custom_sfp_shipment_id)
+	try:
+		shipping.cancel_shipment(shipment_id=packing_slip_doc.custom_sfp_shipment_id)
+	except SPAPIError as error:
+		frappe.throw(
+			_("Amazon rejected the cancellation: {0}").format(error.error_description),
+			title=_("Could Not Cancel SFP Shipment"),
+		)
 	packing_slip_doc.custom_sfp_rate_id = ""
 	packing_slip_doc.custom_sfp_shipment_id = ""
 	packing_slip_doc.custom_sfp_label = ""

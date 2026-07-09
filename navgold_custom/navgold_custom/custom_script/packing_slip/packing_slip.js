@@ -65,10 +65,7 @@ function add_sfp_label_button(frm) {
 
 			show_sfp_rate_dialog(frm, rates);
 		} catch {
-			frappe.show_alert(
-				{ message: __('Failed to fetch SFP rates.'), indicator: 'red' },
-				5,
-			);
+			// frappe.call already shows the server error dialog
 		}
 	});
 }
@@ -90,10 +87,7 @@ function add_sfp_cancel_button(frm) {
 				5,
 			);
 		} catch {
-			frappe.show_alert(
-				{ message: __('Failed to cancel SFP shipment.'), indicator: 'red' },
-				5,
-			);
+			// frappe.call already shows the server error dialog
 		}
 	});
 }
@@ -183,10 +177,7 @@ function show_sfp_rate_dialog(frm, rates) {
 					window.open(result.file_url, '_blank');
 				}
 			} catch {
-				frappe.show_alert(
-					{ message: __('Failed to generate SFP label.'), indicator: 'red' },
-					5,
-				);
+				// frappe.call already shows the server error dialog
 			}
 		},
 	});
