@@ -8,7 +8,7 @@ import frappe
 from erpnext.stock.doctype.item.item import get_uom_conv_factor
 from erpnext.stock.doctype.packed_item.packed_item import is_product_bundle
 from frappe import _
-from frappe.utils import flt
+from frappe.utils import cint, flt
 from frappe.utils.data import cstr
 
 from navgold_custom.navgold_custom.amazon_repository import format_local_as_amazon_utc
@@ -422,7 +422,7 @@ def build_package_items(orders, amazon_order_id, currency, weight_in_grams):
 			break
 
 	valid_order_items = [item for item in order_items if item.get("OrderItemId")]
-	total_quantity = sum(max(1, int(flt(item.get("QuantityOrdered")) or 0)) for item in valid_order_items)
+	total_quantity = sum(max(1, cint(item.get("QuantityOrdered"))) for item in valid_order_items)
 	# Amazon treats item weight as per-unit and multiplies it by quantity; round down so
 	# the summed item weights never exceed the declared package weight (InvalidInput 400)
 	unit_weight_grams = math.floor(weight_in_grams / max(total_quantity, 1) * 100) / 100
@@ -430,7 +430,7 @@ def build_package_items(orders, amazon_order_id, currency, weight_in_grams):
 	total_item_value = 0
 	package_items = []
 	for item in valid_order_items:
-		quantity = max(1, int(flt(item.get("QuantityOrdered")) or 0))
+		quantity = max(1, cint(item.get("QuantityOrdered")))
 		item_price = flt((item.get("ItemPrice") or {}).get("Amount")) or 1.0
 		total_item_value += item_price
 		package_item = {
