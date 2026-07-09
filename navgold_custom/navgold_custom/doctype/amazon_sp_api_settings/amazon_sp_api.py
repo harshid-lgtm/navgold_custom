@@ -226,7 +226,7 @@ class SPAPI:
 			try:
 				body = e.response.json()
 				errors = body.get("errors", [])
-				# details carries the actionable reason (e.g. weight mismatch); message is often generic
+				# details carries the actionable reason; message is often generic
 				description = (
 					"; ".join(
 						": ".join(

@@ -81,8 +81,6 @@ def recalculate_net_weight(doc):
 
 
 def set_gross_weight_from_parcel(doc):
-	# only fills an empty gross weight, mirroring core's gross = net fallback;
-	# clearing the field and saving recomputes it after item changes
 	if flt(doc.gross_weight_pkg) or not doc.get("custom_shipment_parcel_template"):
 		return
 
