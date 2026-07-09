@@ -15,14 +15,14 @@ def sort_item_locations_by_walk_route(doc, method):
 	if not warehouses:
 		return
 
-	walk_route_map = {
-		warehouse.name: warehouse.custom_walk_route
-		for warehouse in frappe.get_all(
+	walk_route_map = frappe._dict(
+		frappe.get_all(
 			"Warehouse",
 			filters={"name": ("in", warehouses)},
 			fields=["name", "custom_walk_route"],
+			as_list=1,
 		)
-	}
+	)
 
 	for row in doc.locations:
 		row.custom_walk_route = flt(walk_route_map.get(row.warehouse))
