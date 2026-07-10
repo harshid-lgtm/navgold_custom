@@ -16,9 +16,17 @@ except ImportError:
 	from erpnext.stock.doctype.pick_list.pick_list import create_delivery_note, create_stock_entry
 
 try:
-	from erpnext.selling.doctype.sales_order.mapper import create_pick_list, make_material_request
+	from erpnext.selling.doctype.sales_order.mapper import (
+		create_pick_list,
+		make_delivery_note,
+		make_material_request,
+	)
 except ImportError:
-	from erpnext.selling.doctype.sales_order.sales_order import create_pick_list, make_material_request
+	from erpnext.selling.doctype.sales_order.sales_order import (
+		create_pick_list,
+		make_delivery_note,
+		make_material_request,
+	)
 
 try:
 	from erpnext.buying.doctype.purchase_order.mapper import make_purchase_receipt
@@ -44,6 +52,7 @@ __all__ = [
 	"create_pick_list",
 	"create_stock_entry",
 	"get_product_bundle_items",
+	"make_delivery_note",
 	"make_material_request",
 	"make_packing_slip",
 	"make_purchase_receipt",
