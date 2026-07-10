@@ -101,10 +101,15 @@ class NavgoldAlertsTestBase(IntegrationTestCase):
 		return customer.name
 
 	def create_amazon_sales_order(self, item_code, rate, qty=1, submit=False):
-		warehouse = frappe.db.get_value("Warehouse", {"is_group": 0, "disabled": 0}, "name")
+		company = frappe.db.get_value("Company", {}, "name")
+		# the warehouse must belong to the same company — an unordered pick breaks as
+		# soon as any warehouse of another company exists on the site
+		warehouse = frappe.db.get_value(
+			"Warehouse", {"is_group": 0, "disabled": 0, "company": company}, "name"
+		)
 		so = frappe.new_doc("Sales Order")
 		so.customer = self.create_test_customer()
-		so.company = frappe.db.get_value("Company", {}, "name")
+		so.company = company
 		so.transaction_date = nowdate()
 		so.delivery_date = add_days(nowdate(), 5)
 		so.amazon_order_id = f"AMZ-{frappe.generate_hash(length=10)}"

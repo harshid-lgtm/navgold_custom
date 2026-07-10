@@ -45,9 +45,10 @@ def create_submitted_amazon_so():
 	item.insert(ignore_permissions=True)
 
 	amazon_order_id = f"AMZ-{frappe.generate_hash(length=10)}"
+	company = frappe.db.get_value("Company", {}, "name")
 	so = frappe.new_doc("Sales Order")
 	so.customer = customer.name
-	so.company = frappe.db.get_value("Company", {}, "name")
+	so.company = company
 	so.transaction_date = nowdate()
 	so.delivery_date = add_days(nowdate(), 5)
 	so.amazon_order_id = amazon_order_id
@@ -58,7 +59,11 @@ def create_submitted_amazon_so():
 			"qty": 1,
 			"rate": 10,
 			"uom": "Nos",
-			"warehouse": frappe.db.get_value("Warehouse", {"is_group": 0, "disabled": 0}, "name"),
+			# the warehouse must belong to the same company — an unordered pick breaks
+			# as soon as any warehouse of another company exists on the site
+			"warehouse": frappe.db.get_value(
+				"Warehouse", {"is_group": 0, "disabled": 0, "company": company}, "name"
+			),
 			"delivery_date": add_days(nowdate(), 5),
 		},
 	)
