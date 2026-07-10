@@ -11,13 +11,12 @@ COMPANY = "Navgold Ltd"
 CUSTOMER = "TEST-DC-CUSTOMER"
 PACK_UOM = "Test DC Pack of 6"
 PACK_SIZE = 6
-ITEM_CODE = "TEST-DC-PACK-ITEM"
 BATCH_ITEM_CODE = "TEST-DC-BATCH-ITEM"
 
 
 def create_test_warehouse(warehouse_name):
-	abbr = frappe.get_cached_value("Company", COMPANY, "abbr")
-	full_name = f"{warehouse_name} - {abbr}"
+	company_abbreviation = frappe.get_cached_value("Company", COMPANY, "abbr")
+	full_name = f"{warehouse_name} - {company_abbreviation}"
 	if frappe.db.exists("Warehouse", full_name):
 		return full_name
 
@@ -144,10 +143,11 @@ class TestDeliveryConsolidation(IntegrationTestCase):
 		)
 
 	def test_pack_split_across_shelves_delivers_one_whole_pack(self):
-		create_pack_item(ITEM_CODE)
-		receive_stock(ITEM_CODE, self.shelf_a, 2)
-		receive_stock(ITEM_CODE, self.shelf_b, 4)
-		sales_order = create_pack_sales_order(ITEM_CODE)
+		item_code = "TEST-DC-SPLIT-ITEM"
+		create_pack_item(item_code)
+		receive_stock(item_code, self.shelf_a, 2)
+		receive_stock(item_code, self.shelf_b, 4)
+		sales_order = create_pack_sales_order(item_code)
 
 		pick_list = submit_pick_list_for(sales_order)
 
@@ -172,27 +172,28 @@ class TestDeliveryConsolidation(IntegrationTestCase):
 
 		delivery_note_items = get_delivery_note_items(sales_order)
 		self.assertEqual(len(delivery_note_items), 1, "expected exactly one whole-pack DN row")
-		dn_row = delivery_note_items[0]
-		self.assertEqual(flt(dn_row.qty), 1)
-		self.assertEqual(flt(dn_row.stock_qty), 6)
-		self.assertEqual(dn_row.warehouse, self.consolidation_warehouse)
-		self.assertEqual(dn_row.uom, PACK_UOM)
+		delivery_note_row = delivery_note_items[0]
+		self.assertEqual(flt(delivery_note_row.qty), 1)
+		self.assertEqual(flt(delivery_note_row.stock_qty), 6)
+		self.assertEqual(delivery_note_row.warehouse, self.consolidation_warehouse)
+		self.assertEqual(delivery_note_row.uom, PACK_UOM)
 
 		# the original bug killed the flow at submit (whole-number UOM + over-allowance)
-		delivery_note = frappe.get_doc("Delivery Note", dn_row.parent)
+		delivery_note = frappe.get_doc("Delivery Note", delivery_note_row.parent)
 		delivery_note.submit()
 		self.assertEqual(flt(frappe.db.get_value("Sales Order", sales_order.name, "per_delivered")), 100)
 		remaining = frappe.db.get_value(
 			"Bin",
-			{"item_code": ITEM_CODE, "warehouse": self.consolidation_warehouse},
+			{"item_code": item_code, "warehouse": self.consolidation_warehouse},
 			"actual_qty",
 		)
 		self.assertEqual(flt(remaining), 0)
 
 	def test_partial_pick_stages_stock_without_delivery_note(self):
-		create_pack_item(ITEM_CODE)
-		receive_stock(ITEM_CODE, self.shelf_b, 4)
-		sales_order = create_pack_sales_order(ITEM_CODE)
+		item_code = "TEST-DC-PARTIAL-ITEM"
+		create_pack_item(item_code)
+		receive_stock(item_code, self.shelf_b, 4)
+		sales_order = create_pack_sales_order(item_code)
 
 		pick_list = submit_pick_list_for(sales_order)
 
@@ -206,17 +207,18 @@ class TestDeliveryConsolidation(IntegrationTestCase):
 		)
 		staged = frappe.db.get_value(
 			"Bin",
-			{"item_code": ITEM_CODE, "warehouse": self.consolidation_warehouse},
+			{"item_code": item_code, "warehouse": self.consolidation_warehouse},
 			"actual_qty",
 		)
 		self.assertEqual(flt(staged), 4, "remainder must wait in the consolidation warehouse")
 
 	def test_feature_off_keeps_legacy_direct_delivery_note(self):
 		frappe.db.set_single_value("Navgold Settings", "delivery_consolidation_warehouse", "")
-		create_pack_item(ITEM_CODE)
-		receive_stock(ITEM_CODE, self.shelf_a, 2)
-		receive_stock(ITEM_CODE, self.shelf_b, 4)
-		sales_order = create_pack_sales_order(ITEM_CODE)
+		item_code = "TEST-DC-LEGACY-ITEM"
+		create_pack_item(item_code)
+		receive_stock(item_code, self.shelf_a, 2)
+		receive_stock(item_code, self.shelf_b, 4)
+		sales_order = create_pack_sales_order(item_code)
 
 		pick_list = submit_pick_list_for(sales_order)
 
@@ -249,3 +251,60 @@ class TestDeliveryConsolidation(IntegrationTestCase):
 			"actual_qty",
 		)
 		self.assertEqual(flt(staged), 6)
+
+		delivery_note_items = get_delivery_note_items(sales_order)
+		self.assertEqual(len(delivery_note_items), 1)
+		self.assertEqual(flt(delivery_note_items[0].qty), 1)
+		self.assertEqual(delivery_note_items[0].warehouse, self.consolidation_warehouse)
+
+	def test_reservation_disabled_floors_to_whole_packs(self):
+		item_code = "TEST-DC-NORESV-ITEM"
+		create_pack_item(item_code)
+		receive_stock(item_code, self.shelf_a, 2)
+		receive_stock(item_code, self.shelf_b, 4)
+		sales_order = create_pack_sales_order(item_code)
+
+		# change_settings restores the singles value cache too — a bare set_single_value
+		# leaks the stale cached value into later tests after rollback
+		with self.change_settings("Stock Settings", {"enable_stock_reservation": 0}):
+			pick_list = submit_pick_list_for(sales_order)
+
+		transfer = get_consolidation_transfer(pick_list)
+		self.assertIsNotNone(transfer)
+		self.assertFalse(
+			frappe.db.exists("Stock Reservation Entry", {"voucher_no": sales_order.name, "docstatus": 1})
+		)
+
+		delivery_note_items = get_delivery_note_items(sales_order)
+		self.assertEqual(len(delivery_note_items), 1, "fallback path must still produce one whole-pack row")
+		delivery_note_row = delivery_note_items[0]
+		self.assertEqual(flt(delivery_note_row.qty), 1)
+		self.assertEqual(flt(delivery_note_row.stock_qty), 6)
+		self.assertEqual(delivery_note_row.warehouse, self.consolidation_warehouse)
+
+	def test_second_pick_list_ships_only_its_own_reservation(self):
+		item_code = "TEST-DC-SEQ-ITEM"
+		create_pack_item(item_code)
+		receive_stock(item_code, self.shelf_a, 6)
+		sales_order = create_pack_sales_order(item_code, pack_qty=2)
+
+		first_pick_list = submit_pick_list_for(sales_order)
+		first_delivery_items = get_delivery_note_items(sales_order)
+		self.assertEqual(len(first_delivery_items), 1)
+		self.assertEqual(flt(first_delivery_items[0].qty), 1)
+		frappe.get_doc("Delivery Note", first_delivery_items[0].parent).submit()
+
+		receive_stock(item_code, self.shelf_b, 6)
+		second_pick_list = submit_pick_list_for(sales_order)
+		self.assertNotEqual(first_pick_list.name, second_pick_list.name)
+
+		second_delivery_items = get_delivery_note_items(sales_order)
+		self.assertEqual(len(second_delivery_items), 1)
+		self.assertEqual(
+			flt(second_delivery_items[0].qty),
+			1,
+			"second DN must ship only the second pick list's pack, not every reservation on the SO",
+		)
+
+		frappe.get_doc("Delivery Note", second_delivery_items[0].parent).submit()
+		self.assertEqual(flt(frappe.db.get_value("Sales Order", sales_order.name, "per_delivered")), 100)

@@ -128,10 +128,16 @@ def move_picked_stock_to_consolidation(pick_list, consolidation_warehouse):
 	stock_entry.pick_list = pick_list.name
 	stock_entry.set_stock_entry_type()
 
+	bundle_entries_map = get_bundle_entries_map(pick_list)
 	for location in pick_list.locations:
 		if location.warehouse == consolidation_warehouse:
 			continue
-		append_transfer_rows_for_location(stock_entry, location, consolidation_warehouse)
+		append_transfer_rows_for_location(
+			stock_entry,
+			location,
+			consolidation_warehouse,
+			bundle_entries_map.get(location.serial_and_batch_bundle, []),
+		)
 
 	if not stock_entry.items:
 		return None
@@ -141,7 +147,27 @@ def move_picked_stock_to_consolidation(pick_list, consolidation_warehouse):
 	return stock_entry
 
 
-def append_transfer_rows_for_location(stock_entry, location, consolidation_warehouse):
+def get_bundle_entries_map(pick_list):
+	"""Serial and Batch Entry rows per bundle, fetched in one query for all locations."""
+	bundle_names = [
+		location.serial_and_batch_bundle
+		for location in pick_list.locations
+		if location.serial_and_batch_bundle
+	]
+	if not bundle_names:
+		return {}
+
+	bundle_entries_map = {}
+	for entry in frappe.get_all(
+		"Serial and Batch Entry",
+		filters={"parent": ["in", bundle_names]},
+		fields=["parent", "batch_no", "serial_no", "qty"],
+	):
+		bundle_entries_map.setdefault(entry.parent, []).append(entry)
+	return bundle_entries_map
+
+
+def append_transfer_rows_for_location(stock_entry, location, consolidation_warehouse, bundle_entries):
 	base_row = {
 		"item_code": location.item_code,
 		"s_warehouse": location.warehouse,
@@ -154,11 +180,6 @@ def append_transfer_rows_for_location(stock_entry, location, consolidation_wareh
 	if location.serial_and_batch_bundle:
 		# the pick list's bundle is tied to its own voucher; re-state its batches as
 		# plain rows so the transfer builds bundles for its own warehouses
-		bundle_entries = frappe.get_all(
-			"Serial and Batch Entry",
-			filters={"parent": location.serial_and_batch_bundle},
-			fields=["batch_no", "serial_no", "qty"],
-		)
 		batch_qty_map = {}
 		serial_nos = []
 		for entry in bundle_entries:
@@ -187,7 +208,7 @@ def append_transfer_rows_for_location(stock_entry, location, consolidation_wareh
 			)
 		return
 
-	picked_qty = flt(location.picked_qty) or flt(location.stock_qty)
+	picked_qty = flt(location.picked_qty)
 	if not picked_qty:
 		return
 
@@ -209,7 +230,9 @@ def get_staged_stock_qty_map(pick_list, sales_order_name):
 	for location in pick_list.locations:
 		if location.sales_order != sales_order_name or not location.sales_order_item:
 			continue
-		picked_qty = flt(location.picked_qty) or flt(location.stock_qty)
+		picked_qty = flt(location.picked_qty)
+		if not picked_qty:
+			continue
 		staged_stock_qty[location.sales_order_item] = (
 			staged_stock_qty.get(location.sales_order_item, 0) + picked_qty
 		)
@@ -221,11 +244,12 @@ def create_consolidated_delivery_note(pick_list, sales_order_name, consolidation
 	if not staged_stock_qty:
 		return
 
-	reserved = reserve_staged_stock(pick_list, sales_order_name, consolidation_warehouse, staged_stock_qty)
+	reserve_staged_stock(pick_list, sales_order_name, consolidation_warehouse, staged_stock_qty)
+	reserved_qty_map = get_reserved_qty_map(pick_list.name, sales_order_name)
 
-	kwargs = {"for_reserved_stock": True} if reserved else None
+	kwargs = {"for_reserved_stock": True} if reserved_qty_map else None
 	delivery_note = make_delivery_note(sales_order_name, kwargs=kwargs)
-	apply_staged_rows(delivery_note, consolidation_warehouse, staged_stock_qty, reserved)
+	apply_staged_rows(delivery_note, consolidation_warehouse, staged_stock_qty, reserved_qty_map)
 
 	if not delivery_note.get("items"):
 		frappe.msgprint(
@@ -248,11 +272,14 @@ def create_consolidated_delivery_note(pick_list, sales_order_name, consolidation
 
 
 def reserve_staged_stock(pick_list, sales_order_name, consolidation_warehouse, staged_stock_qty):
-	"""Reserve whole-pack multiples of the staged stock against the consolidation
-	warehouse. Whole packs only: a fractional pack cannot be represented exactly on
-	the Delivery Note row (reserved_qty / conversion_factor must stay whole)."""
+	"""Best-effort: reserve whole-pack multiples of the staged stock against the
+	consolidation warehouse. Whole packs only: a fractional pack cannot be represented
+	exactly on the Delivery Note row (reserved_qty / conversion_factor must stay whole).
+	Callers must read the outcome via get_reserved_qty_map — reservation can partially
+	succeed per item (reserve_stock off, partial reservation disallowed) or throw after
+	creating some entries."""
 	if not cint(frappe.db.get_single_value("Stock Settings", "enable_stock_reservation")):
-		return False
+		return
 
 	from erpnext.stock.doctype.stock_reservation_entry.stock_reservation_entry import (
 		create_stock_reservation_entries_for_so_items,
@@ -278,7 +305,7 @@ def reserve_staged_stock(pick_list, sales_order_name, consolidation_warehouse, s
 		)
 
 	if not items_details:
-		return False
+		return
 
 	try:
 		# from_voucher_type="Pick List" keeps qty in stock UOM and ties the entries to
@@ -291,28 +318,40 @@ def reserve_staged_stock(pick_list, sales_order_name, consolidation_warehouse, s
 		frappe.log_error(
 			title=_("Consolidation Stock Reservation Failed for Pick List {0}").format(pick_list.name)
 		)
-		return False
 
-	return bool(
-		frappe.db.exists(
-			"Stock Reservation Entry",
-			{"voucher_no": sales_order_name, "from_voucher_no": pick_list.name, "docstatus": 1},
+
+def get_reserved_qty_map(pick_list_name, sales_order_name):
+	"""This pick list's active reservations per Sales Order Item. The reserved-stock
+	DN mapper pulls every undelivered reservation on the SO — including ones made by
+	earlier pick lists — so DN rows must be clamped to this pick list's share."""
+	reserved_qty_map = {}
+	for entry in frappe.get_all(
+		"Stock Reservation Entry",
+		filters={"voucher_no": sales_order_name, "from_voucher_no": pick_list_name, "docstatus": 1},
+		fields=["voucher_detail_no", "reserved_qty"],
+	):
+		reserved_qty_map[entry.voucher_detail_no] = reserved_qty_map.get(entry.voucher_detail_no, 0) + flt(
+			entry.reserved_qty
 		)
-	)
+	return reserved_qty_map
 
 
 def get_whole_pack_stock_qty(staged_qty, conversion_factor):
-	whole_packs = int(flt(staged_qty) / flt(conversion_factor or 1))
-	return whole_packs * flt(conversion_factor or 1)
+	conversion_factor = flt(conversion_factor) or 1
+	# flt(..., 6) before int(): raw float noise (5.999999999) would under-floor a whole pack
+	whole_packs = int(flt(flt(staged_qty) / conversion_factor, 6))
+	return whole_packs * conversion_factor
 
 
-def apply_staged_rows(delivery_note, consolidation_warehouse, staged_stock_qty, reserved):
-	"""Keep only rows backed by staged stock. Reserved rows already carry the exact
-	whole-pack qty and consolidation warehouse from the reservation; unreserved rows
-	get floored to whole packs. Anything else (unpicked SO items, remainders) must
-	not ship on this Delivery Note."""
+def apply_staged_rows(delivery_note, consolidation_warehouse, staged_stock_qty, reserved_qty_map):
+	"""Keep only rows backed by THIS pick list's staged stock. Rows born from our
+	reservations keep the reservation's exact whole-pack qty, clamped so entries from
+	earlier pick lists of the same SO cannot double-ship. Rows without a reservation
+	(item skipped, partial reservation refused, reservation disabled) fall back to the
+	whole-pack floor from the staged qty. Anything else must not ship on this note."""
 	kept_rows = []
 	remainder_items = []
+	remaining_reserved = dict(reserved_qty_map)
 
 	for row in delivery_note.get("items"):
 		staged_qty = flt(staged_stock_qty.get(row.so_detail))
@@ -321,12 +360,17 @@ def apply_staged_rows(delivery_note, consolidation_warehouse, staged_stock_qty, 
 
 		conversion_factor = flt(row.conversion_factor) or 1
 
-		if reserved:
-			if row.warehouse == consolidation_warehouse:
-				kept_rows.append(row)
+		if row.so_detail in remaining_reserved and row.warehouse == consolidation_warehouse:
+			row_stock_qty = flt(row.qty) * conversion_factor
+			allowed_stock_qty = min(row_stock_qty, remaining_reserved[row.so_detail])
+			if allowed_stock_qty <= 0:
+				continue
+			remaining_reserved[row.so_detail] -= allowed_stock_qty
+			row.qty = allowed_stock_qty / conversion_factor
+			kept_rows.append(row)
 			continue
 
-		whole_packs = int(staged_qty / conversion_factor)
+		whole_packs = int(flt(staged_qty / conversion_factor, 6))
 		if whole_packs <= 0:
 			remainder_items.append(row.item_code)
 			continue
