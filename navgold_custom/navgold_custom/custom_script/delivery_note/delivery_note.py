@@ -33,3 +33,98 @@ def refresh_sales_order_reserved_qty(doc, method):
 			continue
 		refreshed_details.add(entry.voucher_detail_no)
 		frappe.get_doc("Stock Reservation Entry", entry.name).update_reserved_qty_in_voucher()
+
+
+def update_pick_list_completion(doc, method):
+	"""Consolidation-flow pick lists deliver from the consolidation warehouse, so ERPNext's
+	native per-row delivery tracking never sees their Delivery Notes and would leave them
+	Open forever. Complete them (or reopen on cancel) from the Sales Order's delivery_status,
+	which the native status updater has already refreshed before doc_events run."""
+	# a return flips the SO back to Partly Delivered, but the pick physically completed;
+	# reopening would resurrect the shelf claims the completion released
+	if doc.is_return:
+		return
+
+	delivered_sales_orders = {
+		item.against_sales_order for item in doc.items if item.get("against_sales_order")
+	}
+	if not delivered_sales_orders:
+		return
+
+	candidate_pick_lists = frappe.get_all(
+		"Pick List Item",
+		filters={"sales_order": ["in", list(delivered_sales_orders)], "docstatus": 1},
+		distinct=True,
+		pluck="parent",
+	)
+	if not candidate_pick_lists:
+		return
+
+	# a submitted Stock Entry linked via pick_list is the consolidation-flow fingerprint;
+	# legacy pick lists keep native per-row tracking and must never be overwritten here
+	consolidation_pick_lists = frappe.get_all(
+		"Stock Entry",
+		filters={"pick_list": ["in", candidate_pick_lists], "docstatus": 1},
+		distinct=True,
+		pluck="pick_list",
+	)
+	if not consolidation_pick_lists:
+		return
+
+	# completion is gated on ALL the pick list's sales orders, not just the ones on this
+	# Delivery Note, so multi-SO pick lists only complete once every SO is fully shipped
+	sales_orders_by_pick_list = {}
+	for row in frappe.get_all(
+		"Pick List Item",
+		filters={
+			"parent": ["in", consolidation_pick_lists],
+			"docstatus": 1,
+			"sales_order": ["is", "set"],
+		},
+		fields=["parent", "sales_order"],
+	):
+		sales_orders_by_pick_list.setdefault(row.parent, set()).add(row.sales_order)
+	if not sales_orders_by_pick_list:
+		return
+
+	involved_sales_orders = set().union(*sales_orders_by_pick_list.values())
+	delivery_status_map = {
+		row.name: row.delivery_status
+		for row in frappe.get_all(
+			"Sales Order",
+			filters={"name": ["in", list(involved_sales_orders)]},
+			fields=["name", "delivery_status"],
+		)
+	}
+	pick_list_status_map = {
+		row.name: row.status
+		for row in frappe.get_all(
+			"Pick List",
+			filters={"name": ["in", list(sales_orders_by_pick_list)]},
+			fields=["name", "status"],
+		)
+	}
+
+	for pick_list_name, pick_list_sales_orders in sales_orders_by_pick_list.items():
+		fully_delivered = all(
+			delivery_status_map.get(sales_order) == "Fully Delivered"
+			for sales_order in pick_list_sales_orders
+		)
+		current_status = pick_list_status_map.get(pick_list_name)
+
+		if doc.docstatus == 1:
+			if fully_delivered and current_status != "Completed":
+				# per_delivered and delivery_status must move with status: the linked Stock
+				# Entry can trigger a native update_status() recompute, and status alone
+				# would be reverted from the untouched per_delivered
+				frappe.db.set_value(
+					"Pick List",
+					pick_list_name,
+					{"status": "Completed", "per_delivered": 100, "delivery_status": "Fully Delivered"},
+				)
+		elif current_status == "Completed" and not fully_delivered:
+			frappe.db.set_value(
+				"Pick List",
+				pick_list_name,
+				{"status": "Open", "per_delivered": 0, "delivery_status": "Not Delivered"},
+			)

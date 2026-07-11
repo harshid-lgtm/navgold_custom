@@ -318,13 +318,18 @@ doc_events = {
 	"Pick List": {
 		"validate": "navgold_custom.navgold_custom.custom_script.pick_list.pick_list.sort_item_locations_by_walk_route",
 		"on_submit": [
-			"navgold_custom.navgold_custom.custom_script.pick_list.pick_list.auto_reserve_stock",
-			"navgold_custom.navgold_custom.custom_script.pick_list.pick_list.auto_create_delivery_notes",
+			"navgold_custom.navgold_custom.custom_script.pick_list.pick_list.on_submit",
 		],
 	},
 	"Delivery Note": {
-		"on_submit": "navgold_custom.navgold_custom.custom_script.delivery_note.delivery_note.refresh_sales_order_reserved_qty",
-		"on_cancel": "navgold_custom.navgold_custom.custom_script.delivery_note.delivery_note.refresh_sales_order_reserved_qty",
+		"on_submit": [
+			"navgold_custom.navgold_custom.custom_script.delivery_note.delivery_note.refresh_sales_order_reserved_qty",
+			"navgold_custom.navgold_custom.custom_script.delivery_note.delivery_note.update_pick_list_completion",
+		],
+		"on_cancel": [
+			"navgold_custom.navgold_custom.custom_script.delivery_note.delivery_note.refresh_sales_order_reserved_qty",
+			"navgold_custom.navgold_custom.custom_script.delivery_note.delivery_note.update_pick_list_completion",
+		],
 	},
 	"Stock Entry": {
 		"on_submit": "navgold_custom.navgold_custom.custom_script.stock_entry.stock_entry.update_proxy_sku_transfer_rates",

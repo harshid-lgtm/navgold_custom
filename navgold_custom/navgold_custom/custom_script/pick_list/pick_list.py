@@ -8,6 +8,11 @@ from frappe.utils import cint, flt
 from navgold_custom.navgold_custom.erpnext_compat import create_delivery_note, make_delivery_note
 
 
+def on_submit(doc, method):
+	auto_reserve_stock(doc)
+	auto_create_delivery_notes(doc)
+
+
 def sort_item_locations_by_walk_route(doc, method):
 	doc.locations.sort(key=lambda x: x.custom_walk_route or 0)
 
@@ -16,7 +21,7 @@ def get_delivery_consolidation_warehouse():
 	return frappe.db.get_single_value("Navgold Settings", "delivery_consolidation_warehouse")
 
 
-def auto_reserve_stock(doc, method):
+def auto_reserve_stock(doc):
 	has_sales_order_items = any(location.sales_order for location in doc.locations)
 	if not has_sales_order_items:
 		return
@@ -37,7 +42,7 @@ def auto_reserve_stock(doc, method):
 		)
 
 
-def auto_create_delivery_notes(doc, method):
+def auto_create_delivery_notes(doc):
 	has_sales_order_items = any(location.sales_order for location in doc.locations)
 	if not has_sales_order_items:
 		return
@@ -73,10 +78,6 @@ def consolidate_and_create_delivery_notes(pick_list, consolidation_warehouse):
 	stock_entry = move_picked_stock_to_consolidation(pick_list, consolidation_warehouse)
 	if not stock_entry:
 		return
-
-	# the pick is physically complete once stock reaches consolidation; an Open pick
-	# list keeps claiming its picked shelf stock and blocks future pick lists
-	pick_list.db_set("status", "Completed")
 
 	frappe.msgprint(
 		_("Picked stock moved to {0} via {1}").format(
@@ -144,6 +145,17 @@ def move_picked_stock_to_consolidation(pick_list, consolidation_warehouse):
 
 	stock_entry.save()
 	stock_entry.submit()
+
+	# the stock has physically left the shelves; without this the Open pick list keeps
+	# claiming picked-but-undelivered qty there (get_picked_items_details subtracts
+	# picked_qty - delivered_qty for every non-Completed pick list) and shorts future
+	# pick lists once the shelves are restocked. Rows already at the consolidation
+	# warehouse keep their claim — that stock is still awaiting its Delivery Note.
+	for location in pick_list.locations:
+		if location.warehouse == consolidation_warehouse or not flt(location.picked_qty):
+			continue
+		location.db_set("delivered_qty", flt(location.picked_qty), update_modified=False)
+
 	return stock_entry
 
 
