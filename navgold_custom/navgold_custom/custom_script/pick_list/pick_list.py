@@ -3,12 +3,31 @@
 
 import frappe
 from frappe import _
+from frappe.utils.data import flt
 
 from navgold_custom.navgold_custom.erpnext_compat import create_delivery_note
 
 
 def sort_item_locations_by_walk_route(doc, method):
-	doc.locations.sort(key=lambda x: x.custom_walk_route or 0)
+	warehouses = {row.warehouse for row in doc.locations if row.warehouse}
+	if not warehouses:
+		return
+
+	walk_route_map = frappe._dict(
+		frappe.get_all(
+			"Warehouse",
+			filters={"name": ("in", warehouses)},
+			fields=["name", "custom_walk_route"],
+			as_list=1,
+		)
+	)
+
+	for row in doc.locations:
+		row.custom_walk_route = flt(walk_route_map.get(row.warehouse))
+
+	doc.locations.sort(key=lambda row: row.custom_walk_route or float("inf"))
+	for idx, row in enumerate(doc.locations, start=1):
+		row.idx = idx
 
 
 def auto_reserve_stock(doc, method):
