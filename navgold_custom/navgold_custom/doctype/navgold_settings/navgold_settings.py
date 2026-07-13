@@ -33,13 +33,18 @@ class NavgoldSettings(Document):
 
 		amazon_pricing_enabled: DF.Check
 		amazon_publishing_mode: DF.Literal["Stock Only", "Stock and Prices"]
-		buying_price_list: DF.Link
+		buying_price_list: DF.Link | None
+		clf_endpoint: DF.Data | None
+		clf_password: DF.Password | None
+		clf_username: DF.Data | None
 		commission_threshold: DF.Float
 		default_label_owner: DF.Literal["AMAZON", "SELLER", "NONE"]
 		default_prep_owner: DF.Literal["AMAZON", "SELLER", "NONE"]
 		default_stock_allocation_warehouse: DF.Link | None
 		enable_afn_stock_sync: DF.Check
+		enable_loss_circuit_breaker: DF.Check
 		enable_pricing_sync: DF.Check
+		enable_telegram_alerts: DF.Check
 		fba_inbound_enabled: DF.Check
 		fba_source_address: DF.Link | None
 		freeze_amazon_outbound: DF.Check
@@ -56,6 +61,7 @@ class NavgoldSettings(Document):
 		last_pricing_synced_at: DF.Datetime | None
 		last_repricer_submit_at: DF.Datetime | None
 		last_strategy_refresh_at: DF.Datetime | None
+		loss_circuit_breaker_threshold: DF.Currency
 		max_publish_qty: DF.Int
 		min_shelf_expiry_in_days: DF.Int
 		multiple_active_item_uom: DF.Check
@@ -81,7 +87,9 @@ class NavgoldSettings(Document):
 		]
 		stock_reserve_pct: DF.Percent
 		strategy_name_mapping: DF.Table[StrategyNameMapping]
-		subscribe_and_save_warehouse: DF.Link
+		subscribe_and_save_warehouse: DF.Link | None
+		telegram_bot_token: DF.Password | None
+		telegram_chat_id: DF.Data | None
 		tote_weight_limit: DF.Int
 		zero_stock_items: DF.Table[NavgoldZeroStockItem]
 	# end: auto-generated types

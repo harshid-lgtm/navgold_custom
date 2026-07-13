@@ -24,6 +24,7 @@ from navgold_custom.navgold_custom.amazon_pricing.pricing_validators import (
 	collect_pricing_violations,
 	format_blocked_records,
 )
+from navgold_custom.navgold_custom.amazon_pricing.submission_log import record_submission_error
 from navgold_custom.navgold_custom.utils import (
 	AmazonFrozenError,
 	PricingNotApprovedError,
@@ -195,10 +196,10 @@ def sync_to_repricer(pricing_names: list) -> dict:
 			errors.append(f"{pricing_name}: {e!s}")
 
 	if not products_to_update:
-		log.status = "Error"
-		log.error_message = "No valid products to sync\n" + "\n".join(errors)
-		log.save()
 		notify_price_deviation_blocks(blocked_price_deviation, "Repricer")
+		record_submission_error(
+			log, message="No valid products to sync\n" + "\n".join(errors), channel="Repricer", alert=False
+		)
 		frappe.throw(_("No valid products to sync"))
 
 	try:
@@ -220,10 +221,7 @@ def sync_to_repricer(pricing_names: list) -> dict:
 			"blocked_validation": violations_by_pricing,
 		}
 	except Exception as e:
-		log.status = "Error"
-		log.error_message = str(e)
-		log.save()
-		frappe.log_error(f"Repricer sync error: {e!s}", "Repricer Sync")
+		record_submission_error(log, channel="Repricer", exception=e)
 		frappe.throw(_("Repricer sync failed: {0}").format(str(e)))
 
 	log.status = "Completed"
