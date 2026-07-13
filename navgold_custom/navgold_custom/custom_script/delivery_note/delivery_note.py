@@ -32,6 +32,9 @@ def refresh_sales_order_reserved_qty(doc, method):
 		if entry.voucher_detail_no in refreshed_details:
 			continue
 		refreshed_details.add(entry.voucher_detail_no)
+		# ponytail: get_doc per Sales Order Item (update_reserved_qty_in_voucher needs a doc
+		# instance, no batch API); reimplement the ERPNext aggregate by hand only if this DN
+		# submit/cancel path shows up in profiling
 		frappe.get_doc("Stock Reservation Entry", entry.name).update_reserved_qty_in_voucher()
 
 

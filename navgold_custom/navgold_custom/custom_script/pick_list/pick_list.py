@@ -21,12 +21,22 @@ def get_delivery_consolidation_warehouse():
 	return frappe.db.get_single_value("Navgold Settings", "delivery_consolidation_warehouse")
 
 
+def get_consolidation_flow_warehouse(pick_list):
+	warehouse = get_delivery_consolidation_warehouse()
+	# ponytail: bundle picks keep the legacy direct pick-list→DN path (fractional-qty risk
+	# only exists for UOM-pack items); extend consolidation to bundles when a bundle SKU
+	# actually splits across warehouses
+	if warehouse and not has_product_bundle_locations(pick_list):
+		return warehouse
+	return None
+
+
 def auto_reserve_stock(doc):
 	has_sales_order_items = any(location.sales_order for location in doc.locations)
 	if not has_sales_order_items:
 		return
 
-	if get_delivery_consolidation_warehouse() and not has_product_bundle_locations(doc):
+	if get_consolidation_flow_warehouse(doc):
 		# shelf-level reservations would block the consolidation transfer; the staged
 		# stock is reserved against the consolidation warehouse in auto_create_delivery_notes
 		return
@@ -47,12 +57,8 @@ def auto_create_delivery_notes(doc):
 	if not has_sales_order_items:
 		return
 
-	consolidation_warehouse = get_delivery_consolidation_warehouse()
-
-	# ponytail: bundle picks keep the legacy direct pick-list→DN path (fractional-qty
-	# risk only exists for UOM-pack items); extend consolidation to bundles when a
-	# bundle SKU actually splits across warehouses
-	if consolidation_warehouse and not has_product_bundle_locations(doc):
+	consolidation_warehouse = get_consolidation_flow_warehouse(doc)
+	if consolidation_warehouse:
 		consolidate_and_create_delivery_notes(doc, consolidation_warehouse)
 		return
 
@@ -160,7 +166,6 @@ def move_picked_stock_to_consolidation(pick_list, consolidation_warehouse):
 
 
 def get_bundle_entries_map(pick_list):
-	"""Serial and Batch Entry rows per bundle, fetched in one query for all locations."""
 	bundle_names = [
 		location.serial_and_batch_bundle
 		for location in pick_list.locations
@@ -348,11 +353,14 @@ def get_reserved_qty_map(pick_list_name, sales_order_name):
 	return reserved_qty_map
 
 
-def get_whole_pack_stock_qty(staged_qty, conversion_factor):
+def whole_pack_count(staged_qty, conversion_factor):
 	conversion_factor = flt(conversion_factor) or 1
 	# flt(..., 6) before int(): raw float noise (5.999999999) would under-floor a whole pack
-	whole_packs = int(flt(flt(staged_qty) / conversion_factor, 6))
-	return whole_packs * conversion_factor
+	return int(flt(flt(staged_qty) / conversion_factor, 6))
+
+
+def get_whole_pack_stock_qty(staged_qty, conversion_factor):
+	return whole_pack_count(staged_qty, conversion_factor) * (flt(conversion_factor) or 1)
 
 
 def apply_staged_rows(delivery_note, consolidation_warehouse, staged_stock_qty, reserved_qty_map):
@@ -382,7 +390,7 @@ def apply_staged_rows(delivery_note, consolidation_warehouse, staged_stock_qty, 
 			kept_rows.append(row)
 			continue
 
-		whole_packs = int(flt(staged_qty / conversion_factor, 6))
+		whole_packs = whole_pack_count(staged_qty, conversion_factor)
 		if whole_packs <= 0:
 			remainder_items.append(row.item_code)
 			continue
