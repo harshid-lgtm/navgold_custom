@@ -5,7 +5,11 @@ import frappe
 from frappe import _
 from frappe.utils import cint, flt
 
-from navgold_custom.navgold_custom.erpnext_compat import create_delivery_note, make_delivery_note
+from navgold_custom.navgold_custom.erpnext_compat import (
+	create_delivery_note,
+	get_product_bundle_items,
+	make_delivery_note,
+)
 
 
 def on_submit(doc, method):
@@ -23,10 +27,18 @@ def get_delivery_consolidation_warehouse():
 
 def get_consolidation_flow_warehouse(pick_list):
 	warehouse = get_delivery_consolidation_warehouse()
-	# ponytail: bundle picks keep the legacy direct pick-list→DN path (fractional-qty risk
-	# only exists for UOM-pack items); extend consolidation to bundles when a bundle SKU
-	# actually splits across warehouses
-	if warehouse and not has_product_bundle_locations(pick_list):
+	if not warehouse:
+		return None
+	# pure-pack picks always consolidate (a split pack UOM otherwise ships fractional qty). Bundle
+	# picks only need it when a component actually splits across warehouses: ERPNext's native
+	# pick-list→DN mapper then collapses that split into one packed row at one shelf with the full
+	# qty and crashes on submit. A single-warehouse bundle maps cleanly on the native path.
+	# ponytail: a pick list mixing a split bundle with pack items (or a non-split bundle beside a
+	# split pack item) is routed wholesale by these two predicates; split the routing per SO/item
+	# only if such mixed pick lists ever appear in practice
+	if not has_product_bundle_locations(pick_list):
+		return warehouse
+	if has_split_product_bundle_locations(pick_list):
 		return warehouse
 	return None
 
@@ -75,6 +87,18 @@ def has_product_bundle_locations(pick_list):
 	return any(location.product_bundle_item for location in pick_list.locations)
 
 
+def has_split_product_bundle_locations(pick_list):
+	"""True when a picked bundle component draws from 2+ distinct warehouses — the case the
+	native mapper mishandles by collapsing the split into one over-drawn packed row."""
+	warehouses_by_component = {}
+	for location in pick_list.locations:
+		if not location.product_bundle_item or not flt(location.picked_qty):
+			continue
+		key = (location.product_bundle_item, location.item_code)
+		warehouses_by_component.setdefault(key, set()).add(location.warehouse)
+	return any(len(warehouses) >= 2 for warehouses in warehouses_by_component.values())
+
+
 def consolidate_and_create_delivery_notes(pick_list, consolidation_warehouse):
 	"""Move picked stock to the consolidation warehouse (in stock UOM, so pack UOMs
 	split across warehouses never produce fractional quantities), then create one
@@ -93,9 +117,13 @@ def consolidate_and_create_delivery_notes(pick_list, consolidation_warehouse):
 		alert=True,
 	)
 
+	builds_bundle_delivery_note = has_product_bundle_locations(pick_list)
 	sales_orders = sorted({location.sales_order for location in pick_list.locations if location.sales_order})
 	for sales_order_name in sales_orders:
-		create_consolidated_delivery_note(pick_list, sales_order_name, consolidation_warehouse)
+		if builds_bundle_delivery_note:
+			create_consolidated_bundle_delivery_note(pick_list, sales_order_name, consolidation_warehouse)
+		else:
+			create_consolidated_delivery_note(pick_list, sales_order_name, consolidation_warehouse)
 
 
 def validate_consolidation_warehouse(company, warehouse):
@@ -290,6 +318,121 @@ def create_consolidated_delivery_note(pick_list, sales_order_name, consolidation
 		indicator="green",
 		alert=True,
 	)
+
+
+def get_pick_list_bundle_so_items(pick_list, sales_order_name):
+	"""Sales Order Item rows of the bundles THIS pick list staged for one Sales Order."""
+	return {
+		location.sales_order_item
+		for location in pick_list.locations
+		if location.sales_order == sales_order_name
+		and location.product_bundle_item
+		and location.sales_order_item
+		and flt(location.picked_qty)
+	}
+
+
+def get_staged_component_qty_map(pick_list, sales_order_name):
+	"""Staged component stock (stock UOM) keyed by (bundle Sales Order Item, component item)."""
+	staged_component_qty = {}
+	for location in pick_list.locations:
+		if location.sales_order != sales_order_name or not location.product_bundle_item:
+			continue
+		picked_qty = flt(location.picked_qty)
+		if not picked_qty:
+			continue
+		key = (location.sales_order_item, location.item_code)
+		staged_component_qty[key] = staged_component_qty.get(key, 0) + picked_qty
+	return staged_component_qty
+
+
+def create_consolidated_bundle_delivery_note(pick_list, sales_order_name, consolidation_warehouse):
+	"""Split-bundle path: the components were staged into one warehouse, so build the Delivery Note
+	from the Sales Order (the native pick-list→DN mapper filters on delivered_qty, which staging
+	overloaded, and would map nothing) and repoint each bundle parent to the staged warehouse. On
+	save make_packing_list rebuilds every packed component against that single warehouse, so the
+	whole-qty packed row no longer over-draws a shelf that never held the full quantity."""
+	bundle_so_items = get_pick_list_bundle_so_items(pick_list, sales_order_name)
+	if not bundle_so_items:
+		return
+
+	staged_component_qty = get_staged_component_qty_map(pick_list, sales_order_name)
+
+	delivery_note = make_delivery_note(sales_order_name)
+	apply_staged_bundle_rows(delivery_note, consolidation_warehouse, bundle_so_items, staged_component_qty)
+
+	if not delivery_note.get("items"):
+		frappe.msgprint(
+			_("No whole bundle staged for Sales Order {0}; stock remains in {1}").format(
+				sales_order_name, consolidation_warehouse
+			),
+			indicator="orange",
+			alert=True,
+		)
+		return
+
+	delivery_note.save()
+	frappe.msgprint(
+		_("Delivery Note {0} created automatically").format(
+			frappe.utils.get_link_to_form("Delivery Note", delivery_note.name)
+		),
+		indicator="green",
+		alert=True,
+	)
+
+
+def get_deliverable_bundle_qty(bundle_item_code, sales_order_item, staged_component_qty, ordered_bundle_qty):
+	"""How many whole bundles this pick list's staged components can build, capped at the qty the
+	Sales Order still expects. Partial bundles cannot ship — their components stay staged."""
+	components = get_product_bundle_items(bundle_item_code)
+	if not components:
+		return 0
+
+	possible_bundles = []
+	for component in components:
+		qty_per_bundle = flt(component.qty) or 1
+		staged_qty = staged_component_qty.get((sales_order_item, component.item_code), 0)
+		# flt(..., 6) before int(): raw float noise must not under-floor a whole bundle
+		possible_bundles.append(int(flt(staged_qty / qty_per_bundle, 6)))
+
+	return min(min(possible_bundles), int(flt(ordered_bundle_qty)))
+
+
+def apply_staged_bundle_rows(delivery_note, consolidation_warehouse, bundle_so_items, staged_component_qty):
+	"""Keep only THIS pick list's bundle rows, clamp each to the whole bundles actually staged, and
+	source them from the consolidation warehouse. packed_items are cleared so make_packing_list
+	rebuilds them from the repointed parents on save (it always recomputes the table for a new
+	mapped Delivery Note), inheriting the single staged warehouse and the clamped bundle qty."""
+	kept_items = []
+	remainder_bundles = []
+	for row in delivery_note.get("items"):
+		if row.get("so_detail") not in bundle_so_items:
+			continue
+
+		deliverable_bundles = get_deliverable_bundle_qty(
+			row.item_code, row.so_detail, staged_component_qty, row.qty
+		)
+		if deliverable_bundles <= 0:
+			remainder_bundles.append(row.item_code)
+			continue
+
+		row.qty = deliverable_bundles
+		row.warehouse = consolidation_warehouse
+		kept_items.append(row)
+
+	delivery_note.set("items", kept_items)
+	for index, row in enumerate(delivery_note.get("items")):
+		row.idx = index + 1
+	delivery_note.set("packed_items", [])
+
+	if remainder_bundles:
+		frappe.msgprint(
+			_("Partial bundles for {0} remain in {1} awaiting the balance components").format(
+				", ".join(sorted(set(remainder_bundles))), consolidation_warehouse
+			),
+			indicator="orange",
+			alert=True,
+		)
 
 
 def reserve_staged_stock(pick_list, sales_order_name, consolidation_warehouse, staged_stock_qty):

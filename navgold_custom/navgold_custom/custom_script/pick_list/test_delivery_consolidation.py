@@ -87,6 +87,66 @@ def receive_stock(item_code, warehouse, qty):
 	return stock_entry
 
 
+def create_bundle_parent_item(item_code):
+	if frappe.db.exists("Item", item_code):
+		return item_code
+
+	item = frappe.new_doc("Item")
+	item.item_code = item_code
+	item.item_name = item_code
+	item.item_group = "All Item Groups"
+	item.stock_uom = "Nos"
+	# a Product Bundle parent is a non-stock item; only its components hit the stock ledger
+	item.is_stock_item = 0
+	item.insert()
+	return item.name
+
+
+def create_product_bundle(bundle_item_code, component_item_code, component_qty):
+	# built inline (not erpnext's make_product_bundle) so the shared test-record walk never
+	# drags in fixtures that trip Navgold's Supplier lead-time validation
+	if frappe.db.exists("Product Bundle", {"new_item_code": bundle_item_code}):
+		return
+
+	bundle = frappe.new_doc("Product Bundle")
+	bundle.new_item_code = bundle_item_code
+	bundle.append("items", {"item_code": component_item_code, "qty": component_qty})
+	bundle.insert()
+	if bundle.meta.is_submittable:
+		bundle.submit()
+
+
+def create_bundle_sales_order(bundle_item_code, qty=1):
+	sales_order = frappe.new_doc("Sales Order")
+	sales_order.customer = create_test_customer()
+	sales_order.company = COMPANY
+	sales_order.delivery_date = nowdate()
+	sales_order.append(
+		"items",
+		{"item_code": bundle_item_code, "qty": qty, "uom": "Nos", "conversion_factor": 1, "rate": 100},
+	)
+	sales_order.save()
+	sales_order.submit()
+	return sales_order
+
+
+def get_draft_delivery_note(sales_order):
+	names = frappe.get_all(
+		"Delivery Note Item",
+		filters={"against_sales_order": sales_order.name, "docstatus": 0},
+		distinct=True,
+		pluck="parent",
+	)
+	return frappe.get_doc("Delivery Note", names[0]) if names else None
+
+
+def get_total_stock(item_code):
+	return sum(
+		flt(bin_row.actual_qty)
+		for bin_row in frappe.get_all("Bin", filters={"item_code": item_code}, fields=["actual_qty"])
+	)
+
+
 def create_pack_sales_order(item_code, pack_qty=1):
 	sales_order = frappe.new_doc("Sales Order")
 	sales_order.customer = create_test_customer()
@@ -437,6 +497,48 @@ class TestDeliveryConsolidation(IntegrationTestCase):
 		)
 		self.assertEqual(flt(staged), 6, "the batch stock must wait in the consolidation warehouse")
 		self.assertEqual(frappe.db.get_value("Pick List", pick_list.name, "status"), "Open")
+
+	def test_bundle_split_across_shelves_delivers_from_consolidation(self):
+		# a bundle component picked across TWO shelves crashed ERPNext's native pick-list→DN
+		# mapper: it collapsed the split into ONE packed_items row at ONE shelf with the FULL
+		# qty (6 units all on Shelf B, which only holds 4) → NegativeStockError on submit.
+		# Consolidation routes the component into one warehouse first, so the single-warehouse
+		# packed_items row becomes valid.
+		component_code = "TEST-DC-BUNDLE-COMPONENT"
+		bundle_code = "TEST-DC-BUNDLE-PARENT"
+		create_pack_item(component_code)
+		create_bundle_parent_item(bundle_code)
+		create_product_bundle(bundle_code, component_code, PACK_SIZE)
+		receive_stock(component_code, self.shelf_a, 2)
+		receive_stock(component_code, self.shelf_b, 4)
+		sales_order = create_bundle_sales_order(bundle_code, qty=1)
+
+		pick_list = submit_pick_list_for(sales_order)
+
+		transfer = get_consolidation_transfer(pick_list)
+		self.assertIsNotNone(
+			transfer, "split-bundle pick must stage its component via a consolidation transfer"
+		)
+		self.assertEqual(sum(flt(row.qty) for row in transfer.items), 6)
+		for row in transfer.items:
+			self.assertEqual(row.t_warehouse, self.consolidation_warehouse)
+
+		delivery_note = get_draft_delivery_note(sales_order)
+		self.assertIsNotNone(delivery_note, "a draft Delivery Note must be created for the split bundle")
+		for packed_item in delivery_note.packed_items:
+			self.assertEqual(
+				packed_item.warehouse,
+				self.consolidation_warehouse,
+				"every packed component must source from the single staged warehouse",
+			)
+
+		# the original bug killed the flow here (full qty against a shelf that can't cover it)
+		delivery_note.submit()
+
+		self.assertEqual(
+			get_total_stock(component_code), 0, "the whole bundle component must ship out to zero stock"
+		)
+		self.assertEqual(frappe.db.get_value("Pick List", pick_list.name, "status"), "Completed")
 
 	def test_restocked_shelf_is_pickable_while_staged(self):
 		item_code = "TEST-DC-RESTOCK-ITEM"

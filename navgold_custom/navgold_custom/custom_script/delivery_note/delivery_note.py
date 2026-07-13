@@ -38,6 +38,39 @@ def refresh_sales_order_reserved_qty(doc, method):
 		frappe.get_doc("Stock Reservation Entry", entry.name).update_reserved_qty_in_voucher()
 
 
+def align_consolidated_bundle_packed_warehouse(doc, method):
+	"""ERPNext's make_packing_list resets every packed component's warehouse from the Sales Order's
+	packed item on each validate, overriding the delivery consolidation warehouse the split-bundle
+	flow stages stock into. When a bundle parent row is itself sourced from that warehouse, force its
+	packed components there too so they draw the staged stock instead of an empty default warehouse.
+	Runs as a validate doc_event, i.e. after the controller's make_packing_list, so it wins."""
+	if doc.is_return or not doc.get("packed_items"):
+		return
+
+	consolidation_warehouse = frappe.db.get_single_value(
+		"Navgold Settings", "delivery_consolidation_warehouse"
+	)
+	if not consolidation_warehouse:
+		return
+
+	# packed_items.parent_detail_docname points at the owning Delivery Note Item's name (or idx on a
+	# not-yet-named row); index both so the match holds before and after the first save
+	consolidated_parent_identifiers = set()
+	for row in doc.get("items"):
+		if row.warehouse != consolidation_warehouse:
+			continue
+		for identifier in (row.name, row.idx, str(row.idx)):
+			if identifier is not None:
+				consolidated_parent_identifiers.add(identifier)
+
+	if not consolidated_parent_identifiers:
+		return
+
+	for packed_item in doc.get("packed_items"):
+		if packed_item.parent_detail_docname in consolidated_parent_identifiers:
+			packed_item.warehouse = consolidation_warehouse
+
+
 def update_pick_list_completion(doc, method):
 	"""Consolidation-flow pick lists deliver from the consolidation warehouse, so ERPNext's
 	native per-row delivery tracking never sees their Delivery Notes and would leave them
