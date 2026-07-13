@@ -7,7 +7,16 @@ from frappe.utils import flt, nowdate
 
 from navgold_custom.navgold_custom.erpnext_compat import create_pick_list, make_delivery_note
 
-COMPANY = "Navgold Ltd"
+
+def get_test_company():
+	# local restore carries "Navgold Ltd"; the bare CI site's before_tests creates "Navgold Test"
+	for name in ("Navgold Ltd", "Navgold Test"):
+		if frappe.db.exists("Company", name):
+			return name
+	return frappe.db.get_value("Company", {}, "name")
+
+
+COMPANY = get_test_company()
 CUSTOMER = "TEST-DC-CUSTOMER"
 PACK_UOM = "Test DC Pack of 6"
 PACK_SIZE = 6
@@ -250,6 +259,9 @@ class TestDeliveryConsolidation(IntegrationTestCase):
 		frappe.db.set_single_value(
 			"Navgold Settings", "delivery_consolidation_warehouse", self.consolidation_warehouse
 		)
+		# the restored local site has reservation on; the bare CI site defaults it off. These tests
+		# assume it on (the reservation-off cases opt out explicitly via change_settings).
+		frappe.db.set_single_value("Stock Settings", "enable_stock_reservation", 1)
 
 	def test_pack_split_across_shelves_delivers_one_whole_pack(self):
 		item_code = "TEST-DC-SPLIT-ITEM"
