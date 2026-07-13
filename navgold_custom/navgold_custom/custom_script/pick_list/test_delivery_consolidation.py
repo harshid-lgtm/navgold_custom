@@ -87,6 +87,55 @@ def receive_stock(item_code, warehouse, qty):
 	return stock_entry
 
 
+def get_receipt_batch(stock_entry):
+	"""The batch auto-assigned to a create_new_batch receive, read back so a test can assert
+	exactly which batch each shelf holds. v15+ carries it on a serial_and_batch_bundle."""
+	stock_entry.reload()
+	row = stock_entry.items[0]
+	if row.batch_no:
+		return row.batch_no
+	if row.serial_and_batch_bundle:
+		batches = frappe.get_all(
+			"Serial and Batch Entry", filters={"parent": row.serial_and_batch_bundle}, pluck="batch_no"
+		)
+		return batches[0] if batches else None
+	return None
+
+
+def get_batch_stock(batch_no, item_code):
+	# get_batch_qty returns a per-warehouse list when no warehouse is passed; sum this batch's rows
+	# to get its balance across every warehouse
+	from erpnext.stock.doctype.batch.batch import get_batch_qty
+
+	rows = get_batch_qty(batch_no=batch_no, item_code=item_code) or []
+	return sum(flt(row.get("qty")) for row in rows if row.get("batch_no") == batch_no)
+
+
+def create_mixed_sales_order(pack_item_code, bundle_item_code, pack_qty=1, bundle_qty=1):
+	sales_order = frappe.new_doc("Sales Order")
+	sales_order.customer = create_test_customer()
+	sales_order.company = COMPANY
+	sales_order.delivery_date = nowdate()
+	sales_order.append(
+		"items",
+		{
+			"item_code": pack_item_code,
+			"qty": pack_qty,
+			"uom": PACK_UOM,
+			"conversion_factor": PACK_SIZE,
+			"rate": 100,
+			"reserve_stock": 1,
+		},
+	)
+	sales_order.append(
+		"items",
+		{"item_code": bundle_item_code, "qty": bundle_qty, "uom": "Nos", "conversion_factor": 1, "rate": 100},
+	)
+	sales_order.save()
+	sales_order.submit()
+	return sales_order
+
+
 def create_bundle_parent_item(item_code):
 	if frappe.db.exists("Item", item_code):
 		return item_code
@@ -538,6 +587,166 @@ class TestDeliveryConsolidation(IntegrationTestCase):
 		self.assertEqual(
 			get_total_stock(component_code), 0, "the whole bundle component must ship out to zero stock"
 		)
+		self.assertEqual(frappe.db.get_value("Pick List", pick_list.name, "status"), "Completed")
+
+	def test_batch_pack_split_delivers_both_batches(self):
+		# a batched pack of 6 = 2 of batch X (shelf A) + 4 of batch Y (shelf B). Reservation ON (site
+		# default), so the DN is built from this pick list's own reservation at the consolidation
+		# warehouse. It must submit cleanly and DRAW BOTH batches (2 from X, 4 from Y), not just move
+		# them — the existing transfer test never proved the delivery half.
+		item_code = "TEST-DC-BATCHPACK-ITEM"
+		create_pack_item(item_code, has_batch_no=1)
+		receipt_x = receive_stock(item_code, self.shelf_a, 2)
+		receipt_y = receive_stock(item_code, self.shelf_b, 4)
+		batch_x = get_receipt_batch(receipt_x)
+		batch_y = get_receipt_batch(receipt_y)
+		self.assertTrue(batch_x and batch_y and batch_x != batch_y, "expected two distinct batches")
+		self.assertEqual(get_batch_stock(batch_x, item_code), 2)
+		self.assertEqual(get_batch_stock(batch_y, item_code), 4)
+
+		sales_order = create_pack_sales_order(item_code)
+		# the batch-wise reservation path only engages with both settings on; pin them so a bare CI
+		# site (use_serial_batch_fields off) can't quietly route through the mapper and prove nothing
+		with self.change_settings(
+			"Stock Settings", {"use_serial_batch_fields": 1, "enable_stock_reservation": 1}
+		):
+			pick_list = submit_pick_list_for(sales_order)
+
+			delivery_note_items = get_delivery_note_items(sales_order)
+			self.assertEqual(len(delivery_note_items), 1, "expected one whole-pack DN row")
+			delivery_note = frappe.get_doc("Delivery Note", delivery_note_items[0].parent)
+			delivery_note.submit()
+
+			self.assertEqual(get_batch_stock(batch_x, item_code), 0, "batch X (2 units) must ship out")
+			self.assertEqual(get_batch_stock(batch_y, item_code), 0, "batch Y (4 units) must ship out")
+			self.assertEqual(get_total_stock(item_code), 0, "no stock may remain anywhere after delivery")
+			self.assertEqual(frappe.db.get_value("Pick List", pick_list.name, "status"), "Completed")
+
+	def test_batch_bundle_component_split_delivers_both_batches(self):
+		# same proof for a batched bundle COMPONENT scattered across two shelves: 2 of batch X + 4 of
+		# batch Y build one whole bundle. The split-bundle DN (no reservation) must submit and consume
+		# both batches to zero, not strand either.
+		component_code = "TEST-DC-BATCH-BUNDLE-COMPONENT"
+		bundle_code = "TEST-DC-BATCH-BUNDLE-PARENT"
+		create_pack_item(component_code, has_batch_no=1)
+		create_bundle_parent_item(bundle_code)
+		create_product_bundle(bundle_code, component_code, PACK_SIZE)
+		receipt_x = receive_stock(component_code, self.shelf_a, 2)
+		receipt_y = receive_stock(component_code, self.shelf_b, 4)
+		batch_x = get_receipt_batch(receipt_x)
+		batch_y = get_receipt_batch(receipt_y)
+		self.assertTrue(batch_x and batch_y and batch_x != batch_y, "expected two distinct batches")
+
+		sales_order = create_bundle_sales_order(bundle_code, qty=1)
+		with self.change_settings(
+			"Stock Settings", {"use_serial_batch_fields": 1, "enable_stock_reservation": 1}
+		):
+			pick_list = submit_pick_list_for(sales_order)
+
+			delivery_note = get_draft_delivery_note(sales_order)
+			self.assertIsNotNone(delivery_note, "a draft Delivery Note must be created for the split bundle")
+			delivery_note.submit()
+
+			self.assertEqual(get_batch_stock(batch_x, component_code), 0, "batch X (2 units) must ship out")
+			self.assertEqual(get_batch_stock(batch_y, component_code), 0, "batch Y (4 units) must ship out")
+			self.assertEqual(
+				get_total_stock(component_code), 0, "the whole bundle component must ship to zero"
+			)
+			self.assertEqual(frappe.db.get_value("Pick List", pick_list.name, "status"), "Completed")
+
+	def test_mixed_sales_order_delivers_pack_and_bundle_in_one_note(self):
+		# ONE Sales Order carrying BOTH a scattered standalone pack line AND a split-component bundle
+		# line. The old all-or-nothing routing ran the bundle-only builder for the whole SO and DROPPED
+		# the standalone pack (its stock stranded in the consolidation warehouse). The per-SO mixed
+		# builder must keep both lines on ONE Delivery Note that submits and ships both to zero stock.
+		pack_item = "TEST-DC-MIXED-PACK-ITEM"
+		component_code = "TEST-DC-MIXED-BUNDLE-COMPONENT"
+		bundle_code = "TEST-DC-MIXED-BUNDLE-PARENT"
+		create_pack_item(pack_item)
+		create_pack_item(component_code)
+		create_bundle_parent_item(bundle_code)
+		create_product_bundle(bundle_code, component_code, PACK_SIZE)
+		# both lines scattered across the two shelves so both exercise consolidation
+		receive_stock(pack_item, self.shelf_a, 2)
+		receive_stock(pack_item, self.shelf_b, 4)
+		receive_stock(component_code, self.shelf_a, 2)
+		receive_stock(component_code, self.shelf_b, 4)
+
+		sales_order = create_mixed_sales_order(pack_item, bundle_code)
+		pick_list = submit_pick_list_for(sales_order)
+
+		delivery_note_items = get_delivery_note_items(sales_order)
+		delivery_note_names = {row.parent for row in delivery_note_items}
+		self.assertEqual(len(delivery_note_names), 1, "the mixed SO must produce exactly one Delivery Note")
+		delivery_note = frappe.get_doc("Delivery Note", delivery_note_names.pop())
+
+		item_codes = {row.item_code for row in delivery_note.items}
+		self.assertIn(pack_item, item_codes, "the standalone pack line must not be dropped")
+		self.assertIn(bundle_code, item_codes, "the bundle parent line must be delivered")
+		for packed_item in delivery_note.packed_items:
+			self.assertEqual(
+				packed_item.warehouse,
+				self.consolidation_warehouse,
+				"every bundle component must source from the single staged warehouse",
+			)
+
+		# the standalone pack line is reserved (so a batched pack can ship its exact batches); the
+		# bundle parent is a non-stock item and is never reserved
+		self.assertTrue(
+			frappe.db.exists(
+				"Stock Reservation Entry",
+				{"voucher_no": sales_order.name, "item_code": pack_item, "docstatus": 1},
+			),
+			"the standalone pack line must be reserved",
+		)
+
+		delivery_note.submit()
+
+		self.assertEqual(get_total_stock(pack_item), 0, "the standalone pack must ship to zero stock")
+		self.assertEqual(get_total_stock(component_code), 0, "the bundle component must ship to zero stock")
+		self.assertEqual(frappe.db.get_value("Pick List", pick_list.name, "status"), "Completed")
+
+	def test_mixed_sales_order_with_batched_pack_delivers_both(self):
+		# the gap found on live data: a mixed SO whose standalone pack is BATCHED (2 of batch X + 4 of
+		# batch Y, scattered) alongside a split bundle. Without reserving the pack line, the batched row
+		# hit the "create DN manually" guard and stranded. The mixed builder must reserve the standalone
+		# line batch-wise so both the batched pack and the bundle deliver on one note that submits clean.
+		pack_item = "TEST-DC-MIXBATCH-PACK-ITEM"
+		component_code = "TEST-DC-MIXBATCH-BUNDLE-COMPONENT"
+		bundle_code = "TEST-DC-MIXBATCH-BUNDLE-PARENT"
+		create_pack_item(pack_item, has_batch_no=1)
+		create_pack_item(component_code)
+		create_bundle_parent_item(bundle_code)
+		create_product_bundle(bundle_code, component_code, PACK_SIZE)
+		receipt_x = receive_stock(pack_item, self.shelf_a, 2)
+		receipt_y = receive_stock(pack_item, self.shelf_b, 4)
+		batch_x = get_receipt_batch(receipt_x)
+		batch_y = get_receipt_batch(receipt_y)
+		self.assertTrue(batch_x and batch_y and batch_x != batch_y, "expected two distinct batches")
+		receive_stock(component_code, self.shelf_a, 2)
+		receive_stock(component_code, self.shelf_b, 4)
+
+		sales_order = create_mixed_sales_order(pack_item, bundle_code)
+		with self.change_settings(
+			"Stock Settings", {"use_serial_batch_fields": 1, "enable_stock_reservation": 1}
+		):
+			pick_list = submit_pick_list_for(sales_order)
+
+			delivery_note_names = {row.parent for row in get_delivery_note_items(sales_order)}
+			self.assertEqual(
+				len(delivery_note_names), 1, "the mixed SO must produce exactly one Delivery Note"
+			)
+			delivery_note = frappe.get_doc("Delivery Note", delivery_note_names.pop())
+			item_codes = {row.item_code for row in delivery_note.items}
+			self.assertIn(pack_item, item_codes, "the batched standalone pack must not be stranded")
+			self.assertIn(bundle_code, item_codes, "the bundle parent line must be delivered")
+
+			delivery_note.submit()
+
+		self.assertEqual(get_batch_stock(batch_x, pack_item), 0, "batch X (2 units) must ship out")
+		self.assertEqual(get_batch_stock(batch_y, pack_item), 0, "batch Y (4 units) must ship out")
+		self.assertEqual(get_total_stock(pack_item), 0, "the batched pack must ship to zero stock")
+		self.assertEqual(get_total_stock(component_code), 0, "the bundle component must ship to zero stock")
 		self.assertEqual(frappe.db.get_value("Pick List", pick_list.name, "status"), "Completed")
 
 	def test_restocked_shelf_is_pickable_while_staged(self):

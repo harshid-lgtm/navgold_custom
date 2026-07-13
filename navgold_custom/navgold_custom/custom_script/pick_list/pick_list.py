@@ -33,9 +33,11 @@ def get_consolidation_flow_warehouse(pick_list):
 	# picks only need it when a component actually splits across warehouses: ERPNext's native
 	# pick-list→DN mapper then collapses that split into one packed row at one shelf with the full
 	# qty and crashes on submit. A single-warehouse bundle maps cleanly on the native path.
-	# ponytail: a pick list mixing a split bundle with pack items (or a non-split bundle beside a
-	# split pack item) is routed wholesale by these two predicates; split the routing per SO/item
-	# only if such mixed pick lists ever appear in practice
+	# Once consolidation is entered, delivery notes are routed per Sales Order (pack / bundle / mixed)
+	# by consolidate_and_create_delivery_notes, so a mixed Sales Order no longer strands either line.
+	# ponytail: this entry predicate is still pick-list-wide — a non-split bundle beside a split pack
+	# on the SAME pick list stays on the native path and would ship the pack fractional; broaden it to
+	# also trigger on a split standalone pack line only if such a pick list ever appears in practice
 	if not has_product_bundle_locations(pick_list):
 		return warehouse
 	if has_split_product_bundle_locations(pick_list):
@@ -117,13 +119,34 @@ def consolidate_and_create_delivery_notes(pick_list, consolidation_warehouse):
 		alert=True,
 	)
 
-	builds_bundle_delivery_note = has_product_bundle_locations(pick_list)
+	# route per Sales Order by the row kinds it actually staged, not per pick list: a bundle line
+	# anywhere on the pick list must not force the bundle-only builder onto a pure-pack Sales Order
+	# (that builder keeps only bundle rows and would strand a standalone pack). A Sales Order carrying
+	# BOTH kinds gets the mixed builder so neither line is dropped.
 	sales_orders = sorted({location.sales_order for location in pick_list.locations if location.sales_order})
 	for sales_order_name in sales_orders:
-		if builds_bundle_delivery_note:
+		has_bundle, has_standalone = get_sales_order_row_kinds(pick_list, sales_order_name)
+		if has_bundle and has_standalone:
+			create_consolidated_mixed_delivery_note(pick_list, sales_order_name, consolidation_warehouse)
+		elif has_bundle:
 			create_consolidated_bundle_delivery_note(pick_list, sales_order_name, consolidation_warehouse)
 		else:
 			create_consolidated_delivery_note(pick_list, sales_order_name, consolidation_warehouse)
+
+
+def get_sales_order_row_kinds(pick_list, sales_order_name):
+	"""(has_bundle, has_standalone) for one Sales Order on this pick list, by picked location kind.
+	A bundle location carries product_bundle_item (the parent item); a standalone location does not."""
+	has_bundle = False
+	has_standalone = False
+	for location in pick_list.locations:
+		if location.sales_order != sales_order_name or not flt(location.picked_qty):
+			continue
+		if location.product_bundle_item:
+			has_bundle = True
+		elif location.sales_order_item:
+			has_standalone = True
+	return has_bundle, has_standalone
 
 
 def validate_consolidation_warehouse(company, warehouse):
@@ -298,7 +321,10 @@ def create_consolidated_delivery_note(pick_list, sales_order_name, consolidation
 
 	kwargs = {"for_reserved_stock": True} if reserved_qty_map else None
 	delivery_note = make_delivery_note(sales_order_name, kwargs=kwargs)
-	apply_staged_rows(delivery_note, consolidation_warehouse, staged_stock_qty, reserved_qty_map)
+	reserved_batch_sre_map = get_reserved_batch_sre_map(pick_list.name, sales_order_name)
+	apply_staged_rows(
+		delivery_note, consolidation_warehouse, staged_stock_qty, reserved_qty_map, reserved_batch_sre_map
+	)
 
 	if not delivery_note.get("items"):
 		frappe.msgprint(
@@ -398,6 +424,20 @@ def get_deliverable_bundle_qty(bundle_item_code, sales_order_item, staged_compon
 	return min(min(possible_bundles), int(flt(ordered_bundle_qty)))
 
 
+def stage_whole_bundle_row(row, consolidation_warehouse, staged_component_qty):
+	"""Clamp a bundle parent Delivery Note row to the whole bundles its staged components can build
+	and repoint it to the consolidation warehouse. Returns True if the row ships, False if only a
+	partial bundle is staged (the caller keeps its components staged for the balance)."""
+	deliverable_bundles = get_deliverable_bundle_qty(
+		row.item_code, row.so_detail, staged_component_qty, row.qty
+	)
+	if deliverable_bundles <= 0:
+		return False
+	row.qty = deliverable_bundles
+	row.warehouse = consolidation_warehouse
+	return True
+
+
 def apply_staged_bundle_rows(delivery_note, consolidation_warehouse, bundle_so_items, staged_component_qty):
 	"""Keep only THIS pick list's bundle rows, clamp each to the whole bundles actually staged, and
 	source them from the consolidation warehouse. packed_items are cleared so make_packing_list
@@ -409,16 +449,10 @@ def apply_staged_bundle_rows(delivery_note, consolidation_warehouse, bundle_so_i
 		if row.get("so_detail") not in bundle_so_items:
 			continue
 
-		deliverable_bundles = get_deliverable_bundle_qty(
-			row.item_code, row.so_detail, staged_component_qty, row.qty
-		)
-		if deliverable_bundles <= 0:
+		if stage_whole_bundle_row(row, consolidation_warehouse, staged_component_qty):
+			kept_items.append(row)
+		else:
 			remainder_bundles.append(row.item_code)
-			continue
-
-		row.qty = deliverable_bundles
-		row.warehouse = consolidation_warehouse
-		kept_items.append(row)
 
 	delivery_note.set("items", kept_items)
 	for index, row in enumerate(delivery_note.get("items")):
@@ -433,6 +467,218 @@ def apply_staged_bundle_rows(delivery_note, consolidation_warehouse, bundle_so_i
 			indicator="orange",
 			alert=True,
 		)
+
+
+def create_consolidated_mixed_delivery_note(pick_list, sales_order_name, consolidation_warehouse):
+	"""A Sales Order carrying BOTH standalone pack lines and bundle lines maps to ONE Delivery Note
+	holding both (standalone rows and bundle parents in items, bundle components in packed_items).
+	Build it from the Sales Order — the native pick-list→DN mapper filters on delivered_qty, which
+	staging overloaded, and would map nothing — then clamp each row by its own whole-unit floor:
+	standalone rows to whole packs, bundle parents to whole bundles, both repointed to the staged
+	warehouse. Only the standalone pack lines are reserved (batch-wise, so a batched pack delivers
+	its exact staged batches); bundles are non-stock parents and can't reserve, so they use the
+	whole-bundle floor. The DN is still built WITHOUT for_reserved_stock — that would map only the
+	reserved rows and drop the bundle line — and the reserved batch bundle is re-attached per row."""
+	bundle_so_items = get_pick_list_bundle_so_items(pick_list, sales_order_name)
+	staged_stock_qty = get_staged_stock_qty_map(pick_list, sales_order_name)
+	if not bundle_so_items and not staged_stock_qty:
+		return
+
+	staged_component_qty = get_staged_component_qty_map(pick_list, sales_order_name)
+
+	# reserve the standalone lines only — bundle Sales Order Items are non-stock parents and reserving
+	# them is a no-op that would flip their reserve_stock flag
+	standalone_staged_qty = {
+		so_item: qty for so_item, qty in staged_stock_qty.items() if so_item not in bundle_so_items
+	}
+	reserve_staged_stock(pick_list, sales_order_name, consolidation_warehouse, standalone_staged_qty)
+	reserved_qty_map = get_reserved_qty_map(pick_list.name, sales_order_name)
+	reserved_batch_sre_map = get_reserved_batch_sre_map(pick_list.name, sales_order_name)
+
+	delivery_note = make_delivery_note(sales_order_name)
+	apply_staged_mixed_rows(
+		delivery_note,
+		consolidation_warehouse,
+		bundle_so_items,
+		staged_stock_qty,
+		staged_component_qty,
+		reserved_qty_map,
+		reserved_batch_sre_map,
+	)
+
+	if not delivery_note.get("items"):
+		frappe.msgprint(
+			_("No whole pack or bundle staged for Sales Order {0}; stock remains in {1}").format(
+				sales_order_name, consolidation_warehouse
+			),
+			indicator="orange",
+			alert=True,
+		)
+		return
+
+	delivery_note.save()
+	frappe.msgprint(
+		_("Delivery Note {0} created automatically").format(
+			frappe.utils.get_link_to_form("Delivery Note", delivery_note.name)
+		),
+		indicator="green",
+		alert=True,
+	)
+
+
+def apply_staged_mixed_rows(
+	delivery_note,
+	consolidation_warehouse,
+	bundle_so_items,
+	staged_stock_qty,
+	staged_component_qty,
+	reserved_qty_map=None,
+	reserved_batch_sre_map=None,
+):
+	"""Keep both row kinds on one mapped Delivery Note, each clamped by its own whole-unit floor:
+	bundle parent rows to whole bundles (packed components rebuilt against the staged warehouse on
+	save), standalone rows to whole packs. A reserved standalone row is clamped to its reservation
+	and gets its staged batch bundle re-attached so a batched pack ships its exact batches. Rows
+	without staged stock, partial packs/bundles, and unreserved batch/serial rows are left staged."""
+	kept_rows = []
+	remainder_items = []
+	remainder_bundles = []
+	manual_batch_items = []
+	reserved_qty_map = reserved_qty_map or {}
+	remaining_reserved = dict(reserved_qty_map)
+	reserved_batch_sre_map = reserved_batch_sre_map or {}
+	standalone_item_codes = [
+		row.item_code for row in delivery_note.get("items") if row.so_detail not in bundle_so_items
+	]
+	tracked_item_codes = get_tracked_item_codes(standalone_item_codes)
+
+	for row in delivery_note.get("items"):
+		if row.so_detail in bundle_so_items:
+			if stage_whole_bundle_row(row, consolidation_warehouse, staged_component_qty):
+				kept_rows.append(row)
+			else:
+				remainder_bundles.append(row.item_code)
+			continue
+
+		staged_qty = flt(staged_stock_qty.get(row.so_detail))
+		if not staged_qty:
+			continue
+
+		if row.so_detail in reserved_qty_map:
+			# the DN was built without for_reserved_stock (to keep the bundle rows), so this is a plain
+			# SO row: clamp it to the reserved whole packs, point it at the staged warehouse, and rebuild
+			# the reserved batch bundle onto it so a batched pack submits against its exact staged batches
+			conversion_factor = flt(row.conversion_factor) or 1
+			allowed_stock_qty = min(
+				flt(row.qty) * conversion_factor, remaining_reserved.get(row.so_detail, 0)
+			)
+			if allowed_stock_qty <= 0:
+				continue
+			remaining_reserved[row.so_detail] -= allowed_stock_qty
+			row.qty = allowed_stock_qty / conversion_factor
+			row.warehouse = consolidation_warehouse
+			attach_reserved_batch_bundle(row, reserved_batch_sre_map.get(row.so_detail))
+			kept_rows.append(row)
+			continue
+
+		if row.item_code in tracked_item_codes:
+			# batched with no whole-pack reservation (e.g. a partial pack): no bundle to source exact
+			# batches from, so auto-picking would over-draw one batch and crash. Leave it staged.
+			manual_batch_items.append(row.item_code)
+			continue
+
+		if stage_whole_pack_row(row, staged_qty, consolidation_warehouse):
+			kept_rows.append(row)
+		else:
+			remainder_items.append(row.item_code)
+
+	delivery_note.set("items", kept_rows)
+	for index, row in enumerate(delivery_note.get("items")):
+		row.idx = index + 1
+	# clear so make_packing_list rebuilds bundle components against the repointed parents on save;
+	# standalone rows carry none, so this only affects the kept bundle parents
+	delivery_note.set("packed_items", [])
+
+	if remainder_items:
+		frappe.msgprint(
+			_("Partial packs for {0} remain in {1} awaiting the balance quantity").format(
+				", ".join(sorted(set(remainder_items))), consolidation_warehouse
+			),
+			indicator="orange",
+			alert=True,
+		)
+
+	if remainder_bundles:
+		frappe.msgprint(
+			_("Partial bundles for {0} remain in {1} awaiting the balance components").format(
+				", ".join(sorted(set(remainder_bundles))), consolidation_warehouse
+			),
+			indicator="orange",
+			alert=True,
+		)
+
+	if manual_batch_items:
+		frappe.msgprint(
+			_(
+				"Batch/serial items {0} are staged in {1}; create their Delivery Note manually to pick batches"
+			).format(", ".join(sorted(set(manual_batch_items))), consolidation_warehouse),
+			indicator="orange",
+			alert=True,
+		)
+
+
+def get_staged_batch_qty_map(pick_list, sales_order_name):
+	"""Batch qty (stock UOM) staged per standalone Sales Order Item for one Sales Order:
+	{sales_order_item: {batch_no: qty}}. Bundle, serial-only and plain locations contribute nothing —
+	this feeds the batch-wise reservation for standalone batched packs."""
+	bundle_entries_map = get_bundle_entries_map(pick_list)
+	batch_qty_by_so_item = {}
+	for location in pick_list.locations:
+		if location.sales_order != sales_order_name or not location.sales_order_item:
+			continue
+		if location.product_bundle_item or not flt(location.picked_qty):
+			continue
+		if location.serial_and_batch_bundle:
+			# ponytail: records batch entries only; a serial+batch combo item's serials are dropped,
+			# giving an inconsistent multi-batch Outward bundle — split per batch if serialised-and-
+			# batched items ever enter the pick flow (mirrors the transfer-side limitation)
+			for entry in bundle_entries_map.get(location.serial_and_batch_bundle, []):
+				if not entry.batch_no:
+					continue
+				batch_map = batch_qty_by_so_item.setdefault(location.sales_order_item, {})
+				batch_map[entry.batch_no] = batch_map.get(entry.batch_no, 0) + abs(flt(entry.qty))
+		elif location.batch_no:
+			batch_map = batch_qty_by_so_item.setdefault(location.sales_order_item, {})
+			batch_map[location.batch_no] = batch_map.get(location.batch_no, 0) + flt(location.picked_qty)
+	return batch_qty_by_so_item
+
+
+def build_reservation_batch_bundle(item_code, consolidation_warehouse, batch_qty_map):
+	"""Draft Outward Serial and Batch Bundle naming the exact staged batches at the consolidation
+	warehouse. Kept a draft (do_not_submit) so it posts no stock ledger entry — the reservation only
+	reads its entries to become batch-wise. Returns the bundle name, or None if it built nothing."""
+	if not item_code or not batch_qty_map:
+		return None
+
+	from erpnext.stock.serial_batch_bundle import SerialBatchCreation
+
+	total_qty = sum(flt(qty) for qty in batch_qty_map.values())
+	# passes "qty" not "actual_qty", so make_serial_and_batch_bundle skips the at-warehouse
+	# availability check — safe because the SRE's own get_available_qty_to_reserve guard catches a
+	# shortfall before the reservation commits
+	bundle = SerialBatchCreation(
+		{
+			"item_code": item_code,
+			"warehouse": consolidation_warehouse,
+			# voucher_type is mandatory on the bundle; Delivery Note names its eventual consumer, but
+			# no voucher_no is set — this draft is only a batch source the reservation copies entries from
+			"voucher_type": "Delivery Note",
+			"type_of_transaction": "Outward",
+			"qty": total_qty,
+			"do_not_submit": True,
+		}
+	).make_serial_and_batch_bundle(batch_nos=dict(batch_qty_map))
+	return bundle.get("name")
 
 
 def reserve_staged_stock(pick_list, sales_order_name, consolidation_warehouse, staged_stock_qty):
@@ -451,22 +697,37 @@ def reserve_staged_stock(pick_list, sales_order_name, consolidation_warehouse, s
 
 	sales_order = frappe.get_doc("Sales Order", sales_order_name)
 	conversion_factors = {item.name: flt(item.conversion_factor) or 1 for item in sales_order.items}
+	item_codes = {item.name: item.item_code for item in sales_order.items}
+	staged_batch_qty = get_staged_batch_qty_map(pick_list, sales_order_name)
 
 	items_details = []
+	throwaway_bundles = []
 	for sales_order_item, staged_qty in staged_stock_qty.items():
 		whole_pack_stock_qty = get_whole_pack_stock_qty(
 			staged_qty, conversion_factors.get(sales_order_item, 1)
 		)
 		if whole_pack_stock_qty <= 0:
 			continue
-		items_details.append(
-			{
-				"sales_order_item": sales_order_item,
-				"warehouse": consolidation_warehouse,
-				"qty_to_reserve": whole_pack_stock_qty,
-				"from_voucher_no": pick_list.name,
-			}
-		)
+		item_detail = {
+			"sales_order_item": sales_order_item,
+			"warehouse": consolidation_warehouse,
+			"qty_to_reserve": whole_pack_stock_qty,
+			"from_voucher_no": pick_list.name,
+		}
+		# a batched item needs a batch-wise reservation: a plain qty reservation leaves the reserved
+		# Delivery Note row with no batch, and on submit ERPNext auto-picks a single batch and over-draws
+		# it (the staged 6 = 2 of X + 4 of Y crashes as -2 on batch Y). Name the exact staged batches so
+		# the reserved-stock mapper draws them precisely. The reservation clamps to qty_to_reserve, so a
+		# partial pack still reserves whole packs and leaves the balance staged.
+		batch_qty_map = staged_batch_qty.get(sales_order_item)
+		if batch_qty_map:
+			bundle_name = build_reservation_batch_bundle(
+				item_codes.get(sales_order_item), consolidation_warehouse, batch_qty_map
+			)
+			if bundle_name:
+				item_detail["serial_and_batch_bundle"] = bundle_name
+				throwaway_bundles.append(bundle_name)
+		items_details.append(item_detail)
 
 	if not items_details:
 		return
@@ -482,6 +743,12 @@ def reserve_staged_stock(pick_list, sales_order_name, consolidation_warehouse, s
 		frappe.log_error(
 			title=_("Consolidation Stock Reservation Failed for Pick List {0}").format(pick_list.name)
 		)
+	finally:
+		# the SREs copied these bundles' entries into their own child tables; the draft bundles now
+		# have no referrer and would otherwise leak one dead row per batched reservation (native
+		# pick-list cancel cleanup never reaches them), so drop them once reservation is done
+		for bundle_name in throwaway_bundles:
+			frappe.delete_doc("Serial and Batch Bundle", bundle_name, ignore_permissions=True, force=True)
 
 
 def get_reserved_qty_map(pick_list_name, sales_order_name):
@@ -500,6 +767,47 @@ def get_reserved_qty_map(pick_list_name, sales_order_name):
 	return reserved_qty_map
 
 
+def get_reserved_batch_sre_map(pick_list_name, sales_order_name):
+	"""This pick list's batch-wise reservations keyed by Sales Order Item. Only Serial-and-Batch
+	reservations need a bundle rebuilt onto the Delivery Note row; qty reservations deliver as-is."""
+	sre_map = {}
+	for sre in frappe.get_all(
+		"Stock Reservation Entry",
+		filters={
+			"voucher_no": sales_order_name,
+			"from_voucher_no": pick_list_name,
+			"docstatus": 1,
+			"reservation_based_on": "Serial and Batch",
+		},
+		fields=["name", "voucher_detail_no", "item_code", "warehouse", "has_serial_no", "has_batch_no"],
+	):
+		sre_map.setdefault(sre.voucher_detail_no, []).append(sre)
+	return sre_map
+
+
+def attach_reserved_batch_bundle(row, sre_list):
+	"""Rebuild the reserved batches onto the Delivery Note row. The reserved-stock mapper only
+	attaches a Serial and Batch Bundle when use_serial_batch_fields is off; with it on (the site
+	default) a multi-batch reservation lands on a bare row that reads item.serial_and_batch_bundle
+	as None on submit. Build the exact Outward bundle from the reservation and point the row at it."""
+	if not sre_list:
+		return
+
+	# with use_serial_batch_fields off, the reserved-stock mapper already attached a bundle; rebuilding
+	# here would orphan it and duplicate the work, so only run when that mode leaves the row bare
+	if not cint(frappe.db.get_single_value("Stock Settings", "use_serial_batch_fields")):
+		return
+
+	from erpnext.stock.doctype.stock_reservation_entry.stock_reservation_entry import (
+		get_ssb_bundle_for_voucher,
+	)
+
+	bundle = get_ssb_bundle_for_voucher(sre_list)
+	if bundle:
+		row.serial_and_batch_bundle = bundle.name
+		row.use_serial_batch_fields = 0
+
+
 def whole_pack_count(staged_qty, conversion_factor):
 	conversion_factor = flt(conversion_factor) or 1
 	# flt(..., 6) before int(): raw float noise (5.999999999) would under-floor a whole pack
@@ -508,6 +816,18 @@ def whole_pack_count(staged_qty, conversion_factor):
 
 def get_whole_pack_stock_qty(staged_qty, conversion_factor):
 	return whole_pack_count(staged_qty, conversion_factor) * (flt(conversion_factor) or 1)
+
+
+def stage_whole_pack_row(row, staged_qty, consolidation_warehouse):
+	"""Clamp a standalone Delivery Note row to the whole packs staged (never more than the row's own
+	ordered qty) and repoint it to the consolidation warehouse. Returns True if the row ships, False
+	if only a partial pack is staged (the caller keeps the remainder staged for the balance)."""
+	whole_packs = whole_pack_count(staged_qty, flt(row.conversion_factor) or 1)
+	if whole_packs <= 0:
+		return False
+	row.qty = min(whole_packs, flt(row.qty))
+	row.warehouse = consolidation_warehouse
+	return True
 
 
 def get_tracked_item_codes(item_codes):
@@ -524,7 +844,9 @@ def get_tracked_item_codes(item_codes):
 	)
 
 
-def apply_staged_rows(delivery_note, consolidation_warehouse, staged_stock_qty, reserved_qty_map):
+def apply_staged_rows(
+	delivery_note, consolidation_warehouse, staged_stock_qty, reserved_qty_map, reserved_batch_sre_map=None
+):
 	"""Keep only rows backed by THIS pick list's staged stock. Rows born from our
 	reservations keep the reservation's exact whole-pack qty, clamped so entries from
 	earlier pick lists of the same SO cannot double-ship. Rows without a reservation
@@ -534,6 +856,7 @@ def apply_staged_rows(delivery_note, consolidation_warehouse, staged_stock_qty, 
 	remainder_items = []
 	manual_batch_items = []
 	remaining_reserved = dict(reserved_qty_map)
+	reserved_batch_sre_map = reserved_batch_sre_map or {}
 	tracked_item_codes = get_tracked_item_codes([row.item_code for row in delivery_note.get("items")])
 
 	for row in delivery_note.get("items"):
@@ -564,17 +887,14 @@ def apply_staged_rows(delivery_note, consolidation_warehouse, staged_stock_qty, 
 				continue
 			remaining_reserved[row.so_detail] -= allowed_stock_qty
 			row.qty = allowed_stock_qty / conversion_factor
+			attach_reserved_batch_bundle(row, reserved_batch_sre_map.get(row.so_detail))
 			kept_rows.append(row)
 			continue
 
-		whole_packs = whole_pack_count(staged_qty, conversion_factor)
-		if whole_packs <= 0:
+		if stage_whole_pack_row(row, staged_qty, consolidation_warehouse):
+			kept_rows.append(row)
+		else:
 			remainder_items.append(row.item_code)
-			continue
-
-		row.qty = min(whole_packs, flt(row.qty))
-		row.warehouse = consolidation_warehouse
-		kept_rows.append(row)
 
 	delivery_note.set("items", kept_rows)
 	for index, row in enumerate(delivery_note.get("items")):
