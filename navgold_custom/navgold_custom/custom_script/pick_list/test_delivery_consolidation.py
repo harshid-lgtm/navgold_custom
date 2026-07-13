@@ -407,6 +407,37 @@ class TestDeliveryConsolidation(IntegrationTestCase):
 			"the cascade must never stamp a legacy pick list Completed",
 		)
 
+	def test_reservation_disabled_batch_item_stays_staged(self):
+		# Reservation off + batch item: without a reservation there is no bundle to source exact
+		# batches whole-pack from the consolidation warehouse, so auto-picking would over-draw a
+		# single batch and crash on submit. The flow must leave the stock staged for a manual
+		# Delivery Note instead — never auto-create a bundle-less row.
+		item_code = "TEST-DC-NORESV-BATCH-ITEM"
+		create_pack_item(item_code, has_batch_no=1)
+		receive_stock(item_code, self.shelf_a, 2)
+		receive_stock(item_code, self.shelf_b, 4)
+		sales_order = create_pack_sales_order(item_code)
+
+		with self.change_settings("Stock Settings", {"enable_stock_reservation": 0}):
+			pick_list = submit_pick_list_for(sales_order)
+
+		transfer = get_consolidation_transfer(pick_list)
+		self.assertIsNotNone(transfer)
+		self.assertFalse(
+			frappe.db.exists("Stock Reservation Entry", {"voucher_no": sales_order.name, "docstatus": 1})
+		)
+		self.assertFalse(
+			get_delivery_note_items(sales_order),
+			"a batch item with no reservation must not auto-create a bundle-less DN",
+		)
+		staged = frappe.db.get_value(
+			"Bin",
+			{"item_code": item_code, "warehouse": self.consolidation_warehouse},
+			"actual_qty",
+		)
+		self.assertEqual(flt(staged), 6, "the batch stock must wait in the consolidation warehouse")
+		self.assertEqual(frappe.db.get_value("Pick List", pick_list.name, "status"), "Open")
+
 	def test_restocked_shelf_is_pickable_while_staged(self):
 		item_code = "TEST-DC-RESTOCK-ITEM"
 		create_pack_item(item_code)

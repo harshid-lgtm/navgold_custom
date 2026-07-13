@@ -157,6 +157,10 @@ def move_picked_stock_to_consolidation(pick_list, consolidation_warehouse):
 	# picked_qty - delivered_qty for every non-Completed pick list) and shorts future
 	# pick lists once the shelves are restocked. Rows already at the consolidation
 	# warehouse keep their claim — that stock is still awaiting its Delivery Note.
+	# ponytail: overloads delivered_qty (the field the shelf claim reads) at stage time, so
+	# ERPNext's native "Create Delivery Note" button on this still-Open pick list maps nothing;
+	# switch to a custom staged_qty field + a get_picked_items_details override if that native
+	# path is ever exposed to users on consolidation pick lists
 	for location in pick_list.locations:
 		if location.warehouse == consolidation_warehouse or not flt(location.picked_qty):
 			continue
@@ -363,6 +367,20 @@ def get_whole_pack_stock_qty(staged_qty, conversion_factor):
 	return whole_pack_count(staged_qty, conversion_factor) * (flt(conversion_factor) or 1)
 
 
+def get_tracked_item_codes(item_codes):
+	unique_codes = list({code for code in item_codes if code})
+	if not unique_codes:
+		return set()
+	return set(
+		frappe.get_all(
+			"Item",
+			filters={"name": ["in", unique_codes]},
+			or_filters={"has_batch_no": 1, "has_serial_no": 1},
+			pluck="name",
+		)
+	)
+
+
 def apply_staged_rows(delivery_note, consolidation_warehouse, staged_stock_qty, reserved_qty_map):
 	"""Keep only rows backed by THIS pick list's staged stock. Rows born from our
 	reservations keep the reservation's exact whole-pack qty, clamped so entries from
@@ -371,7 +389,9 @@ def apply_staged_rows(delivery_note, consolidation_warehouse, staged_stock_qty, 
 	whole-pack floor from the staged qty. Anything else must not ship on this note."""
 	kept_rows = []
 	remainder_items = []
+	manual_batch_items = []
 	remaining_reserved = dict(reserved_qty_map)
+	tracked_item_codes = get_tracked_item_codes([row.item_code for row in delivery_note.get("items")])
 
 	for row in delivery_note.get("items"):
 		staged_qty = flt(staged_stock_qty.get(row.so_detail))
@@ -380,9 +400,23 @@ def apply_staged_rows(delivery_note, consolidation_warehouse, staged_stock_qty, 
 
 		conversion_factor = flt(row.conversion_factor) or 1
 
-		if row.so_detail in remaining_reserved and row.warehouse == consolidation_warehouse:
+		if row.so_detail not in reserved_qty_map and row.item_code in tracked_item_codes:
+			# no reservation means no bundle to source exact batches/serials from; auto-picking a
+			# whole pack from the consolidation warehouse would over-draw a single batch and crash
+			# on submit. Leave it staged for a manual Delivery Note instead.
+			manual_batch_items.append(row.item_code)
+			continue
+
+		if row.so_detail in reserved_qty_map:
+			# make_delivery_note(for_reserved_stock) pulls EVERY undelivered SRE on the SO. Today
+			# that is only ever this pick list's own (all at the consolidation warehouse): ERPNext's
+			# validate_sales_order blocks a new pick list while any reservation is undelivered, and
+			# refresh_sales_order_reserved_qty keeps that aggregate honest. The warehouse guard is
+			# belt-and-suspenders so a foreign reservation could never double-ship on top of our row.
+			if row.warehouse != consolidation_warehouse:
+				continue
 			row_stock_qty = flt(row.qty) * conversion_factor
-			allowed_stock_qty = min(row_stock_qty, remaining_reserved[row.so_detail])
+			allowed_stock_qty = min(row_stock_qty, remaining_reserved.get(row.so_detail, 0))
 			if allowed_stock_qty <= 0:
 				continue
 			remaining_reserved[row.so_detail] -= allowed_stock_qty
@@ -408,6 +442,15 @@ def apply_staged_rows(delivery_note, consolidation_warehouse, staged_stock_qty, 
 			_("Partial packs for {0} remain in {1} awaiting the balance quantity").format(
 				", ".join(sorted(set(remainder_items))), consolidation_warehouse
 			),
+			indicator="orange",
+			alert=True,
+		)
+
+	if manual_batch_items:
+		frappe.msgprint(
+			_(
+				"Batch/serial items {0} are staged in {1}; create their Delivery Note manually to pick batches"
+			).format(", ".join(sorted(set(manual_batch_items))), consolidation_warehouse),
 			indicator="orange",
 			alert=True,
 		)
