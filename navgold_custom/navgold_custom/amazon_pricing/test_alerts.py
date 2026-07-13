@@ -102,8 +102,6 @@ class NavgoldAlertsTestBase(IntegrationTestCase):
 
 	def create_amazon_sales_order(self, item_code, rate, qty=1, submit=False):
 		company = frappe.db.get_value("Company", {}, "name")
-		# the warehouse must belong to the same company — an unordered pick breaks as
-		# soon as any warehouse of another company exists on the site
 		warehouse = frappe.db.get_value(
 			"Warehouse", {"is_group": 0, "disabled": 0, "company": company}, "name"
 		)

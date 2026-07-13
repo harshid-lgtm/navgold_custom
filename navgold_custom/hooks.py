@@ -323,14 +323,8 @@ doc_events = {
 	},
 	"Delivery Note": {
 		"validate": "navgold_custom.navgold_custom.custom_script.delivery_note.delivery_note.align_consolidated_bundle_packed_warehouse",
-		"on_submit": [
-			"navgold_custom.navgold_custom.custom_script.delivery_note.delivery_note.refresh_sales_order_reserved_qty",
-			"navgold_custom.navgold_custom.custom_script.delivery_note.delivery_note.update_pick_list_completion",
-		],
-		"on_cancel": [
-			"navgold_custom.navgold_custom.custom_script.delivery_note.delivery_note.refresh_sales_order_reserved_qty",
-			"navgold_custom.navgold_custom.custom_script.delivery_note.delivery_note.update_pick_list_completion",
-		],
+		"on_submit": "navgold_custom.navgold_custom.custom_script.delivery_note.delivery_note.on_submit",
+		"on_cancel": "navgold_custom.navgold_custom.custom_script.delivery_note.delivery_note.on_cancel",
 	},
 	"Stock Entry": {
 		"on_submit": "navgold_custom.navgold_custom.custom_script.stock_entry.stock_entry.update_proxy_sku_transfer_rates",

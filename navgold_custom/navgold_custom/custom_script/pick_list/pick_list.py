@@ -2,6 +2,9 @@
 # For license information, please see license.txt
 
 import frappe
+from erpnext.stock.doctype.stock_reservation_entry.stock_reservation_entry import (
+	create_stock_reservation_entries_for_so_items,
+)
 from frappe import _
 from frappe.utils import cint, flt
 
@@ -35,9 +38,9 @@ def get_consolidation_flow_warehouse(pick_list):
 	# qty and crashes on submit. A single-warehouse bundle maps cleanly on the native path.
 	# Once consolidation is entered, delivery notes are routed per Sales Order (pack / bundle / mixed)
 	# by consolidate_and_create_delivery_notes, so a mixed Sales Order no longer strands either line.
-	# ponytail: this entry predicate is still pick-list-wide — a non-split bundle beside a split pack
-	# on the SAME pick list stays on the native path and would ship the pack fractional; broaden it to
-	# also trigger on a split standalone pack line only if such a pick list ever appears in practice
+	# this entry predicate is still pick-list-wide — a non-split bundle beside a split pack on the SAME
+	# pick list stays on the native path and would ship the pack fractional; broaden it to also trigger
+	# on a split standalone pack line only if such a pick list ever appears in practice
 	if not has_product_bundle_locations(pick_list):
 		return warehouse
 	if has_split_product_bundle_locations(pick_list):
@@ -51,8 +54,6 @@ def auto_reserve_stock(doc):
 		return
 
 	if get_consolidation_flow_warehouse(doc):
-		# shelf-level reservations would block the consolidation transfer; the staged
-		# stock is reserved against the consolidation warehouse in auto_create_delivery_notes
 		return
 
 	try:
@@ -102,9 +103,6 @@ def has_split_product_bundle_locations(pick_list):
 
 
 def consolidate_and_create_delivery_notes(pick_list, consolidation_warehouse):
-	"""Move picked stock to the consolidation warehouse (in stock UOM, so pack UOMs
-	split across warehouses never produce fractional quantities), then create one
-	draft Delivery Note per Sales Order sourcing whole packs from there."""
 	validate_consolidation_warehouse(pick_list.company, consolidation_warehouse)
 
 	stock_entry = move_picked_stock_to_consolidation(pick_list, consolidation_warehouse)
@@ -208,7 +206,7 @@ def move_picked_stock_to_consolidation(pick_list, consolidation_warehouse):
 	# picked_qty - delivered_qty for every non-Completed pick list) and shorts future
 	# pick lists once the shelves are restocked. Rows already at the consolidation
 	# warehouse keep their claim — that stock is still awaiting its Delivery Note.
-	# ponytail: overloads delivered_qty (the field the shelf claim reads) at stage time, so
+	# IMP: overloads delivered_qty (the field the shelf claim reads) at stage time, so
 	# ERPNext's native "Create Delivery Note" button on this still-Open pick list maps nothing;
 	# switch to a custom staged_qty field + a get_picked_items_details override if that native
 	# path is ever exposed to users on consolidation pick lists
@@ -267,8 +265,6 @@ def append_transfer_rows_for_location(stock_entry, location, consolidation_wareh
 					{**base_row, "qty": batch_qty, "batch_no": batch_no, "use_serial_batch_fields": 1},
 				)
 		if serial_nos:
-			# ponytail: serial+batch combo items land as a serial-only row; split them
-			# per batch if a serialised-and-batched item ever enters the pick flow
 			stock_entry.append(
 				"items",
 				{
@@ -317,12 +313,12 @@ def create_consolidated_delivery_note(pick_list, sales_order_name, consolidation
 		return
 
 	reserve_staged_stock(pick_list, sales_order_name, consolidation_warehouse, staged_stock_qty)
-	reserved_qty_map = get_reserved_qty_map(pick_list.name, sales_order_name)
+	reserved_qty_map = get_pick_list_reserved_qty_by_sales_order_item(pick_list.name, sales_order_name)
 
 	kwargs = {"for_reserved_stock": True} if reserved_qty_map else None
 	delivery_note = make_delivery_note(sales_order_name, kwargs=kwargs)
 	reserved_batch_sre_map = get_reserved_batch_sre_map(pick_list.name, sales_order_name)
-	apply_staged_rows(
+	keep_whole_pack_delivery_rows(
 		delivery_note, consolidation_warehouse, staged_stock_qty, reserved_qty_map, reserved_batch_sre_map
 	)
 
@@ -385,7 +381,9 @@ def create_consolidated_bundle_delivery_note(pick_list, sales_order_name, consol
 	staged_component_qty = get_staged_component_qty_map(pick_list, sales_order_name)
 
 	delivery_note = make_delivery_note(sales_order_name)
-	apply_staged_bundle_rows(delivery_note, consolidation_warehouse, bundle_so_items, staged_component_qty)
+	keep_whole_bundle_delivery_rows(
+		delivery_note, consolidation_warehouse, bundle_so_items, staged_component_qty
+	)
 
 	if not delivery_note.get("items"):
 		frappe.msgprint(
@@ -438,7 +436,9 @@ def stage_whole_bundle_row(row, consolidation_warehouse, staged_component_qty):
 	return True
 
 
-def apply_staged_bundle_rows(delivery_note, consolidation_warehouse, bundle_so_items, staged_component_qty):
+def keep_whole_bundle_delivery_rows(
+	delivery_note, consolidation_warehouse, bundle_so_items, staged_component_qty
+):
 	"""Keep only THIS pick list's bundle rows, clamp each to the whole bundles actually staged, and
 	source them from the consolidation warehouse. packed_items are cleared so make_packing_list
 	rebuilds them from the repointed parents on save (it always recomputes the table for a new
@@ -492,11 +492,11 @@ def create_consolidated_mixed_delivery_note(pick_list, sales_order_name, consoli
 		so_item: qty for so_item, qty in staged_stock_qty.items() if so_item not in bundle_so_items
 	}
 	reserve_staged_stock(pick_list, sales_order_name, consolidation_warehouse, standalone_staged_qty)
-	reserved_qty_map = get_reserved_qty_map(pick_list.name, sales_order_name)
+	reserved_qty_map = get_pick_list_reserved_qty_by_sales_order_item(pick_list.name, sales_order_name)
 	reserved_batch_sre_map = get_reserved_batch_sre_map(pick_list.name, sales_order_name)
 
 	delivery_note = make_delivery_note(sales_order_name)
-	apply_staged_mixed_rows(
+	keep_mixed_delivery_rows(
 		delivery_note,
 		consolidation_warehouse,
 		bundle_so_items,
@@ -526,7 +526,7 @@ def create_consolidated_mixed_delivery_note(pick_list, sales_order_name, consoli
 	)
 
 
-def apply_staged_mixed_rows(
+def keep_mixed_delivery_rows(
 	delivery_note,
 	consolidation_warehouse,
 	bundle_so_items,
@@ -684,16 +684,9 @@ def build_reservation_batch_bundle(item_code, consolidation_warehouse, batch_qty
 def reserve_staged_stock(pick_list, sales_order_name, consolidation_warehouse, staged_stock_qty):
 	"""Best-effort: reserve whole-pack multiples of the staged stock against the
 	consolidation warehouse. Whole packs only: a fractional pack cannot be represented
-	exactly on the Delivery Note row (reserved_qty / conversion_factor must stay whole).
-	Callers must read the outcome via get_reserved_qty_map — reservation can partially
-	succeed per item (reserve_stock off, partial reservation disallowed) or throw after
-	creating some entries."""
+	exactly on the Delivery Note row (reserved_qty / conversion_factor must stay whole)."""
 	if not cint(frappe.db.get_single_value("Stock Settings", "enable_stock_reservation")):
 		return
-
-	from erpnext.stock.doctype.stock_reservation_entry.stock_reservation_entry import (
-		create_stock_reservation_entries_for_so_items,
-	)
 
 	sales_order = frappe.get_doc("Sales Order", sales_order_name)
 	conversion_factors = {item.name: flt(item.conversion_factor) or 1 for item in sales_order.items}
@@ -733,9 +726,6 @@ def reserve_staged_stock(pick_list, sales_order_name, consolidation_warehouse, s
 		return
 
 	try:
-		# from_voucher_type="Pick List" keeps qty in stock UOM and ties the entries to
-		# the pick list so cancelling it cascades; plain SO reservation throws for
-		# already-picked items
 		create_stock_reservation_entries_for_so_items(
 			sales_order, items_details, from_voucher_type="Pick List", notify=True
 		)
@@ -751,7 +741,7 @@ def reserve_staged_stock(pick_list, sales_order_name, consolidation_warehouse, s
 			frappe.delete_doc("Serial and Batch Bundle", bundle_name, ignore_permissions=True, force=True)
 
 
-def get_reserved_qty_map(pick_list_name, sales_order_name):
+def get_pick_list_reserved_qty_by_sales_order_item(pick_list_name, sales_order_name):
 	"""This pick list's active reservations per Sales Order Item. The reserved-stock
 	DN mapper pulls every undelivered reservation on the SO — including ones made by
 	earlier pick lists — so DN rows must be clamped to this pick list's share."""
@@ -844,14 +834,9 @@ def get_tracked_item_codes(item_codes):
 	)
 
 
-def apply_staged_rows(
+def keep_whole_pack_delivery_rows(
 	delivery_note, consolidation_warehouse, staged_stock_qty, reserved_qty_map, reserved_batch_sre_map=None
 ):
-	"""Keep only rows backed by THIS pick list's staged stock. Rows born from our
-	reservations keep the reservation's exact whole-pack qty, clamped so entries from
-	earlier pick lists of the same SO cannot double-ship. Rows without a reservation
-	(item skipped, partial reservation refused, reservation disabled) fall back to the
-	whole-pack floor from the staged qty. Anything else must not ship on this note."""
 	kept_rows = []
 	remainder_items = []
 	manual_batch_items = []
@@ -874,6 +859,7 @@ def apply_staged_rows(
 			continue
 
 		if row.so_detail in reserved_qty_map:
+			# ship this reserved row, clamped to its own reservation, re-attaching its staged batch bundle.
 			# make_delivery_note(for_reserved_stock) pulls EVERY undelivered SRE on the SO. Today
 			# that is only ever this pick list's own (all at the consolidation warehouse): ERPNext's
 			# validate_sales_order blocks a new pick list while any reservation is undelivered, and

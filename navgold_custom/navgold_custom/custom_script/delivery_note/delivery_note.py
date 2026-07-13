@@ -4,11 +4,19 @@
 import frappe
 
 
+def on_submit(doc, method):
+	refresh_sales_order_reserved_qty(doc, method)
+	complete_pick_list_when_sales_order_delivered(doc, method)
+
+
+def on_cancel(doc, method):
+	refresh_sales_order_reserved_qty(doc, method)
+	complete_pick_list_when_sales_order_delivered(doc, method)
+
+
 def refresh_sales_order_reserved_qty(doc, method):
-	"""ERPNext updates SRE delivered_qty on Delivery Note submit/cancel
-	(selling_controller.update_stock_reservation_entries) but never recomputes
-	Sales Order Item.stock_reserved_qty, so the stale aggregate makes the pick list
-	creation guard block every later pick list for the same Sales Order. Recompute it."""
+	"""Recompute Sales Order Item.stock_reserved_qty, which ERPNext leaves stale on Delivery Note
+	submit/cancel and would otherwise block every later pick list for the same Sales Order."""
 	if doc.is_return:
 		return
 
@@ -32,9 +40,6 @@ def refresh_sales_order_reserved_qty(doc, method):
 		if entry.voucher_detail_no in refreshed_details:
 			continue
 		refreshed_details.add(entry.voucher_detail_no)
-		# ponytail: get_doc per Sales Order Item (update_reserved_qty_in_voucher needs a doc
-		# instance, no batch API); reimplement the ERPNext aggregate by hand only if this DN
-		# submit/cancel path shows up in profiling
 		frappe.get_doc("Stock Reservation Entry", entry.name).update_reserved_qty_in_voucher()
 
 
@@ -71,13 +76,11 @@ def align_consolidated_bundle_packed_warehouse(doc, method):
 			packed_item.warehouse = consolidation_warehouse
 
 
-def update_pick_list_completion(doc, method):
+def complete_pick_list_when_sales_order_delivered(doc, method):
 	"""Consolidation-flow pick lists deliver from the consolidation warehouse, so ERPNext's
 	native per-row delivery tracking never sees their Delivery Notes and would leave them
 	Open forever. Complete them (or reopen on cancel) from the Sales Order's delivery_status,
 	which the native status updater has already refreshed before doc_events run."""
-	# a return flips the SO back to Partly Delivered, but the pick physically completed;
-	# reopening would resurrect the shelf claims the completion released
 	if doc.is_return:
 		return
 
@@ -96,8 +99,6 @@ def update_pick_list_completion(doc, method):
 	if not candidate_pick_lists:
 		return
 
-	# a submitted Stock Entry linked via pick_list is the consolidation-flow fingerprint;
-	# legacy pick lists keep native per-row tracking and must never be overwritten here
 	consolidation_pick_lists = frappe.get_all(
 		"Stock Entry",
 		filters={"pick_list": ["in", candidate_pick_lists], "docstatus": 1},
@@ -107,8 +108,6 @@ def update_pick_list_completion(doc, method):
 	if not consolidation_pick_lists:
 		return
 
-	# completion is gated on ALL the pick list's sales orders, not just the ones on this
-	# Delivery Note, so multi-SO pick lists only complete once every SO is fully shipped
 	sales_orders_by_pick_list = {}
 	for row in frappe.get_all(
 		"Pick List Item",
@@ -150,9 +149,6 @@ def update_pick_list_completion(doc, method):
 
 		if doc.docstatus == 1:
 			if fully_delivered and current_status != "Completed":
-				# per_delivered and delivery_status must move with status: the linked Stock
-				# Entry can trigger a native update_status() recompute, and status alone
-				# would be reverted from the untouched per_delivered
 				frappe.db.set_value(
 					"Pick List",
 					pick_list_name,
