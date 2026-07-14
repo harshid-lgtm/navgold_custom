@@ -532,6 +532,11 @@ function show_pack_qty_dialog(frm, matching_rows, item_code, options = {}) {
 			};
 
 			if (options.is_bundle) {
+				// Close this dialog BEFORE stacking frappe.confirm on top of it. A modal-on-modal
+				// leaves the confirm's Yes button unresponsive in some browsers, so apply_packed_qty
+				// never runs, custom_packed_qty stays 0, and the "Product Bundle" confirm loops
+				// forever — a bundle Packing Slip could never be packed/saved.
+				dialog.hide();
 				frappe.confirm(__('The Item is a Product Bundle.'), apply_packed_qty);
 			} else {
 				apply_packed_qty();
