@@ -486,7 +486,12 @@ def get_sku_inventory_data(
 	if is_sfp:
 		is_two_day = (sku_shipping_group_choice or "").strip().lower() == "twoday"
 		shipping_group = SHIPPING_GROUPS["two_day"] if is_two_day else SHIPPING_GROUPS["sfp"]
-	elif is_backorder and supplier_sfp_eligible and resolved_supplier_sfp and restock_date:
+	elif (
+		is_backorder
+		and supplier_sfp_eligible
+		and resolved_supplier_sfp
+		and (restock_date or resolved_supplier_stock > 0)
+	):
 		shipping_group = SHIPPING_GROUPS["sfp"]
 	else:
 		shipping_group = SHIPPING_GROUPS["main_revised"]

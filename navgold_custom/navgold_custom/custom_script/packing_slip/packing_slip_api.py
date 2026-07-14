@@ -2,12 +2,13 @@
 # For license information, please see license.txt
 
 import base64
+import math
 
 import frappe
 from erpnext.stock.doctype.item.item import get_uom_conv_factor
 from erpnext.stock.doctype.packed_item.packed_item import is_product_bundle
 from frappe import _
-from frappe.utils import flt
+from frappe.utils import cint, flt
 from frappe.utils.data import cstr
 
 from navgold_custom.navgold_custom.amazon_repository import format_local_as_amazon_utc
@@ -18,6 +19,7 @@ from navgold_custom.navgold_custom.custom_script.packing_slip.packing_utils impo
 from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import (
 	Orders,
 	Shipping,
+	SPAPIError,
 )
 from navgold_custom.navgold_custom.erpnext_compat import make_packing_slip
 
@@ -140,10 +142,17 @@ def get_delivery_note_items(delivery_note: str):
 @frappe.whitelist()
 def get_sfp_shipping_rates(packing_slip: str):
 	packing_slip_doc = frappe.get_cached_doc("Packing Slip", packing_slip)
-	shipping_payload = build_shipping_payload(packing_slip_doc)
 	shipping = Shipping.from_amazon_settings()
 
-	response = shipping.get_shipping_rates(payload=shipping_payload)
+	try:
+		shipping_payload = build_shipping_payload(packing_slip_doc)
+		response = shipping.get_shipping_rates(payload=shipping_payload)
+	except SPAPIError as error:
+		frappe.throw(
+			_("Amazon rejected the shipping rate request: {0}").format(error.error_description),
+			title=_("Could Not Fetch SFP Rates"),
+		)
+
 	rates_payload = response.get("payload")
 	rates = rates_payload.get("rates") or []
 	if not rates:
@@ -204,12 +213,19 @@ def purchase_sfp_shipping_label(
 	packing_slip_doc = frappe.get_cached_doc("Packing Slip", packing_slip)
 	shipping = Shipping.from_amazon_settings()
 
-	response = shipping.purchase_shipment(
-		rate_id=rate_id,
-		request_token=request_token,
-		document_spec=document_spec,
-		value_added_services=value_added_services or [],
-	)
+	try:
+		response = shipping.purchase_shipment(
+			rate_id=rate_id,
+			request_token=request_token,
+			document_spec=document_spec,
+			value_added_services=value_added_services or [],
+		)
+	except SPAPIError as error:
+		frappe.throw(
+			_("Amazon rejected the label purchase: {0}").format(error.error_description),
+			title=_("Could Not Purchase SFP Label"),
+		)
+
 	purchase_payload = response.get("payload")
 	shipment_id = purchase_payload.get("shipmentId")
 	if not shipment_id:
@@ -255,7 +271,13 @@ def cancel_sfp_shipment(packing_slip: str):
 		frappe.throw(_("No SFP shipment to cancel."))
 
 	shipping = Shipping.from_amazon_settings()
-	shipping.cancel_shipment(shipment_id=packing_slip_doc.custom_sfp_shipment_id)
+	try:
+		shipping.cancel_shipment(shipment_id=packing_slip_doc.custom_sfp_shipment_id)
+	except SPAPIError as error:
+		frappe.throw(
+			_("Amazon rejected the cancellation: {0}").format(error.error_description),
+			title=_("Could Not Cancel SFP Shipment"),
+		)
 	packing_slip_doc.custom_sfp_rate_id = ""
 	packing_slip_doc.custom_sfp_shipment_id = ""
 	packing_slip_doc.custom_sfp_label = ""
@@ -399,20 +421,23 @@ def build_package_items(orders, amazon_order_id, currency, weight_in_grams):
 		if not next_token:
 			break
 
+	valid_order_items = [item for item in order_items if item.get("OrderItemId")]
+	total_quantity = sum(max(1, cint(item.get("QuantityOrdered"))) for item in valid_order_items)
+	# Amazon treats item weight as per-unit and multiplies it by quantity; round down so
+	# the summed item weights never exceed the declared package weight (InvalidInput 400)
+	unit_weight_grams = math.floor(weight_in_grams / max(total_quantity, 1) * 100) / 100
+
 	total_item_value = 0
 	package_items = []
-	for item in order_items:
-		order_item_id = item.get("OrderItemId")
-		if not order_item_id:
-			continue
-		quantity = max(1, int(flt(item.get("QuantityOrdered")) or 0))
+	for item in valid_order_items:
+		quantity = max(1, cint(item.get("QuantityOrdered")))
 		item_price = flt((item.get("ItemPrice") or {}).get("Amount")) or 1.0
 		total_item_value += item_price
 		package_item = {
-			"itemIdentifier": order_item_id,
+			"itemIdentifier": item.get("OrderItemId"),
 			"quantity": quantity,
 			"itemValue": {"unit": currency, "value": round(item_price, 2)},
-			"weight": {"unit": "GRAM", "value": round(weight_in_grams / max(len(order_items), 1), 2)},
+			"weight": {"unit": "GRAM", "value": unit_weight_grams},
 		}
 		description = item.get("Title") or ""
 		if description:

@@ -2,6 +2,7 @@
 # For license information, please see license.txt
 
 import frappe
+from erpnext.stock.doctype.item.item import get_uom_conv_factor
 from erpnext.stock.utils import scan_barcode
 from frappe import _
 from frappe.utils import flt
@@ -67,12 +68,29 @@ def recalculate_net_weight(doc):
 		if weight_per_unit:
 			uom = item.stock_uom or "Nos"
 			conversion_factor = conversion_map.get((item.item_code, uom), 1.0)
-			item.net_weight = weight_per_unit * flt(item.qty) * conversion_factor
+			# net_weight is per unit: core Packing Slip sums net_weight * qty into net_weight_pkg
+			item.net_weight = weight_per_unit * conversion_factor
 			item.weight_uom = weight_info.get("weight_uom", "")
-			total_net_weight += flt(item.net_weight)
+			total_net_weight += flt(item.net_weight) * flt(item.qty)
 			if not net_weight_uom:
 				net_weight_uom = item.weight_uom
 
 	doc.net_weight_pkg = total_net_weight
 	if net_weight_uom:
 		doc.net_weight_uom = net_weight_uom
+
+
+def set_gross_weight_from_parcel(doc):
+	if flt(doc.gross_weight_pkg) or not doc.get("custom_shipment_parcel_template"):
+		return
+
+	parcel_weight_kg = flt(
+		frappe.db.get_value("Shipment Parcel Template", doc.custom_shipment_parcel_template, "weight")
+	)
+	weight_uom = doc.net_weight_uom or "Kg"
+	conversion_factor = flt(get_uom_conv_factor("Kg", weight_uom))
+	if not (parcel_weight_kg and conversion_factor):
+		return
+
+	doc.gross_weight_pkg = round(flt(doc.net_weight_pkg) + parcel_weight_kg * conversion_factor, 2)
+	doc.gross_weight_uom = weight_uom

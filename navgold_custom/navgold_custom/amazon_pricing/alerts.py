@@ -4,7 +4,7 @@
 import frappe
 from frappe import _
 from frappe.integrations.utils import make_get_request, make_post_request
-from frappe.utils.data import add_to_date, cint, flt, fmt_money, get_datetime, now_datetime
+from frappe.utils.data import add_to_date, cint, cstr, flt, fmt_money, get_datetime, now_datetime
 
 from navgold_custom.navgold_custom.report.below_min_price_sales.below_min_price_sales import (
 	get_min_price_map,
@@ -57,6 +57,21 @@ def send_telegram(text: str, config: dict | None = None, silent: bool = False) -
 		return None
 
 
+def alert_gate_open(config: dict, dedupe_key: str | None = None, dedupe_seconds: int = 600) -> bool:
+	# Require a fully-wired channel before touching the dedupe cache — otherwise a key set
+	# while the chat id is missing would silently suppress the alert once it is connected.
+	if not (config.get("enabled") and config.get("token") and config.get("chat_id")):
+		return False
+
+	if dedupe_key:
+		cache_key = f"navgold_alert_sent:{dedupe_key}"
+		if frappe.cache().get_value(cache_key):
+			return False
+		frappe.cache().set_value(cache_key, "1", expires_in_sec=dedupe_seconds)
+
+	return True
+
+
 def notify(
 	title: str,
 	lines: list[str],
@@ -65,21 +80,40 @@ def notify(
 	dedupe_seconds: int = 600,
 ) -> None:
 	config = get_alert_config()
-	# Require a fully-wired channel before touching the dedupe cache — otherwise a key set
-	# while the chat id is missing would silently suppress the alert once it is connected.
-	if not (config.get("enabled") and config.get("token") and config.get("chat_id")):
+	if not alert_gate_open(config, dedupe_key, dedupe_seconds):
 		return
-
-	if dedupe_key:
-		cache_key = f"navgold_alert_sent:{dedupe_key}"
-		if frappe.cache().get_value(cache_key):
-			return
-		frappe.cache().set_value(cache_key, "1", expires_in_sec=dedupe_seconds)
 
 	prefix, silent = SEVERITY_TELEGRAM.get(severity, ("", False))
 	body = "\n".join(lines)
 	text = f"{prefix}<b>{frappe.utils.escape_html(title)}</b>\n{body}"
 	send_telegram(text, config, silent=silent)
+
+
+@frappe.whitelist()
+def send_telegram_message(
+	message: str | list,
+	title: str | None = None,
+	severity: str = "info",
+	dedupe_key: str | None = None,
+	dedupe_seconds: int = 600,
+) -> None:
+	# Whitelisted so Server Scripts can enqueue it — the sandbox only allows whitelisted methods.
+	lines = message if isinstance(message, list) else [cstr(message)]
+	if title:
+		notify(
+			title,
+			lines,
+			severity=severity,
+			dedupe_key=dedupe_key,
+			dedupe_seconds=cint(dedupe_seconds) or 600,
+		)
+		return
+
+	config = get_alert_config()
+	if not alert_gate_open(config, dedupe_key, cint(dedupe_seconds) or 600):
+		return
+	_, silent = SEVERITY_TELEGRAM.get(severity, ("", False))
+	send_telegram("\n".join(lines), config, silent=silent)
 
 
 def format_money(amount) -> str:

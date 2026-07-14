@@ -17,6 +17,7 @@
 		"min_shelf_expiry_in_days",
 		"section_break_oarw",
 		"subscribe_and_save_warehouse",
+		"delivery_consolidation_warehouse",
 		"stock_allocation_section",
 		"default_stock_allocation_warehouse",
 		"last_reports_section",
@@ -79,6 +80,11 @@
 		"column_break_afn_stock",
 		"last_afn_stock_proxy_count",
 		"last_afn_stock_items_count",
+		"clf_credential_section",
+		"clf_username",
+		"clf_endpoint",
+		"column_break_hxgs",
+		"clf_password",
 		"fba_inbound_tab",
 		"fba_inbound_enabled",
 		"fba_source_address",
@@ -163,6 +169,13 @@
 			"fieldname": "subscribe_and_save_warehouse",
 			"fieldtype": "Link",
 			"label": "Subscribe and Save Warehouse",
+			"options": "Warehouse"
+		},
+		{
+			"description": "When set, submitting a Delivery pick list auto-transfers picked stock here (in stock UOM), reserves whole packs, and creates draft Delivery Notes sourcing from here. Leave empty to disable.",
+			"fieldname": "delivery_consolidation_warehouse",
+			"fieldtype": "Link",
+			"label": "Delivery Consolidation Warehouse",
 			"options": "Warehouse"
 		},
 		{
@@ -295,6 +308,7 @@
 			"options": "Publish All Prices\nPublish Selected Prices Only"
 		},
 		{
+			"allow_bulk_edit": 1,
 			"depends_on": "eval:doc.pricing_publishing_mode === 'Publish Selected Prices Only'",
 			"fieldname": "published_pricing_items",
 			"fieldtype": "Table",
@@ -558,6 +572,26 @@
 			"read_only": 1
 		},
 		{
+			"fieldname": "clf_credential_section",
+			"fieldtype": "Section Break",
+			"label": "CLF Credential"
+		},
+		{
+			"fieldname": "clf_endpoint",
+			"fieldtype": "Data",
+			"label": "CLF Stock Import Endpoint"
+		},
+		{
+			"fieldname": "clf_username",
+			"fieldtype": "Data",
+			"label": "Username"
+		},
+		{
+			"fieldname": "clf_password",
+			"fieldtype": "Password",
+			"label": "Password"
+		},
+		{
 			"fieldname": "fba_inbound_tab",
 			"fieldtype": "Tab Break",
 			"label": "FBA Inbound"
@@ -660,13 +694,17 @@
 			"fieldtype": "Currency",
 			"label": "Loss Circuit Breaker Threshold",
 			"options": "GBP"
+		},
+		{
+			"fieldname": "column_break_hxgs",
+			"fieldtype": "Column Break"
 		}
 	],
 	"grid_page_length": 50,
 	"index_web_pages_for_search": 1,
 	"issingle": 1,
 	"links": [],
-	"modified": "2026-06-23 03:47:59.437393",
+	"modified": "2026-07-03 08:28:23.156099",
 	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Navgold Settings",

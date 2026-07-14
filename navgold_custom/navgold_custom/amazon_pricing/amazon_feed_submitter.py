@@ -17,6 +17,7 @@ from navgold_custom.navgold_custom.amazon_pricing.pricing_validators import (
 	format_blocked_records,
 	merge_blocked_reasons,
 )
+from navgold_custom.navgold_custom.amazon_pricing.submission_log import record_submission_error
 from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import Feeds, SPAPIError
 from navgold_custom.navgold_custom.utils import (
 	AmazonFrozenError,
@@ -137,17 +138,9 @@ def submit_pricing(pricing_names: list, test_mode: bool = False) -> dict:
 		}
 
 	except Exception as e:
-		log.status = "Error"
-		log.error_message = str(e)
-		log.save()
-
 		bulk_set_value("Amazon Product Pricing", pricing_names, "amazon_sync_status", "Error")
 
-		frappe.log_error(f"Amazon feed submission error: {e!s}", "Amazon Pricing Submission")
-
-		from navgold_custom.navgold_custom.amazon_pricing.alerts import alert_feed_error
-
-		alert_feed_error(log.name, str(e), "Amazon")
+		record_submission_error(log, channel="Amazon", exception=e)
 
 		return {
 			"success": False,
@@ -216,10 +209,6 @@ def check_feed_status(log_name: str) -> dict:
 				)
 
 		elif processing_status in ["CANCELLED", "FATAL"]:
-			log.status = "Error"
-			log.error_message = f"Feed processing failed: {processing_status}"
-			log.save()
-
 			if pricing_names:
 				frappe.db.set_value(
 					"Amazon Product Pricing",
@@ -228,18 +217,28 @@ def check_feed_status(log_name: str) -> dict:
 					"Error",
 				)
 
+			record_submission_error(
+				log, message=f"Feed processing failed: {processing_status}", channel="Amazon"
+			)
+
 		return {"status": processing_status, "feed_status": feed_status}
 
 	except Exception as e:
 		if is_feed_not_found_error(e):
 			# Amazon eventually drops old feed ids; leaving the log "Submitted" would make the
 			# scheduled poller retry a feed that can never resolve.
-			log.status = "Error"
-			log.error_message = f"Feed {log.feed_id} not found on Amazon: {e.error_description}"
-			log.save()
+			record_submission_error(
+				log,
+				message=f"Feed {log.feed_id} not found on Amazon: {e.error_description}",
+				channel="Amazon",
+				alert=False,
+			)
 			return {"status": "NOT_FOUND", "feed_status": None}
 
-		frappe.log_error(f"Feed status check error for {log_name}: {e!s}", "Amazon Pricing")
+		frappe.log_error(
+			f"Feed status check error for {log_name}:\n{frappe.get_traceback(with_context=True)}",
+			"Amazon Pricing",
+		)
 		frappe.throw(_("Failed to check feed status: {0}").format(str(e)))
 
 
