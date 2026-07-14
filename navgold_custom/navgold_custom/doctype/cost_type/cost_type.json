@@ -13,6 +13,7 @@
 		"is_purchase_cost",
 		"source",
 		"default_value",
+		"allowed_zero_valued",
 		"lft",
 		"rgt",
 		"old_parent"
@@ -82,6 +83,14 @@
 			"fieldtype": "Float",
 			"label": "Default Value",
 			"precision": "4"
+		},
+		{
+			"default": "0",
+			"description": "This cost is legitimately 0 (e.g. a VAT-exempt tax rate). The push guard will not block a strategy on a zero value for this cost type.",
+			"fieldname": "allowed_zero_valued",
+			"fieldtype": "Check",
+			"in_standard_filter": 1,
+			"label": "Allowed Zero Valued"
 		},
 		{
 			"fieldname": "lft",

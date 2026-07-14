@@ -23,15 +23,16 @@ PURCHASE_COST_TYPE = "Test Purchase Cost"
 TEST_ITEM_CODE = "TEST-PRICING-VALIDATOR-ITEM"
 
 
-def create_purchase_cost_type():
-	if frappe.db.exists("Cost Type", PURCHASE_COST_TYPE):
-		return PURCHASE_COST_TYPE
+def create_purchase_cost_type(name=PURCHASE_COST_TYPE, allowed_zero_valued=0):
+	if frappe.db.exists("Cost Type", name):
+		return name
 
 	cost_type = frappe.new_doc("Cost Type")
-	cost_type.cost_type_name = PURCHASE_COST_TYPE
+	cost_type.cost_type_name = name
 	cost_type.is_group = 1
 	cost_type.calculation_type = "Absolute"
 	cost_type.is_purchase_cost = 1
+	cost_type.allowed_zero_valued = allowed_zero_valued
 	cost_type.insert()
 	return cost_type.name
 
@@ -75,7 +76,9 @@ def ensure_purchase_sub_type(source):
 	return sub_type_name
 
 
-def create_strategy(proxy_sku, purchase_cost_value=5.0, cost_source="Manual", is_active=1):
+def create_strategy(
+	proxy_sku, purchase_cost_value=5.0, cost_source="Manual", is_active=1, cost_type=PURCHASE_COST_TYPE
+):
 	strategy = frappe.new_doc("Amazon Product Strategy")
 	strategy.proxy_sku = proxy_sku
 	strategy.strategy_name = "default"
@@ -84,7 +87,7 @@ def create_strategy(proxy_sku, purchase_cost_value=5.0, cost_source="Manual", is
 	strategy.max_margin = 20
 
 	row = {
-		"cost_type": PURCHASE_COST_TYPE,
+		"cost_type": cost_type,
 		"value": purchase_cost_value,
 		"rank": 1,
 		"is_active": 1,
@@ -168,6 +171,19 @@ class TestPricingValidators(IntegrationTestCase):
 		self.assertTrue(
 			any(reason.startswith("Purchase cost is 0") for reason in violations[pricing_name]),
 			violations[pricing_name],
+		)
+
+	def test_allowed_zero_valued_purchase_cost_not_flagged(self):
+		cost_type = create_purchase_cost_type(f"{PURCHASE_COST_TYPE} Zero Allowed", allowed_zero_valued=1)
+		proxy_sku = create_proxy_sku()
+		strategy = create_strategy(proxy_sku, purchase_cost_value=0, cost_type=cost_type)
+		pricing_name = create_pricing(proxy_sku, strategy)
+
+		violations = collect_pricing_violations([pricing_name], include_deviation=False)
+
+		self.assertFalse(
+			[reason for reason in violations.get(pricing_name, []) if reason.startswith("Purchase cost is")],
+			violations.get(pricing_name),
 		)
 
 	def test_po_sync_without_history_resolves_to_zero_and_is_flagged(self):

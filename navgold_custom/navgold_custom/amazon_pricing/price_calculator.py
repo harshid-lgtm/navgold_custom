@@ -14,9 +14,15 @@ def get_cost_sub_type_map() -> dict:
 	# One query feeds every cost row's dispatch; the leaves are small reference data. Cost sub types are
 	# the leaf nodes (is_group=0) of the Cost Type tree — they carry where a value comes from.
 	return {
-		row.name: {"source": row.source, "default_value": row.default_value}
+		row.name: {
+			"source": row.source,
+			"default_value": row.default_value,
+			"allowed_zero_valued": row.allowed_zero_valued,
+		}
 		for row in frappe.get_all(
-			"Cost Type", filters={"is_group": 0}, fields=["name", "source", "default_value"]
+			"Cost Type",
+			filters={"is_group": 0},
+			fields=["name", "source", "default_value", "allowed_zero_valued"],
 		)
 	}
 
@@ -24,11 +30,11 @@ def get_cost_sub_type_map() -> dict:
 @redis_cache()
 def get_cost_type_map() -> dict:
 	# Groups (is_group=1) carry the calculation rule; leaves hold no calculation_type.
-	# is_purchase_cost rides along for the push-block rules in pricing_validators.
+	# is_purchase_cost and allowed_zero_valued ride along for the push-block rules in pricing_validators.
 	rows = frappe.get_all(
 		"Cost Type",
 		filters={"is_group": 1},
-		fields=["name", "calculation_type", "is_purchase_cost"],
+		fields=["name", "calculation_type", "is_purchase_cost", "allowed_zero_valued"],
 	)
 	return {row.name: row for row in rows}
 
