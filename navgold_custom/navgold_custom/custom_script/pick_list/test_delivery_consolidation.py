@@ -271,11 +271,20 @@ def get_delivery_note_items(sales_order):
 
 
 class TestDeliveryConsolidation(IntegrationTestCase):
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		# Create the shared warehouses ONCE per class, not per test. Per-test creation tripped a
+		# duplicate-insert on the bare CI site: a mid-test stock-ledger commit persists the warehouse to
+		# disk, but the suite's long-lived REPEATABLE READ snapshot never sees it, so frappe.db.exists()
+		# reads stale-empty and the next test's insert() collides on the primary key. Creating them here
+		# runs the insert exactly once, so it can never collide.
+		cls.shelf_a = create_test_warehouse("Test DC Shelf A")
+		cls.shelf_b = create_test_warehouse("Test DC Shelf B")
+		cls.consolidation_warehouse = create_test_warehouse("Test DC Ready to Ship")
+
 	def setUp(self):
 		super().setUp()
-		self.shelf_a = create_test_warehouse("Test DC Shelf A")
-		self.shelf_b = create_test_warehouse("Test DC Shelf B")
-		self.consolidation_warehouse = create_test_warehouse("Test DC Ready to Ship")
 		frappe.db.set_single_value(
 			"Navgold Settings", "delivery_consolidation_warehouse", self.consolidation_warehouse
 		)
