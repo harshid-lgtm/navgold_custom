@@ -282,6 +282,11 @@ class TestDeliveryConsolidation(IntegrationTestCase):
 		cls.shelf_a = create_test_warehouse("Test DC Shelf A")
 		cls.shelf_b = create_test_warehouse("Test DC Shelf B")
 		cls.consolidation_warehouse = create_test_warehouse("Test DC Ready to Ship")
+		# The bare CI site ships "Nos" as whole-number-only; the restored local site this suite was
+		# written against has it fraction-tolerant. erpnext's legacy (feature-off) pick-list -> DN
+		# mapping rounds a pack-UOM conversion (2 Nos -> 0.333 pack -> 1.998 Nos), which errors only
+		# under whole-number Nos. Match the local config so the drift doesn't mask/break the mapping test.
+		frappe.db.set_value("UOM", "Nos", "must_be_whole_number", 0)
 
 	def setUp(self):
 		super().setUp()
