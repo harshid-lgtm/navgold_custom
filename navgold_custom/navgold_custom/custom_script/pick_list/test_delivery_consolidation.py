@@ -237,6 +237,26 @@ def submit_pick_list_for(sales_order):
 	return pick_list
 
 
+def submit_pick_list_via_app_flow(sales_order):
+	# Drives the app's real UI entry point (map_sales_orders_to_pick_list) exactly as pick_list.js calls
+	# it — JSON string args through the whitelisted method. This is the door users go through instead of
+	# erpnext's native Create→Pick List, which the typed create_pick_list mapper rejects (dict target_doc)
+	# on this frappe version.
+	from navgold_custom.navgold_custom.custom_script.pick_list.pick_list_api import (
+		map_sales_orders_to_pick_list,
+	)
+
+	pick_list = map_sales_orders_to_pick_list(
+		frappe.as_json([sales_order.name]), frappe.as_json(frappe.new_doc("Pick List").as_dict())
+	)
+	pick_list.save()
+	for location in pick_list.locations:
+		location.picked_qty = location.stock_qty
+	pick_list.save()
+	pick_list.submit()
+	return pick_list
+
+
 def get_consolidation_transfer(pick_list):
 	names = frappe.get_all("Stock Entry", filters={"pick_list": pick_list.name, "docstatus": 1}, pluck="name")
 	return frappe.get_doc("Stock Entry", names[0]) if names else None
@@ -599,6 +619,38 @@ class TestDeliveryConsolidation(IntegrationTestCase):
 		self.assertEqual(
 			get_total_stock(component_code), 0, "the whole bundle component must ship out to zero stock"
 		)
+		self.assertEqual(frappe.db.get_value("Pick List", pick_list.name, "status"), "Completed")
+
+	def test_bundle_split_via_app_map_flow_delivers_from_consolidation(self):
+		# Same split-bundle scenario, but created through the app's map_sales_orders_to_pick_list UI flow
+		# (the workaround for erpnext's broken native pick-list button). Proves that real entry point
+		# delivers a bundle whose component is split across two warehouses, end to end.
+		component_code = "TEST-DC-APPFLOW-COMPONENT"
+		bundle_code = "TEST-DC-APPFLOW-PARENT"
+		create_pack_item(component_code)
+		create_bundle_parent_item(bundle_code)
+		create_product_bundle(bundle_code, component_code, PACK_SIZE)
+		receive_stock(component_code, self.shelf_a, 2)
+		receive_stock(component_code, self.shelf_b, 4)
+		sales_order = create_bundle_sales_order(bundle_code, qty=1)
+
+		pick_list = submit_pick_list_via_app_flow(sales_order)
+
+		transfer = get_consolidation_transfer(pick_list)
+		self.assertIsNotNone(
+			transfer, "app-flow split-bundle pick must stage its component via a consolidation transfer"
+		)
+		self.assertEqual(sum(flt(row.qty) for row in transfer.items), 6)
+		for row in transfer.items:
+			self.assertEqual(row.t_warehouse, self.consolidation_warehouse)
+
+		delivery_note = get_draft_delivery_note(sales_order)
+		self.assertIsNotNone(delivery_note, "app flow must create a draft Delivery Note for the split bundle")
+		for packed_item in delivery_note.packed_items:
+			self.assertEqual(packed_item.warehouse, self.consolidation_warehouse)
+
+		delivery_note.submit()
+		self.assertEqual(get_total_stock(component_code), 0)
 		self.assertEqual(frappe.db.get_value("Pick List", pick_list.name, "status"), "Completed")
 
 	def test_batch_pack_split_delivers_both_batches(self):
