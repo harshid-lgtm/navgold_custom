@@ -64,7 +64,7 @@ def process_fba_fee_fetch():
 		try:
 			existing_cost = existing_costs.get(strategy_name)
 			if existing_cost:
-				if existing_cost["source"] != FEE_SOURCE:
+				if existing_cost["value_mode"] == "Manual":
 					skipped_manual += 1
 					continue
 				if flt(existing_cost["value"], 4) == flt(fee, 4):
@@ -87,7 +87,7 @@ def process_fba_fee_fetch():
 						"cost_type": FEE_COST_TYPE,
 						"cost_sub_type": FEE_COST_SUB_TYPE,
 						"value": fee,
-						"source": FEE_SOURCE,
+						"value_mode": "Auto",
 						"is_active": 1,
 						"rank": 1,
 					},
@@ -158,7 +158,7 @@ def get_existing_fba_fee_costs(strategy_names):
 	cost = DocType("Amazon Product Cost")
 	rows = (
 		frappe.qb.from_(cost)
-		.select(cost.name, cost.parent, cost.value, cost.source)
+		.select(cost.name, cost.parent, cost.value, cost.value_mode)
 		.where(
 			(cost.parenttype == "Amazon Product Strategy")
 			& (cost.parent.isin(strategy_names))
@@ -172,6 +172,6 @@ def get_existing_fba_fee_costs(strategy_names):
 		result[row["parent"]] = {
 			"name": row["name"],
 			"value": row["value"],
-			"source": row["source"],
+			"value_mode": row["value_mode"],
 		}
 	return result

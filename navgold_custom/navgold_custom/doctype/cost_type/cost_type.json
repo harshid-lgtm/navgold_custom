@@ -1,15 +1,22 @@
 {
 	"actions": [],
 	"allow_rename": 1,
-	"autoname": "field:cost_type_name",
 	"creation": "2026-01-20 10:00:00",
 	"doctype": "DocType",
 	"engine": "InnoDB",
 	"field_order": [
 		"cost_type_name",
-		"calculation_type",
+		"is_group",
+		"parent_cost_type",
 		"column_break_type",
-		"is_purchase_cost"
+		"calculation_type",
+		"is_purchase_cost",
+		"source",
+		"default_value",
+		"allowed_zero_valued",
+		"lft",
+		"rgt",
+		"old_parent"
 	],
 	"fields": [
 		{
@@ -18,40 +25,114 @@
 			"in_list_view": 1,
 			"in_standard_filter": 1,
 			"label": "Cost Type Name",
-			"reqd": 1,
-			"unique": 1
+			"reqd": 1
 		},
 		{
-			"description": "How this cost enters the price formula. Absolute: fixed amount in GBP. Relative: percentage of price. VAT: tax fraction removed from the denominator.",
-			"fieldname": "calculation_type",
-			"fieldtype": "Select",
+			"default": "0",
+			"fieldname": "is_group",
+			"fieldtype": "Check",
 			"in_list_view": 1,
 			"in_standard_filter": 1,
-			"label": "Calculation Type",
-			"options": "Absolute\nRelative\nVAT",
-			"reqd": 1
+			"label": "Is Group"
+		},
+		{
+			"fieldname": "parent_cost_type",
+			"fieldtype": "Link",
+			"ignore_user_permissions": 1,
+			"in_list_view": 1,
+			"label": "Parent Cost Type",
+			"options": "Cost Type"
 		},
 		{
 			"fieldname": "column_break_type",
 			"fieldtype": "Column Break"
 		},
 		{
+			"depends_on": "is_group",
+			"description": "How this cost enters the price formula. Absolute: fixed amount in GBP. Relative: percentage of price. VAT: tax fraction removed from the denominator.",
+			"fieldname": "calculation_type",
+			"fieldtype": "Select",
+			"in_list_view": 1,
+			"in_standard_filter": 1,
+			"label": "Calculation Type",
+			"options": "Absolute\nRelative\nVAT"
+		},
+		{
 			"default": "0",
+			"depends_on": "is_group",
 			"description": "COGS - eligible for auto-sync from Supplier Item Price",
 			"fieldname": "is_purchase_cost",
 			"fieldtype": "Check",
 			"in_standard_filter": 1,
 			"label": "Is Purchase Cost"
+		},
+		{
+			"depends_on": "eval:!doc.is_group",
+			"description": "The feed that owns this cost's value. Empty = self-contained (uses Default Value). Set = fed by that source; the value is derived, not entered.",
+			"fieldname": "source",
+			"fieldtype": "Select",
+			"in_standard_filter": 1,
+			"label": "Source",
+			"options": "\nSupplier-Sync\nPO-Sync\nFBA-Transfer\nAmazon-Sync\nItem-Tax-Sync\nShipping-Sync"
+		},
+		{
+			"default": "0",
+			"depends_on": "eval:!doc.is_group && !doc.source",
+			"description": "Self-contained value, used only when Source is empty. A fed cost (Source set) must leave this 0.",
+			"fieldname": "default_value",
+			"fieldtype": "Float",
+			"label": "Default Value",
+			"precision": "4"
+		},
+		{
+			"default": "0",
+			"description": "This cost is legitimately 0 (e.g. a VAT-exempt tax rate). The push guard will not block a strategy on a zero value for this cost type.",
+			"fieldname": "allowed_zero_valued",
+			"fieldtype": "Check",
+			"in_standard_filter": 1,
+			"label": "Allowed Zero Valued"
+		},
+		{
+			"fieldname": "lft",
+			"fieldtype": "Int",
+			"hidden": 1,
+			"label": "lft",
+			"no_copy": 1,
+			"print_hide": 1,
+			"read_only": 1,
+			"search_index": 1
+		},
+		{
+			"fieldname": "rgt",
+			"fieldtype": "Int",
+			"hidden": 1,
+			"label": "rgt",
+			"no_copy": 1,
+			"print_hide": 1,
+			"read_only": 1,
+			"search_index": 1
+		},
+		{
+			"fieldname": "old_parent",
+			"fieldtype": "Link",
+			"hidden": 1,
+			"ignore_user_permissions": 1,
+			"label": "old_parent",
+			"no_copy": 1,
+			"options": "Cost Type",
+			"print_hide": 1,
+			"report_hide": 1
 		}
 	],
 	"grid_page_length": 50,
 	"index_web_pages_for_search": 1,
+	"is_tree": 1,
 	"links": [],
-	"modified": "2026-02-02 02:20:21.028084",
-	"modified_by": "rahul@buildwithhussain.com",
+	"modified": "2026-07-02 00:00:00.000000",
+	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Cost Type",
-	"naming_rule": "By fieldname",
+	"nsm_parent_field": "parent_cost_type",
 	"owner": "Administrator",
 	"permissions": [
 		{

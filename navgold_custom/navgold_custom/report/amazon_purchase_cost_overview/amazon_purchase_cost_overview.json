@@ -16,14 +16,6 @@
 			"wildcard_filter": 0
 		},
 		{
-			"fieldname": "current_source",
-			"fieldtype": "Select",
-			"label": "Current Source",
-			"mandatory": 0,
-			"options": "\nManual\nSupplier-Sync\nPO-Sync\nFBA-Transfer\nAuto-Sync\nAmazon-Sync",
-			"wildcard_filter": 0
-		},
-		{
 			"fieldname": "proxy_sku",
 			"fieldtype": "Link",
 			"label": "Proxy SKU",

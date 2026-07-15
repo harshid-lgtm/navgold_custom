@@ -12,7 +12,6 @@
 		"default_value",
 		"column_break_item",
 		"is_active",
-		"source",
 		"rank"
 	],
 	"fields": [
@@ -21,6 +20,7 @@
 			"fieldtype": "Link",
 			"in_list_view": 1,
 			"label": "Cost Type",
+			"link_filters": "[[\"Cost Type\",\"is_group\",\"=\",1]]",
 			"options": "Cost Type",
 			"reqd": 1
 		},
@@ -29,7 +29,8 @@
 			"fieldtype": "Link",
 			"in_list_view": 1,
 			"label": "Cost Sub Type",
-			"options": "Cost Sub Type"
+			"link_filters": "[[\"Cost Type\",\"is_group\",\"=\",0]]",
+			"options": "Cost Type"
 		},
 		{
 			"default": "0",
@@ -57,14 +58,6 @@
 			"fieldtype": "Int",
 			"in_list_view": 1,
 			"label": "Rank"
-		},
-		{
-			"default": "Manual",
-			"description": "Manual: User-entered, Auto-Sync: Supplier price, PO-Sync: Purchase Order, Warehouse: Purchase Receipt, FBA-Transfer: Stock Entry to FBA",
-			"fieldname": "source",
-			"fieldtype": "Select",
-			"label": "Source",
-			"options": "Manual\nAuto-Sync\nSupplier-Sync\nPO-Sync\nFBA-Transfer\nAmazon-Sync\nItem-Tax-Sync\nShipping-Sync"
 		}
 	],
 	"grid_page_length": 50,

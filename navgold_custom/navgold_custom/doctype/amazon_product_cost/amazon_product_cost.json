@@ -11,15 +11,18 @@
 		"value",
 		"column_break_cost",
 		"is_active",
-		"source",
+		"value_mode",
 		"rank"
 	],
 	"fields": [
 		{
+			"fetch_from": "cost_sub_type.parent_cost_type",
+			"fetch_if_empty": 0,
 			"fieldname": "cost_type",
 			"fieldtype": "Link",
 			"in_list_view": 1,
 			"label": "Cost Type",
+			"link_filters": "[[\"Cost Type\",\"is_group\",\"=\",1]]",
 			"options": "Cost Type",
 			"reqd": 1
 		},
@@ -28,7 +31,8 @@
 			"fieldtype": "Link",
 			"in_list_view": 1,
 			"label": "Cost Sub Type",
-			"options": "Cost Sub Type"
+			"link_filters": "[[\"Cost Type\",\"is_group\",\"=\",0]]",
+			"options": "Cost Type"
 		},
 		{
 			"description": "For Manual purchase cost, enter the total cost per listing unit (pack or bundle), not the per-Nos unit cost.",
@@ -53,13 +57,13 @@
 			"read_only": 1
 		},
 		{
-			"default": "Manual",
-			"description": "Manual: User override (never auto-overwritten). Auto-Sync: Cost Sub Type default. Supplier-Sync: Supplier price. PO-Sync: Purchase Order. FBA-Transfer: Stock Entry. Amazon-Sync: Amazon SP-API FBA fee report. Item-Tax-Sync: Item master tax template rate. Shipping-Sync: weight-based shipping tier (FBA strategy excluded)",
-			"fieldname": "source",
+			"default": "Auto",
+			"description": "Auto: value is owned by a feed or the Cost Sub Type default (Value is read-only). Manual: select this to pin the value by hand; feeds never overwrite it.",
+			"fieldname": "value_mode",
 			"fieldtype": "Select",
 			"in_list_view": 1,
-			"label": "Source",
-			"options": "Manual\nSupplier-Sync\nPO-Sync\nAuto-Sync\nFBA-Transfer\nAmazon-Sync\nItem-Tax-Sync\nShipping-Sync"
+			"label": "Value Mode",
+			"options": "Auto\nManual"
 		},
 		{
 			"default": "1",

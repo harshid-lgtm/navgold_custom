@@ -8,6 +8,10 @@ SHIPPING_SUB_TYPES = ["Fulfillment Cost-Domestic Regular", "Fulfillment Cost-Ama
 
 
 def execute():
+	# The `source` field on this child table was removed in the cost-source remodel; nothing to do then.
+	if not frappe.get_meta("Amazon Cost Set Template Item").get_field("source"):
+		return
+
 	# Shipping cost lines on the cost-set templates were seeded as Manual, so newly generated
 	# pricing never picked up the weight-based tier. Point every shipping line at Shipping-Sync so
 	# the template applicator copies a self-syncing source onto new strategies.

@@ -59,15 +59,18 @@ def create_cost_sub_type():
 	if not frappe.db.exists("Cost Type", COST_TYPE_NAME):
 		cost_type = frappe.new_doc("Cost Type")
 		cost_type.cost_type_name = COST_TYPE_NAME
+		cost_type.is_group = 1
 		cost_type.calculation_type = "Absolute"
 		cost_type.is_purchase_cost = 1
 		cost_type.insert()
 
 	sub_type_name = f"{COST_TYPE_NAME}-Supplier"
-	if not frappe.db.exists("Cost Sub Type", sub_type_name):
-		sub_type = frappe.new_doc("Cost Sub Type")
-		sub_type.cost_type = COST_TYPE_NAME
-		sub_type.sub_type_name = "Supplier"
+	if not frappe.db.exists("Cost Type", sub_type_name):
+		sub_type = frappe.new_doc("Cost Type")
+		sub_type.is_group = 0
+		sub_type.parent_cost_type = COST_TYPE_NAME
+		sub_type.cost_type_name = "Supplier"
+		sub_type.source = "Supplier-Sync"
 		sub_type.insert()
 	return sub_type_name
 
@@ -93,7 +96,7 @@ def create_strategy(proxy_sku_name, strategy_name, cost_sub_type_name):
 		{
 			"cost_type": COST_TYPE_NAME,
 			"cost_sub_type": cost_sub_type_name,
-			"source": "Supplier-Sync",
+			"value_mode": "Auto",
 			"rank": 1,
 			"value": 0,
 		},
@@ -139,7 +142,7 @@ class TestBundleRateLogging(IntegrationTestCase):
 
 		supplier_sync_value = frappe.db.get_value(
 			"Amazon Product Cost",
-			{"parent": self.strategy_name, "source": "Supplier-Sync"},
+			{"parent": self.strategy_name, "cost_sub_type": self.cost_sub_type_name},
 			"value",
 		)
 		self.assertEqual(flt(supplier_sync_value), 0.0)
