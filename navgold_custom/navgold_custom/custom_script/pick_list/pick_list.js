@@ -2,11 +2,14 @@
 // For license information, please see license.txt
 frappe.ui.form.on('Pick List', {
 	refresh(frm) {
-		frm.add_custom_button(__('Get Items by Weight'), () => {
-			frm.events.open_weight_based_selection_dialog(frm);
-		});
+		if (frm.doc.docstatus === 0) {
+			frm.add_custom_button(__('Get Items by Weight'), () => {
+				frm.events.open_weight_based_selection_dialog(frm);
+			});
+		}
 
 		add_scan_buttons(frm);
+		setup_delivery_note_buttons(frm);
 
 		if (
 			frm.doc.docstatus === 1 &&
@@ -247,6 +250,26 @@ frappe.ui.form.on('Pick List', {
 		}
 	},
 });
+
+function setup_delivery_note_buttons(frm) {
+	if (frm.doc.docstatus !== 1) return;
+
+	frm.remove_custom_button(__('Delivery Note'), __('Create'));
+
+	const sales_orders = [
+		...new Set(
+			(frm.doc.locations || []).map((row) => row.sales_order).filter(Boolean),
+		),
+	];
+	if (!sales_orders.length) return;
+
+	frm.add_custom_button(__('Delivery Note'), () => {
+		frappe.set_route('List', 'Delivery Note', {
+			'Delivery Note Item.against_sales_order': ['in', sales_orders],
+			docstatus: ['!=', 2],
+		});
+	});
+}
 
 function add_scan_buttons(frm) {
 	if (frm.doc.docstatus !== 0) return;
