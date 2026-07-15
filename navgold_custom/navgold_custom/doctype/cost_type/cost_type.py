@@ -21,6 +21,7 @@ class CostType(NestedSet):
 	if TYPE_CHECKING:
 		from frappe.types import DF
 
+		allowed_zero_valued: DF.Check
 		calculation_type: DF.Literal["Absolute", "Relative", "VAT"]
 		cost_type_name: DF.Data
 		default_value: DF.Float

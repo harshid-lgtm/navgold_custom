@@ -245,6 +245,48 @@ class TestPushGuardHelper(IntegrationTestCase):
 
 		self.assertIn(strategy.name, violations)
 
+	def test_allowed_zero_valued_leaf_never_blocks(self):
+		# allowed_zero_valued clears every rule, even (a): a VAT-exempt rate is 0 by design.
+		vat_cost_type = f"{PERCENT_COST_TYPE} VAT"
+		strategy = build_guard_strategy(
+			[
+				healthy_purchase_row(),
+				{
+					"cost_type": vat_cost_type,
+					"cost_sub_type": ensure_cost_leaf(vat_cost_type, "Exempt", allowed_zero_valued=1),
+					"value": 0,
+					"value_mode": "Manual",
+					"rank": 1,
+					"is_active": 1,
+				},
+			]
+		)
+
+		violations = get_push_block_violations([strategy.name])
+
+		self.assertNotIn(strategy.name, violations)
+
+	def test_allowed_zero_valued_group_never_blocks(self):
+		# A row with no leaf falls back to its group's flag.
+		strategy = build_guard_strategy(
+			[
+				healthy_purchase_row(),
+				{
+					"cost_type": ensure_cost_group(
+						f"{PERCENT_COST_TYPE} Zero Allowed", "Relative", allowed_zero_valued=1
+					),
+					"value": 0,
+					"value_mode": "Manual",
+					"rank": 1,
+					"is_active": 1,
+				},
+			]
+		)
+
+		violations = get_push_block_violations([strategy.name])
+
+		self.assertNotIn(strategy.name, violations)
+
 	def test_healthy_strategy_is_pushable(self):
 		strategy = build_guard_strategy(
 			[

@@ -36,11 +36,17 @@ class TestCostSubTypeMap(IntegrationTestCase):
 		ensure_item(ITEM_CODE)
 
 	def test_map_mirrors_cost_type_leaves(self):
-		# The map is exactly the source/default_value config of every non-group Cost Type node.
+		# The map is exactly the value config of every non-group Cost Type node.
 		expected = {
-			row.name: {"source": row.source, "default_value": row.default_value}
+			row.name: {
+				"source": row.source,
+				"default_value": row.default_value,
+				"allowed_zero_valued": row.allowed_zero_valued,
+			}
 			for row in frappe.get_all(
-				"Cost Type", filters={"is_group": 0}, fields=["name", "source", "default_value"]
+				"Cost Type",
+				filters={"is_group": 0},
+				fields=["name", "source", "default_value", "allowed_zero_valued"],
 			)
 		}
 		self.assertEqual(get_cost_sub_type_map(), expected)

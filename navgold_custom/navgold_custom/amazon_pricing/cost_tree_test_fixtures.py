@@ -26,7 +26,7 @@ def ensure_item(item_code, **overrides):
 	return item.name
 
 
-def ensure_cost_group(name, calculation_type="Absolute", is_purchase_cost=0):
+def ensure_cost_group(name, calculation_type="Absolute", is_purchase_cost=0, allowed_zero_valued=0):
 	if frappe.db.exists("Cost Type", name):
 		return name
 	group = frappe.new_doc("Cost Type")
@@ -34,11 +34,12 @@ def ensure_cost_group(name, calculation_type="Absolute", is_purchase_cost=0):
 	group.is_group = 1
 	group.calculation_type = calculation_type
 	group.is_purchase_cost = is_purchase_cost
+	group.allowed_zero_valued = allowed_zero_valued
 	group.insert()
 	return group.name
 
 
-def ensure_cost_leaf(parent, leaf_name, source="", default_value=0):
+def ensure_cost_leaf(parent, leaf_name, source="", default_value=0, allowed_zero_valued=0):
 	full_name = f"{parent}-{leaf_name}"
 	if frappe.db.exists("Cost Type", full_name):
 		return full_name
@@ -48,6 +49,7 @@ def ensure_cost_leaf(parent, leaf_name, source="", default_value=0):
 	leaf.parent_cost_type = parent
 	leaf.source = source
 	leaf.default_value = default_value
+	leaf.allowed_zero_valued = allowed_zero_valued
 	leaf.insert()
 	return full_name
 
