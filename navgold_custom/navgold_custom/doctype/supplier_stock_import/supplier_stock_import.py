@@ -264,6 +264,7 @@ class SupplierStockImport(Document):
 			record.price = price
 		if supplier_part_number:
 			record.supplier_part_number = supplier_part_number
+		record.flags.bulk_entry = True
 		record.save(ignore_permissions=True)
 
 	def create_record(self, item, uom, stock_qty, price, supplier_part_number, barcode):
