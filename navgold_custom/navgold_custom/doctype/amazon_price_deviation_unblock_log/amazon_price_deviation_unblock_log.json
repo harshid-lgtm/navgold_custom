@@ -1,0 +1,107 @@
+{
+	"actions": [],
+	"allow_rename": 0,
+	"autoname": "format:APDU-{#####}",
+	"creation": "2026-07-20 10:00:00.000000",
+	"doctype": "DocType",
+	"engine": "InnoDB",
+	"field_order": [
+		"proxy_sku",
+		"unblocked_by",
+		"column_break_price",
+		"previous_selling_price",
+		"new_selling_price",
+		"section_break_band",
+		"min_price",
+		"column_break_band",
+		"max_price"
+	],
+	"fields": [
+		{
+			"fieldname": "proxy_sku",
+			"fieldtype": "Link",
+			"in_list_view": 1,
+			"in_standard_filter": 1,
+			"label": "Proxy SKU",
+			"options": "Proxy SKU",
+			"read_only": 1,
+			"reqd": 1
+		},
+		{
+			"fieldname": "unblocked_by",
+			"fieldtype": "Link",
+			"in_list_view": 1,
+			"in_standard_filter": 1,
+			"label": "Unblocked By",
+			"options": "User",
+			"read_only": 1,
+			"reqd": 1
+		},
+		{
+			"fieldname": "column_break_price",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "previous_selling_price",
+			"fieldtype": "Currency",
+			"in_list_view": 1,
+			"label": "Previous Selling Price",
+			"read_only": 1
+		},
+		{
+			"fieldname": "new_selling_price",
+			"fieldtype": "Currency",
+			"in_list_view": 1,
+			"label": "New Selling Price",
+			"read_only": 1,
+			"reqd": 1
+		},
+		{
+			"fieldname": "section_break_band",
+			"fieldtype": "Section Break",
+			"label": "Price Band At Unblock"
+		},
+		{
+			"description": "The calculated band the SKU was blocked against. Kept because the strategy recalculates over time.",
+			"fieldname": "min_price",
+			"fieldtype": "Currency",
+			"label": "Min Price",
+			"read_only": 1
+		},
+		{
+			"fieldname": "column_break_band",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "max_price",
+			"fieldtype": "Currency",
+			"label": "Max Price",
+			"read_only": 1
+		}
+	],
+	"grid_page_length": 50,
+	"index_web_pages_for_search": 1,
+	"links": [],
+	"modified": "2026-07-20 10:00:00.000000",
+	"modified_by": "Administrator",
+	"module": "Navgold Custom",
+	"name": "Amazon Price Deviation Unblock Log",
+	"naming_rule": "Expression",
+	"owner": "Administrator",
+	"permissions": [
+		{
+			"email": 1,
+			"export": 1,
+			"print": 1,
+			"read": 1,
+			"report": 1,
+			"role": "System Manager",
+			"share": 1
+		}
+	],
+	"row_format": "Dynamic",
+	"rows_threshold_for_grid_search": 50,
+	"sort_field": "creation",
+	"sort_order": "DESC",
+	"states": []
+}

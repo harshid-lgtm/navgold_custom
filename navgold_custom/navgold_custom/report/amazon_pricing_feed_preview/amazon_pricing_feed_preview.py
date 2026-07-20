@@ -85,6 +85,7 @@ def get_columns(channel: str) -> list[dict]:
 		{"label": _("Repricer Rule"), "fieldname": "repricer_rule", "fieldtype": "Data", "width": 160},
 		{"label": _("Status"), "fieldname": "status", "fieldtype": "Data", "width": 90},
 		{"label": _("Reason"), "fieldname": "reason", "fieldtype": "Data", "width": 360},
+		{"label": _("Unblock"), "fieldname": "unblock", "fieldtype": "Data", "width": 100},
 	]
 
 	if channel == "Amazon":
@@ -153,9 +154,15 @@ def enrich_sku_metadata(proxy_sku_names: list[str]) -> dict:
 		return {}
 
 	proxy_info = {
-		row.name: {"item": row.item, "is_fba": row.is_fba}
+		row.name: {
+			"item": row.item,
+			"is_fba": row.is_fba,
+			"current_selling_price": row.current_selling_price,
+		}
 		for row in frappe.get_all(
-			"Proxy SKU", filters={"name": ["in", proxy_sku_names]}, fields=["name", "item", "is_fba"]
+			"Proxy SKU",
+			filters={"name": ["in", proxy_sku_names]},
+			fields=["name", "item", "is_fba", "current_selling_price"],
 		)
 	}
 
@@ -186,6 +193,7 @@ def enrich_sku_metadata(proxy_sku_names: list[str]) -> dict:
 		metadata[proxy_sku] = {
 			"item": proxy_info.get(proxy_sku, {}).get("item"),
 			"is_fba": cint(proxy_info.get(proxy_sku, {}).get("is_fba")),
+			"current_selling_price": flt(proxy_info.get(proxy_sku, {}).get("current_selling_price")),
 			"active_strategy": active_strategy,
 			"repricer_rule": repricer_rule_map.get(active_strategy) or "",
 		}
@@ -202,6 +210,10 @@ def build_preview_row(
 	publishing_mode: str,
 	status: str,
 	reason: str,
+	can_unblock: int = 0,
+	min_price: float | None = None,
+	max_price: float | None = None,
+	current_price: float | None = None,
 ) -> dict:
 	return {
 		"proxy_sku": proxy_sku,
@@ -220,6 +232,10 @@ def build_preview_row(
 		"repricer_rule": repricer.get("repricer_rule"),
 		"status": status,
 		"reason": reason,
+		"can_unblock": can_unblock,
+		"min_price": min_price,
+		"max_price": max_price,
+		"current_price": current_price,
 	}
 
 
@@ -266,12 +282,19 @@ def get_live_preview_rows(filters: dict) -> tuple[list[dict], str | None]:
 
 	# Both channels share the same price guards.
 	name_to_proxy = {row.name: row.proxy_sku for row in pricing_records}
-	blocked_reasons = {}
-	deviation_blocked = partition_pricing_by_price_deviation(pricing_records)[1]
-	for record in deviation_blocked:
-		blocked_reasons.setdefault(record["proxy_sku"], []).append(record["reason"])
+	deviation_reasons = {}
+	for record in partition_pricing_by_price_deviation(pricing_records)[1]:
+		deviation_reasons[record["proxy_sku"]] = record["reason"]
+
+	other_reasons = {}
 	for pricing_name, reasons in collect_pricing_violations(pricing_names, include_deviation=False).items():
-		blocked_reasons.setdefault(name_to_proxy.get(pricing_name, pricing_name), []).extend(reasons)
+		other_reasons.setdefault(name_to_proxy.get(pricing_name, pricing_name), []).extend(reasons)
+
+	blocked_reasons = {}
+	for proxy_sku_name in set(deviation_reasons) | set(other_reasons):
+		blocked_reasons[proxy_sku_name] = other_reasons.get(proxy_sku_name, []) + (
+			[deviation_reasons[proxy_sku_name]] if proxy_sku_name in deviation_reasons else []
+		)
 
 	metadata = enrich_sku_metadata([row.proxy_sku for row in pricing_records])
 
@@ -305,6 +328,10 @@ def get_live_preview_rows(filters: dict) -> tuple[list[dict], str | None]:
 				publishing_mode=publishing_mode,
 				status="Blocked" if is_blocked else "OK",
 				reason="; ".join(blocked_reasons[proxy_sku]) if is_blocked else "",
+				can_unblock=cint(proxy_sku in deviation_reasons and proxy_sku not in other_reasons),
+				min_price=flt(pricing.current_min_price),
+				max_price=flt(pricing.current_max_price),
+				current_price=metadata.get(proxy_sku, {}).get("current_selling_price"),
 			)
 		)
 
