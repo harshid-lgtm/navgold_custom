@@ -2,20 +2,12 @@
 // For license information, please see license.txt
 
 frappe.ui.form.on('Bulk Reset Purchase Cost Source', {
-	setup(frm) {
-		frm.set_query('cost_sub_type', () => ({
-			filters: { cost_type: frm.doc.cost_type },
-		}));
-	},
 	refresh(frm) {
 		frm.disable_save();
 		frm.page.set_primary_action(__('Apply Reset'), async () => {
 			await apply_reset(frm);
 		});
 		add_completion_listener();
-	},
-	cost_type(frm) {
-		frm.set_value('cost_sub_type', null);
 	},
 });
 
@@ -24,21 +16,19 @@ async function apply_reset(frm) {
 		frappe.msgprint(__('Cost Type is required.'));
 		return;
 	}
-	if (!frm.doc.target_source) {
-		frappe.msgprint(__('Select a Target Source.'));
+	if (!frm.doc.target_mode) {
+		frappe.msgprint(__('Select a Target Mode.'));
 		return;
 	}
-	if (frm.doc.target_source === 'Manual' && is_null(frm.doc.manual_value)) {
-		frappe.msgprint(
-			__('Manual Value is required when Target Source is Manual.'),
-		);
+	if (frm.doc.target_mode === 'Manual' && is_null(frm.doc.manual_value)) {
+		frappe.msgprint(__('Manual Value is required when Target Mode is Manual.'));
 		return;
 	}
 
 	const confirmed = await navgold.confirm_dialog(
 		__(
-			"Enqueue background reset of '{0}' cost rows to source '{1}'? Prices will recompute after.",
-			[frm.doc.cost_type, frm.doc.target_source],
+			"Enqueue background reset of '{0}' cost rows to mode '{1}'? Prices will recompute after.",
+			[frm.doc.cost_type, frm.doc.target_mode],
 		),
 	);
 	if (!confirmed) return;
@@ -66,42 +56,19 @@ async function apply_reset(frm) {
 function add_completion_listener() {
 	frappe.realtime.off('bulk_reset_purchase_cost_complete');
 	frappe.realtime.on('bulk_reset_purchase_cost_complete', (payload) => {
-		const breakdown_rows = Object.entries(payload.target_breakdown || {})
-			.map(
-				([target, count]) =>
-					`<tr><td>${frappe.utils.escape_html(
-						target,
-					)}</td><td class="text-right">${count}</td></tr>`,
-			)
-			.join('');
-
-		const fba_note = payload.fba_fee_refresh_enqueued
-			? `<p>${__(
-					'An FBA fee refresh has been queued to repopulate the Amazon-Sync values.',
-			  )}</p>`
-			: '';
-
 		frappe.msgprint({
 			title: __('Bulk Reset Complete'),
 			indicator: 'green',
-			message: `
-				<p>${__(
-					'Matched {0}, updated {1}. {2} strategies enqueued for price recompute across {3} chunk(s).',
-					[
-						payload.matched,
-						payload.updated,
-						payload.enqueued_strategies,
-						payload.chunks_enqueued,
-					],
-				)}</p>
-				${fba_note}
-				<table class="table table-bordered">
-					<thead><tr><th>${__('Target Source')}</th><th class="text-right">${__(
-						'Rows',
-					)}</th></tr></thead>
-					<tbody>${breakdown_rows}</tbody>
-				</table>
-			`,
+			message: __(
+				"Reset {0} cost row(s) to mode '{1}' (matched {2}). {3} strategies enqueued for price recompute across {4} chunk(s).",
+				[
+					payload.updated,
+					payload.target_mode,
+					payload.matched,
+					payload.enqueued_strategies,
+					payload.chunks_enqueued,
+				],
+			),
 		});
 	});
 }

@@ -2,7 +2,8 @@
 # For license information, please see license.txt
 
 import frappe
-from frappe.utils import flt, fmt_money
+from frappe import _
+from frappe.utils import flt, fmt_money, now_datetime
 
 DROP_DIRECTIONS = {"Both", "Drops Only"}
 RISE_DIRECTIONS = {"Both", "Increases Only"}
@@ -93,6 +94,64 @@ def partition_pricing_by_price_deviation(pricing_records: list) -> tuple[list, l
 			allowed_records.append(record)
 
 	return allowed_records, blocked_records
+
+
+@frappe.whitelist()
+def unblock_price_deviation(proxy_sku: str, new_selling_price: float) -> str:
+	new_selling_price = flt(new_selling_price)
+	if new_selling_price <= 0:
+		frappe.throw(_("Selling price must be greater than zero."))
+
+	pricing = frappe.db.get_value(
+		"Amazon Product Pricing",
+		{"proxy_sku": proxy_sku, "is_active": 1},
+		["name", "current_min_price", "current_max_price"],
+		as_dict=True,
+	)
+	if not pricing:
+		frappe.throw(_("No active Amazon Product Pricing found for {0}.").format(proxy_sku))
+
+	min_price = flt(pricing.current_min_price)
+	max_price = flt(pricing.current_max_price)
+	if min_price <= 0 or max_price <= 0 or min_price > max_price:
+		frappe.throw(
+			_("{0} has an invalid price band ({1} - {2}). Fix the strategy before unblocking.").format(
+				proxy_sku, fmt_money(min_price, currency="GBP"), fmt_money(max_price, currency="GBP")
+			)
+		)
+
+	if not min_price <= new_selling_price <= max_price:
+		frappe.throw(
+			_("{0} is outside the price band {1} - {2}, so {3} would stay blocked.").format(
+				fmt_money(new_selling_price, currency="GBP"),
+				fmt_money(min_price, currency="GBP"),
+				fmt_money(max_price, currency="GBP"),
+				proxy_sku,
+			)
+		)
+
+	previous_selling_price = flt(frappe.db.get_value("Proxy SKU", proxy_sku, "current_selling_price"))
+
+	frappe.db.set_value(
+		"Proxy SKU",
+		proxy_sku,
+		{"current_selling_price": new_selling_price, "selling_price_updated_at": now_datetime()},
+	)
+
+	unblock_log = frappe.new_doc("Amazon Price Deviation Unblock Log")
+	unblock_log.update(
+		{
+			"proxy_sku": proxy_sku,
+			"unblocked_by": frappe.session.user,
+			"previous_selling_price": previous_selling_price,
+			"new_selling_price": new_selling_price,
+			"min_price": min_price,
+			"max_price": max_price,
+		}
+	)
+	unblock_log.insert(ignore_permissions=True)
+
+	return unblock_log.name
 
 
 def notify_price_deviation_blocks(blocked_records: list, channel_label: str):

@@ -129,7 +129,7 @@ def get_data(filters: dict) -> list[dict]:
 				"min_price": pricing.current_min_price,
 				"max_price": pricing.current_max_price,
 				"purchase_cost": purchase_cost.get("value"),
-				"cost_source": purchase_cost.get("source"),
+				"cost_source": purchase_cost.get("value_mode"),
 				"violations": "; ".join(violations),
 			}
 		)

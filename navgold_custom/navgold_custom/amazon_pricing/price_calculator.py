@@ -1,17 +1,40 @@
 # Copyright (c) 2026, developers@buildwithhussain.com and contributors
 # For license information, please see license.txt
 
-
 import frappe
 from frappe.utils.caching import redis_cache
 from frappe.utils.data import flt
 
+# The only two value modes a cost row can carry: Auto (sub-type resolves the feed) or Manual (pinned value).
+VALUE_MODES = {"Auto", "Manual"}
+
+
+@redis_cache()
+def get_cost_sub_type_map() -> dict:
+	# One query feeds every cost row's dispatch; the leaves are small reference data. Cost sub types are
+	# the leaf nodes (is_group=0) of the Cost Type tree — they carry where a value comes from.
+	return {
+		row.name: {
+			"source": row.source,
+			"default_value": row.default_value,
+			"allowed_zero_valued": row.allowed_zero_valued,
+		}
+		for row in frappe.get_all(
+			"Cost Type",
+			filters={"is_group": 0},
+			fields=["name", "source", "default_value", "allowed_zero_valued"],
+		)
+	}
+
 
 @redis_cache()
 def get_cost_type_map() -> dict:
+	# Groups (is_group=1) carry the calculation rule; leaves hold no calculation_type.
+	# is_purchase_cost and allowed_zero_valued ride along for the push-block rules in pricing_validators.
 	rows = frappe.get_all(
 		"Cost Type",
-		fields=["name", "calculation_type"],
+		filters={"is_group": 1},
+		fields=["name", "calculation_type", "is_purchase_cost", "allowed_zero_valued"],
 	)
 	return {row.name: row for row in rows}
 
@@ -38,12 +61,16 @@ def get_item_tax_rate(item_code: str) -> float:
 	return flt(rate)
 
 
-def get_cost_data(strategy, override_supplier_price: float | None = None) -> list[dict]:
+def get_cost_data(
+	strategy, override_supplier_price: float | None = None, cost_sub_type_map: dict | None = None
+) -> list[dict]:
 	active_costs = [cost for cost in strategy.costs if cost.is_active]
 	if not active_costs:
 		return []
 
 	cost_type_map = get_cost_type_map()
+	if cost_sub_type_map is None:
+		cost_sub_type_map = get_cost_sub_type_map()
 
 	cost_data = []
 	for cost in active_costs:
@@ -51,7 +78,9 @@ def get_cost_data(strategy, override_supplier_price: float | None = None) -> lis
 		if not cost_type:
 			continue
 
-		if cost.source == "Supplier-Sync" and override_supplier_price is not None:
+		sub_type_source = (cost_sub_type_map.get(cost.cost_sub_type) or {}).get("source")
+		is_supplier_fed = sub_type_source == "Supplier-Sync" and cost.value_mode != "Manual"
+		if is_supplier_fed and override_supplier_price is not None:
 			value = flt(override_supplier_price)
 		else:
 			value = flt(cost.value)
@@ -126,8 +155,12 @@ def calculate_single_price(numerator: float, denominator: float, margin: float, 
 	return initial_price
 
 
-def calculate_prices_with_purchase_cost_override(strategy, override_purchase_cost: float) -> dict:
-	cost_data = get_cost_data(strategy, override_supplier_price=flt(override_purchase_cost))
+def calculate_prices_with_purchase_cost_override(
+	strategy, override_purchase_cost: float, cost_sub_type_map: dict | None = None
+) -> dict:
+	cost_data = get_cost_data(
+		strategy, override_supplier_price=flt(override_purchase_cost), cost_sub_type_map=cost_sub_type_map
+	)
 	if not cost_data:
 		return {"min_price": 0, "max_price": 0}
 

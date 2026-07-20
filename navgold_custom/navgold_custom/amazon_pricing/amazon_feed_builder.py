@@ -14,6 +14,7 @@ from frappe.utils.data import cint, cstr, flt, orjson_dumps
 
 from navgold_custom.navgold_custom.amazon_pricing.price_calculator import (
 	calculate_prices_with_purchase_cost_override,
+	get_cost_sub_type_map,
 )
 from navgold_custom.navgold_custom.amazon_pricing.price_guard import (
 	partition_pricing_by_price_deviation,
@@ -76,6 +77,7 @@ def recompute_backorder_prices_with_fallback_supplier(
 	pricing,
 	resolved_suppliers: dict | None = None,
 	backorder_strategy_map: dict | None = None,
+	cost_sub_type_map: dict | None = None,
 ) -> dict | None:
 	if not pricing.get("backorder_strategy"):
 		return None
@@ -142,7 +144,9 @@ def recompute_backorder_prices_with_fallback_supplier(
 		except frappe.DoesNotExistError:
 			return None
 
-	recomputed = calculate_prices_with_purchase_cost_override(backorder_strategy, override_price)
+	recomputed = calculate_prices_with_purchase_cost_override(
+		backorder_strategy, override_price, cost_sub_type_map=cost_sub_type_map
+	)
 	recomputed_min = flt(recomputed.get("min_price", 0))
 	recomputed_max = flt(recomputed.get("max_price", 0))
 	if recomputed_min <= 0 or recomputed_max <= 0:
@@ -658,6 +662,9 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 		}
 	)
 	backorder_strategy_map = get_backorder_strategy_map(backorder_strategy_names)
+	# Fetched once here and threaded down: the recompute runs per pricing, and each redis_cache
+	# call is a Redis round trip, not a request-local memo.
+	cost_sub_type_map = get_cost_sub_type_map()
 
 	zero_stock_proxy_skus = get_zero_stock_proxy_skus()
 
@@ -703,6 +710,7 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 					pricing,
 					resolved_suppliers=resolved_suppliers,
 					backorder_strategy_map=backorder_strategy_map,
+					cost_sub_type_map=cost_sub_type_map,
 				)
 			except Exception as e:
 				frappe.log_error(

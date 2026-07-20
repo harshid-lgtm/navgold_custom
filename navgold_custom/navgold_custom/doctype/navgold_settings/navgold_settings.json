@@ -17,6 +17,7 @@
 		"min_shelf_expiry_in_days",
 		"section_break_oarw",
 		"subscribe_and_save_warehouse",
+		"delivery_consolidation_warehouse",
 		"stock_allocation_section",
 		"default_stock_allocation_warehouse",
 		"last_reports_section",
@@ -168,6 +169,13 @@
 			"fieldname": "subscribe_and_save_warehouse",
 			"fieldtype": "Link",
 			"label": "Subscribe and Save Warehouse",
+			"options": "Warehouse"
+		},
+		{
+			"description": "When set, submitting a Delivery pick list auto-transfers picked stock here (in stock UOM), reserves whole packs, and creates draft Delivery Notes sourcing from here. Leave empty to disable.",
+			"fieldname": "delivery_consolidation_warehouse",
+			"fieldtype": "Link",
+			"label": "Delivery Consolidation Warehouse",
 			"options": "Warehouse"
 		},
 		{

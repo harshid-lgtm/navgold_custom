@@ -3,6 +3,7 @@
 
 frappe.ui.form.on('Amazon Product Strategy', {
 	refresh(frm) {
+		refresh_value_editability(frm);
 		if (!frm.is_new()) {
 			frm.add_custom_button(
 				__('Apply Cost Template'),
@@ -34,10 +35,11 @@ frappe.ui.form.on('Amazon Product Strategy', {
 									row.value = cost.default_value;
 									row.is_active = cost.is_active;
 									row.rank = cost.rank;
-									row.source = cost.source;
+									row.value_mode = 'Auto';
 								}
 
 								frm.refresh_field('costs');
+								refresh_value_editability(frm);
 								frappe.msgprint(
 									__('Cost template applied. Please save to confirm.'),
 								);
@@ -103,11 +105,11 @@ frappe.ui.form.on('Amazon Product Strategy', {
 			cdn,
 		) => {
 			const row = locals[cdt][cdn];
-			return {
-				filters: {
-					cost_type: row.cost_type,
-				},
-			};
+			const filters = { is_group: 0 };
+			if (row.cost_type) {
+				filters.parent_cost_type = row.cost_type;
+			}
+			return { filters };
 		};
 
 		render_cost_filter_controls(frm);
@@ -121,6 +123,7 @@ frappe.ui.form.on('Amazon Product Strategy', {
 
 	costs_add(frm) {
 		apply_cost_filters(frm);
+		refresh_value_editability(frm);
 	},
 
 	costs_remove(frm) {
@@ -150,6 +153,29 @@ frappe.ui.form.on('Amazon Product Strategy', {
 		}
 	},
 });
+
+frappe.ui.form.on('Amazon Product Cost', {
+	value_mode(frm, cdt, cdn) {
+		const row = locals[cdt][cdn];
+		// Switching to Auto hands the value to the feed/default; drop the stale hand-set number.
+		if (row.value_mode === 'Auto' && row.value) {
+			frappe.model.set_value(cdt, cdn, 'value', 0);
+		}
+		refresh_value_editability(frm);
+	},
+});
+
+function refresh_value_editability(frm) {
+	// Value is editable only for Manual rows; Auto rows are owned by a feed or default. Set this
+	// per row here because read_only_depends_on evaluates unreliably per row in the inline grid.
+	const grid = frm.fields_dict.costs?.grid;
+	if (!grid?.grid_rows) {
+		return;
+	}
+	for (const grid_row of grid.grid_rows) {
+		grid_row.toggle_editable('value', grid_row.doc.value_mode !== 'Auto');
+	}
+}
 
 function render_cost_filter_controls(frm) {
 	const grid_field = frm.fields_dict.costs;
@@ -189,6 +215,7 @@ function render_cost_filter_controls(frm) {
 				fieldname: 'cost_type_filter',
 				label: __('Filter by Cost Type'),
 				options: 'Cost Type',
+				get_query: () => ({ filters: { is_group: 1 } }),
 				change: () => {
 					frm.cost_filter_state.cost_type = cstr(
 						frm.cost_type_filter_control.get_value(),
@@ -207,12 +234,12 @@ function render_cost_filter_controls(frm) {
 			df: {
 				fieldtype: 'Link',
 				fieldname: 'cost_sub_type_filter',
-				label: __('Filter by Cost Sub Type'),
-				options: 'Cost Sub Type',
+				label: __('Filter by Sub Type'),
+				options: 'Cost Type',
 				get_query: () => {
-					const filters = {};
+					const filters = { is_group: 0 };
 					if (frm.cost_filter_state.cost_type) {
-						filters.cost_type = frm.cost_filter_state.cost_type;
+						filters.parent_cost_type = frm.cost_filter_state.cost_type;
 					}
 					return { filters };
 				},

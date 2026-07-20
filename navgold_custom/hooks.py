@@ -318,9 +318,13 @@ doc_events = {
 	"Pick List": {
 		"before_save": "navgold_custom.navgold_custom.custom_script.pick_list.pick_list.sort_item_locations_by_walk_route",
 		"on_submit": [
-			"navgold_custom.navgold_custom.custom_script.pick_list.pick_list.auto_reserve_stock",
-			"navgold_custom.navgold_custom.custom_script.pick_list.pick_list.auto_create_delivery_notes",
+			"navgold_custom.navgold_custom.custom_script.pick_list.pick_list.on_submit",
 		],
+	},
+	"Delivery Note": {
+		"validate": "navgold_custom.navgold_custom.custom_script.delivery_note.delivery_note.align_consolidated_bundle_packed_warehouse",
+		"on_submit": "navgold_custom.navgold_custom.custom_script.delivery_note.delivery_note.on_submit",
+		"on_cancel": "navgold_custom.navgold_custom.custom_script.delivery_note.delivery_note.on_cancel",
 	},
 	"Stock Entry": {
 		"on_submit": "navgold_custom.navgold_custom.custom_script.stock_entry.stock_entry.update_proxy_sku_transfer_rates",

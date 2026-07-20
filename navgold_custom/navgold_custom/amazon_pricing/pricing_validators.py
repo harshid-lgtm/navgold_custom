@@ -5,9 +5,72 @@ import frappe
 from frappe.query_builder import DocType
 from frappe.utils.data import flt
 
+from navgold_custom.navgold_custom.amazon_pricing.price_calculator import (
+	get_cost_sub_type_map,
+	get_cost_type_map,
+)
 from navgold_custom.navgold_custom.amazon_pricing.price_guard import (
 	partition_pricing_by_price_deviation,
 )
+
+
+def is_zero_allowed(cost, cost_type: dict, cost_sub_type_map: dict) -> bool:
+	# The flag rides the Cost Type the row points at: its leaf, or the group when the row has no leaf.
+	if cost.cost_sub_type:
+		return bool((cost_sub_type_map.get(cost.cost_sub_type) or {}).get("allowed_zero_valued"))
+	return bool(cost_type.get("allowed_zero_valued"))
+
+
+def get_push_block_violations(strategy_names: list[str]) -> dict[str, list[str]]:
+	# Per-strategy push blockers driven purely by the active cost rows. A row blocks if it is
+	# (a) a percentage cost (Relative/VAT) sitting at 0 — percentages are never legitimately 0;
+	# (b) a fed purchase cost (is_purchase_cost, sub-type source set) on Auto resolving to 0 — unsynced; or
+	# (c) a defaulted cost (no sub-type source) on Auto sitting at 0 — the leaf default is missing/0.
+	# FED absolute non-purchase zeros (e.g. FBA shipping resolving to 0) are allowed, as is any
+	# Manual 0 — pinning a zero by hand is the seller's call — and any allowed_zero_valued cost type.
+	if not strategy_names:
+		return {}
+
+	cost_type_map = get_cost_type_map()
+	cost_sub_type_map = get_cost_sub_type_map()
+
+	cost_rows = frappe.get_all(
+		"Amazon Product Cost",
+		filters={
+			"parenttype": "Amazon Product Strategy",
+			"parent": ["in", strategy_names],
+			"is_active": 1,
+		},
+		fields=["parent", "cost_type", "cost_sub_type", "value", "value_mode"],
+		order_by="idx asc",
+	)
+
+	violations: dict[str, list[str]] = {}
+	for cost in cost_rows:
+		cost_type = cost_type_map.get(cost.cost_type)
+		if not cost_type or is_zero_allowed(cost, cost_type, cost_sub_type_map):
+			continue
+
+		value = flt(cost.value)
+		sub_type_label = cost.cost_sub_type or cost.cost_type
+		calculation_type = cost_type.calculation_type
+
+		if calculation_type in ("Relative", "VAT") and value == 0:
+			violations.setdefault(cost.parent, []).append(
+				f"{sub_type_label}: zero percentage cost ({calculation_type})"
+			)
+			continue
+
+		if cost.value_mode == "Auto" and value == 0:
+			sub_type_source = (cost_sub_type_map.get(cost.cost_sub_type) or {}).get("source")
+			if not sub_type_source:
+				violations.setdefault(cost.parent, []).append(f"{sub_type_label}: defaulted cost at 0")
+			elif cost_type.get("is_purchase_cost"):
+				violations.setdefault(cost.parent, []).append(
+					f"{sub_type_label}: unsynced purchase cost (source {sub_type_source})"
+				)
+
+	return violations
 
 
 def get_purchase_cost_map(strategy_names: list[str]) -> dict[str, dict]:
@@ -20,7 +83,7 @@ def get_purchase_cost_map(strategy_names: list[str]) -> dict[str, dict]:
 		frappe.qb.from_(cost)
 		.join(cost_type)
 		.on(cost.cost_type == cost_type.name)
-		.select(cost.parent, cost.value, cost.source)
+		.select(cost.parent, cost.value, cost.value_mode, cost.cost_type, cost.cost_sub_type)
 		.where(
 			(cost.parenttype == "Amazon Product Strategy")
 			& (cost.parent.isin(strategy_names))
@@ -30,7 +93,19 @@ def get_purchase_cost_map(strategy_names: list[str]) -> dict[str, dict]:
 		)
 	).run(as_dict=True)
 
-	return {row.parent: {"value": flt(row.value), "source": row.source} for row in rows}
+	cost_type_map = get_cost_type_map()
+	cost_sub_type_map = get_cost_sub_type_map()
+
+	return {
+		row.parent: {
+			"value": flt(row.value),
+			"value_mode": row.value_mode,
+			"allowed_zero_valued": is_zero_allowed(
+				row, cost_type_map.get(row.cost_type) or {}, cost_sub_type_map
+			),
+		}
+		for row in rows
+	}
 
 
 def collect_pricing_violations(
@@ -64,6 +139,7 @@ def collect_pricing_violations(
 			)
 		}
 	purchase_cost_map = get_purchase_cost_map(strategy_names)
+	push_block_map = get_push_block_violations(strategy_names)
 
 	violations: dict[str, list[str]] = {}
 
@@ -83,12 +159,16 @@ def collect_pricing_violations(
 			if purchase_cost is None:
 				add_violation(pricing.name, "No active purchase cost row on the active strategy")
 			elif purchase_cost["value"] <= 0:
-				add_violation(
-					pricing.name,
-					f"Purchase cost is {purchase_cost['value']:g} (source: {purchase_cost['source']})",
-				)
+				if not purchase_cost["allowed_zero_valued"]:
+					add_violation(
+						pricing.name,
+						f"Purchase cost is {purchase_cost['value']:g} (value mode: {purchase_cost['value_mode']})",
+					)
 			else:
 				purchase_cost_value = flt(purchase_cost["value"])
+
+			for reason in push_block_map.get(pricing.active_strategy, []):
+				add_violation(pricing.name, reason)
 
 		min_price = flt(pricing.current_min_price)
 		max_price = flt(pricing.current_max_price)

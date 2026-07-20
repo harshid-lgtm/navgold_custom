@@ -81,7 +81,7 @@ class TestGoliveReports(IntegrationTestCase):
 	def test_readiness_row_blocked_without_pricing(self):
 		proxy = frappe._dict(name="PROXY-X", item="ITEM-X", is_fba=0, asin="B000TEST01")
 
-		row = build_readiness_row(proxy, None, {}, {})
+		row = build_readiness_row(proxy, None, {}, {}, {})
 
 		self.assertEqual(row["status"], "BLOCKED")
 		self.assertIn("no Amazon Product Pricing", row["issues"])
@@ -101,7 +101,7 @@ class TestGoliveReports(IntegrationTestCase):
 		}
 		purchase_cost_map = {"PROXY-Y-FBA": 5.0}
 
-		row = build_readiness_row(proxy, pricing, strategy_map, purchase_cost_map)
+		row = build_readiness_row(proxy, pricing, strategy_map, purchase_cost_map, {})
 
 		self.assertEqual(row["status"], "READY")
 		self.assertEqual(row["issues"], "")

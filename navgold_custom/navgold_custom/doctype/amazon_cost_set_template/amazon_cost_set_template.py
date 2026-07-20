@@ -56,7 +56,7 @@ class AmazonCostSetTemplate(Document):
 					"value": template_cost.default_value,
 					"is_active": template_cost.is_active,
 					"rank": template_cost.rank,
-					"source": "Manual",
+					"value_mode": "Auto",
 				},
 			)
 

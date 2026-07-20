@@ -23,6 +23,7 @@ def create_purchase_cost_type():
 
 	cost_type = frappe.new_doc("Cost Type")
 	cost_type.cost_type_name = CTRL_COST_TYPE
+	cost_type.is_group = 1
 	cost_type.calculation_type = "Absolute"
 	cost_type.is_purchase_cost = 1
 	cost_type.insert()
@@ -65,7 +66,7 @@ def build_strategy(proxy_sku, min_margin=10, max_margin=20, purchase_cost_value=
 		{
 			"cost_type": CTRL_COST_TYPE,
 			"value": purchase_cost_value,
-			"source": "Manual",
+			"value_mode": "Manual",
 			"rank": 1,
 			"is_active": 1,
 		},
