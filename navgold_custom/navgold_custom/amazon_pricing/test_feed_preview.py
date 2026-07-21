@@ -1,6 +1,8 @@
 # Copyright (c) 2026, developers@buildwithhussain.com and Contributors
 # See license.txt
 
+from unittest.mock import patch
+
 from frappe.tests import IntegrationTestCase
 
 from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import SHIPPING_GROUPS
@@ -41,3 +43,23 @@ class TestFeedPreviewShippingGroup(IntegrationTestCase):
 		# An FBA message carries no merchant_shipping_group patch.
 		values = feed_preview.extract_amazon_values({"sku": "TEST-SKU", "patches": []})
 		self.assertIsNone(values["shipping_group"])
+
+
+class TestFeedPreviewStatusFilter(IntegrationTestCase):
+	def run_execute(self, status):
+		preview_rows = [
+			{"proxy_sku": "OK-SKU", "status": "OK"},
+			{"proxy_sku": "BLOCKED-SKU", "status": "Blocked"},
+		]
+		with patch.object(feed_preview, "get_live_preview_rows", return_value=(preview_rows, None)):
+			_columns, rows, _message = feed_preview.execute({"status": status})
+		return [row["proxy_sku"] for row in rows]
+
+	def test_blocked_status_keeps_only_blocked_rows(self):
+		self.assertEqual(self.run_execute("Blocked"), ["BLOCKED-SKU"])
+
+	def test_unblocked_status_drops_blocked_rows(self):
+		self.assertEqual(self.run_execute("Unblocked"), ["OK-SKU"])
+
+	def test_empty_status_returns_all_rows(self):
+		self.assertEqual(self.run_execute(""), ["OK-SKU", "BLOCKED-SKU"])
