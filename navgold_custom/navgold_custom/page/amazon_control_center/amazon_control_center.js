@@ -171,6 +171,7 @@ class AmazonControlCenter {
 		tables.append(this.format_offenders_table(readiness.top_offenders));
 		tables.append(this.format_below_min_table(data.below_min));
 		tables.append(this.format_feeds_table(data.feeds.recent));
+		tables.append(this.format_canary_table(data.outbound_scope));
 		tables.append(this.format_fba_stock_table(data.fba_stock));
 
 		this.body.append(this.format_nav_panel());
@@ -411,6 +412,9 @@ class AmazonControlCenter {
 
 	format_stat_cards(data) {
 		const readiness = data.readiness;
+		const scope = data.outbound_scope;
+		const push_status = data.push_status;
+		const feed_window = data.feeds.window_hours;
 		const orders = this.summary_to_map(data.orders.summary);
 		const open_failed = orders['Open Failed Syncs'];
 		const minutes_since_order = orders['Minutes Since Last Amazon Order'];
@@ -424,11 +428,34 @@ class AmazonControlCenter {
 				'Ready to push',
 				readiness.ok_total,
 				readiness.ok_total === readiness.total_active ? 'good' : 'neutral',
+				'readiness — not what actually ships',
 			),
 			this.format_card(
 				'Would be BLOCKED',
 				readiness.blocked_total,
 				readiness.blocked_total ? 'bad' : 'good',
+			),
+			this.format_card(
+				'Amazon · Stock',
+				scope.amazon_stock,
+				scope.amazon_stock ? 'good' : 'neutral',
+				push_status.amazon_stock_live ? 'SKUs sending stock' : 'stock OFF',
+			),
+			this.format_card(
+				'Amazon · Price',
+				scope.amazon_price,
+				scope.amazon_price ? 'good' : 'neutral',
+				push_status.amazon_prices_live
+					? 'prices to Amazon'
+					: `0 — ${data.switches.amazon_publishing_mode}`,
+			),
+			this.format_card(
+				'Repricer · Price',
+				scope.repricer_price,
+				scope.repricer_price ? 'good' : 'neutral',
+				scope.canary_mode === 'Selected'
+					? `${scope.canary_total} canary SKUs`
+					: 'all ready prices',
 			),
 			this.format_card(
 				`Below-min sales (${data.below_min.days_back}d)`,
@@ -442,7 +469,7 @@ class AmazonControlCenter {
 				'Feed errors',
 				data.feeds.status_counts.Error,
 				data.feeds.status_counts.Error ? 'bad' : 'good',
-				`${data.feeds.status_counts.Pending} pending`,
+				`${data.feeds.status_counts.Pending} pending · last ${feed_window}h`,
 			),
 			this.format_card(
 				'Oldest open feed',
@@ -450,7 +477,7 @@ class AmazonControlCenter {
 					? `${data.feeds.oldest_open_minutes}m`
 					: '—',
 				data.feeds.oldest_open_minutes > 30 ? 'bad' : 'good',
-				`${data.feeds.status_counts.Submitted} in flight`,
+				`${data.feeds.status_counts.Submitted} in flight · last ${feed_window}h`,
 			),
 			this.format_card(
 				'Open failed order syncs',
@@ -495,7 +522,7 @@ class AmazonControlCenter {
 			)
 			.join('');
 		return $(
-			`<div class="acc-section"><div class="acc-section-title">Why SKUs are blocked</div><div class="acc-chips">${items}</div></div>`,
+			`<div class="acc-section"><div class="acc-section-title">Why SKUs are blocked</div><div class="acc-chips">${items}</div><div class="acc-card-sub" style="margin-top:.4rem">A SKU can carry more than one blocker, so these add up to more than the blocked total.</div></div>`,
 		);
 	}
 
@@ -564,6 +591,31 @@ class AmazonControlCenter {
 			['Item · UOM', 'Amazon SKU(s)', 'Qty', 'Revenue', 'Orders'],
 			body,
 			'Amazon Top Selling SKU',
+		);
+	}
+
+	format_canary_table(scope) {
+		// Only "Publish Selected Prices Only" has an enumerable canary set; "Publish All" is the
+		// whole catalog, so there is nothing to single out.
+		if (scope.canary_mode !== 'Selected') return $('');
+		const rows = scope.canary_skus || [];
+		const body = rows
+			.map(
+				(row) => `
+			<tr>
+				<td><a href="/app/proxy-sku/${encodeURIComponent(
+					row.proxy_sku,
+				)}">${frappe.utils.escape_html(row.proxy_sku || '')}</a></td>
+				<td>${frappe.utils.escape_html(row.item || '')}</td>
+				<td>${frappe.utils.escape_html(row.asin || '')}</td>
+				<td>${row.is_fba ? 'FBA' : 'MFN'}</td>
+			</tr>`,
+			)
+			.join('');
+		return this.format_table_block(
+			`Canary price SKUs (${scope.canary_total})`,
+			['Proxy SKU', 'Item', 'ASIN', 'Channel'],
+			body,
 		);
 	}
 
