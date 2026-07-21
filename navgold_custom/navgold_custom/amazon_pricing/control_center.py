@@ -6,6 +6,7 @@ from frappe import _
 from frappe.utils.data import add_to_date, cint, flt, get_datetime, now_datetime
 
 from navgold_custom.navgold_custom.amazon_pricing.alerts import alert_freeze_toggled
+from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import get_allowed_pricing_proxy_skus
 from navgold_custom.navgold_custom.report.amazon_fba_stock_sync_health.amazon_fba_stock_sync_health import (
 	get_data_and_summary as get_fba_stock_sync_health,
 )
@@ -130,17 +131,68 @@ def categorize_violation(text: str) -> set:
 	return categories
 
 
-def get_oldest_open_feed_minutes() -> int:
-	# A feed stuck Pending/Submitted for hours is a silent stall.
+def get_oldest_open_feed_minutes(cutoff) -> int:
+	# A recent feed stuck Pending/Submitted for hours is a silent stall. Feeds older than the health
+	# window are almost always un-reconciled orphans (there is no feed-status poller yet), not a live
+	# problem — so the window keeps them out of the current-health signal.
 	oldest = frappe.db.get_value(
 		"Amazon Pricing Submission Log",
-		{"status": ["in", ["Pending", "Submitted"]]},
+		{"status": ["in", ["Pending", "Submitted"]], "creation": [">=", cutoff]},
 		"creation",
 		order_by="creation asc",
 	)
 	if not oldest:
 		return 0
 	return cint((now_datetime() - get_datetime(oldest)).total_seconds() / 60)
+
+
+def get_outbound_scope(push_status: dict, readiness_rows: list) -> dict:
+	# Reuse the exact allowlist the feed builder applies at push time so the tiles match what
+	# actually leaves the building, not the catalog-wide readiness count.
+	allowed_pricing_proxy_skus = get_allowed_pricing_proxy_skus()
+	scope = compute_outbound_scope(push_status, readiness_rows, allowed_pricing_proxy_skus)
+	scope["canary_skus"] = get_canary_sku_rows(allowed_pricing_proxy_skus)
+	return scope
+
+
+def compute_outbound_scope(
+	push_status: dict, readiness_rows: list, allowed_pricing_proxy_skus: set | None
+) -> dict:
+	ready_proxy_skus = {
+		row["proxy_sku"] for row in readiness_rows if row.get("proxy_sku") and not row.get("violations")
+	}
+	if allowed_pricing_proxy_skus is not None:
+		price_ready = ready_proxy_skus & allowed_pricing_proxy_skus
+		canary_total = len(allowed_pricing_proxy_skus)
+		canary_mode = "Selected"
+	else:
+		price_ready = ready_proxy_skus
+		canary_total = len(ready_proxy_skus)
+		canary_mode = "All"
+
+	total_active = len(readiness_rows)
+	return {
+		# Stock is sent for every active SKU regardless of price validity — a stock-only feed keeps
+		# updating stock even for SKUs whose pricing is currently invalid.
+		"amazon_stock": total_active if push_status["amazon_stock_live"] else 0,
+		"amazon_price": len(price_ready) if push_status["amazon_prices_live"] else 0,
+		"repricer_price": len(price_ready) if push_status["repricer_live"] else 0,
+		"canary_total": canary_total,
+		"canary_mode": canary_mode,
+	}
+
+
+def get_canary_sku_rows(allowed_pricing_proxy_skus: set | None) -> list:
+	# Only the "Publish Selected Prices Only" allowlist is small enough to enumerate; "Publish All"
+	# is the whole catalog, so there is no canary subset to show.
+	if not allowed_pricing_proxy_skus:
+		return []
+	return frappe.get_all(
+		"Proxy SKU",
+		filters={"name": ["in", list(allowed_pricing_proxy_skus)]},
+		fields=["name as proxy_sku", "item", "asin", "is_fba"],
+		order_by="name asc",
+	)
 
 
 def get_top_selling_skus(days_back: int = 30, top_n: int = 10) -> list:
@@ -199,10 +251,13 @@ def get_control_center_data(below_min_days: int = 3, top_n: int = 30, top_seller
 		:top_n
 	]
 
+	window_hours = cint(settings.get("feed_health_window_hours")) or 48
+	feed_health_cutoff = add_to_date(now_datetime(), hours=-window_hours)
 	feed_status_counts = {
-		"Pending": frappe.db.count("Amazon Pricing Submission Log", {"status": "Pending"}),
-		"Submitted": frappe.db.count("Amazon Pricing Submission Log", {"status": "Submitted"}),
-		"Error": frappe.db.count("Amazon Pricing Submission Log", {"status": "Error"}),
+		status: frappe.db.count(
+			"Amazon Pricing Submission Log", {"status": status, "creation": [">=", feed_health_cutoff]}
+		)
+		for status in ("Pending", "Submitted", "Error")
 	}
 	recent_feeds = frappe.get_all(
 		"Amazon Pricing Submission Log",
@@ -248,8 +303,10 @@ def get_control_center_data(below_min_days: int = 3, top_n: int = 30, top_seller
 		"feeds": {
 			"status_counts": feed_status_counts,
 			"recent": recent_feeds,
-			"oldest_open_minutes": get_oldest_open_feed_minutes(),
+			"oldest_open_minutes": get_oldest_open_feed_minutes(feed_health_cutoff),
+			"window_hours": window_hours,
 		},
+		"outbound_scope": get_outbound_scope(push_status, readiness_rows),
 		"orders": {"summary": order_summary},
 		"fba_stock": {"summary": fba_stock_summary, "rows": fba_stock_rows},
 	}
