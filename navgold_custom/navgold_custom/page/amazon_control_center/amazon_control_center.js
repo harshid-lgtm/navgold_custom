@@ -439,7 +439,13 @@ class AmazonControlCenter {
 				'Amazon · Stock',
 				scope.amazon_stock,
 				scope.amazon_stock ? 'good' : 'neutral',
-				push_status.amazon_stock_live ? 'SKUs sending stock' : 'stock OFF',
+				!push_status.amazon_stock_live
+					? 'stock OFF'
+					: scope.amazon_stock_suppressed
+					  ? `SKUs sending stock · ${scope.amazon_stock_suppressed} zeroed`
+					  : scope.canary_mode === 'Selected'
+						  ? 'SKUs sending stock (canary)'
+						  : 'SKUs sending stock',
 			),
 			this.format_card(
 				'Amazon · Price',
@@ -595,8 +601,7 @@ class AmazonControlCenter {
 	}
 
 	format_canary_table(scope) {
-		// Only "Publish Selected Prices Only" has an enumerable canary set; "Publish All" is the
-		// whole catalog, so there is nothing to single out.
+		// Publish-All is the whole catalog — no canary subset to single out.
 		if (scope.canary_mode !== 'Selected') return $('');
 		const rows = scope.canary_skus || [];
 		const body = rows
