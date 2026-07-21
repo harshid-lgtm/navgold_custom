@@ -54,6 +54,7 @@
 		"last_strategy_refresh_at",
 		"last_pricing_submit_at",
 		"last_repricer_submit_at",
+		"feed_health_window_hours",
 		"price_deviation_guard_section",
 		"price_change_threshold_percent",
 		"price_change_block_direction",
@@ -408,6 +409,14 @@
 			"fieldtype": "Datetime",
 			"label": "Last Repricer Submit At",
 			"read_only": 1
+		},
+		{
+			"default": "48",
+			"description": "Control Center feed-health tiles (feed errors, oldest open feed) only count submission logs created within this many hours, so stale pre-cutover feeds stop dominating the current-health view.",
+			"fieldname": "feed_health_window_hours",
+			"fieldtype": "Int",
+			"label": "Feed Health Window (Hours)",
+			"non_negative": 1
 		},
 		{
 			"fieldname": "price_deviation_guard_section",
