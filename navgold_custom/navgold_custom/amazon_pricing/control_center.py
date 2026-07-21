@@ -299,13 +299,19 @@ def contain_now() -> dict:
 
 	doc = frappe.get_doc("Amazon Pricing Snapshot", snapshot["name"])
 	revert_result = doc.revert_prices()
-	repricer_result = doc.publish("Repricer")
-	amazon_result = doc.publish("Amazon")
 
-	frappe.db.set_single_value("Navgold Settings", "freeze_amazon_outbound", 1)
+	# When the circuit breaker has already tripped, outbound is frozen and the corrective
+	# publish would be skipped at the transport — lift the freeze for exactly this push and
+	# always end frozen, even if a publish raises.
+	frappe.db.set_single_value("Navgold Settings", "freeze_amazon_outbound", 0)
 	frappe.clear_cache(doctype="Navgold Settings")
-
-	alert_freeze_toggled(1)
+	try:
+		repricer_result = doc.publish("Repricer")
+		amazon_result = doc.publish("Amazon")
+	finally:
+		frappe.db.set_single_value("Navgold Settings", "freeze_amazon_outbound", 1)
+		frappe.clear_cache(doctype="Navgold Settings")
+		alert_freeze_toggled(1)
 
 	return {
 		"snapshot": snapshot["name"],
