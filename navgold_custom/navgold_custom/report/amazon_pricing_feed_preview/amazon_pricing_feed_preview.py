@@ -47,6 +47,12 @@ def execute(filters: dict | None = None):
 	else:
 		rows, message = get_live_preview_rows(filters)
 
+	status_filter = filters.get("status")
+	if status_filter == "Blocked":
+		rows = [row for row in rows if row["status"] == "Blocked"]
+	elif status_filter == "Unblocked":
+		rows = [row for row in rows if row["status"] != "Blocked"]
+
 	return get_columns(channel), rows, message
 
 

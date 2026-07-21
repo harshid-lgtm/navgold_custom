@@ -25,6 +25,12 @@ frappe.query_reports['Amazon Pricing Feed Preview'] = {
 			options: 'Proxy SKU',
 		},
 		{
+			fieldname: 'status',
+			label: __('Status'),
+			fieldtype: 'Select',
+			options: '\nBlocked\nUnblocked',
+		},
+		{
 			fieldname: 'refresh_strategies',
 			label: __('Refresh Strategies (Live Preview only)'),
 			fieldtype: 'Check',
