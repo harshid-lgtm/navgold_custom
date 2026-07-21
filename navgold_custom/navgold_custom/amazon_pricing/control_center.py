@@ -6,7 +6,10 @@ from frappe import _
 from frappe.utils.data import add_to_date, cint, flt, get_datetime, now_datetime
 
 from navgold_custom.navgold_custom.amazon_pricing.alerts import alert_freeze_toggled
-from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import get_allowed_pricing_proxy_skus
+from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import (
+	get_allowed_pricing_proxy_skus,
+	get_zero_stock_proxy_skus,
+)
 from navgold_custom.navgold_custom.report.amazon_fba_stock_sync_health.amazon_fba_stock_sync_health import (
 	get_data_and_summary as get_fba_stock_sync_health,
 )
@@ -132,9 +135,8 @@ def categorize_violation(text: str) -> set:
 
 
 def get_oldest_open_feed_minutes(cutoff) -> int:
-	# A recent feed stuck Pending/Submitted for hours is a silent stall. Feeds older than the health
-	# window are almost always un-reconciled orphans (there is no feed-status poller yet), not a live
-	# problem — so the window keeps them out of the current-health signal.
+	# Feeds older than the window are un-reconciled orphans (no feed-status poller yet), not a live
+	# stall, so the cutoff keeps them out of the current-health signal.
 	oldest = frappe.db.get_value(
 		"Amazon Pricing Submission Log",
 		{"status": ["in", ["Pending", "Submitted"]], "creation": [">=", cutoff]},
@@ -147,34 +149,46 @@ def get_oldest_open_feed_minutes(cutoff) -> int:
 
 
 def get_outbound_scope(push_status: dict, readiness_rows: list) -> dict:
-	# Reuse the exact allowlist the feed builder applies at push time so the tiles match what
-	# actually leaves the building, not the catalog-wide readiness count.
 	allowed_pricing_proxy_skus = get_allowed_pricing_proxy_skus()
-	scope = compute_outbound_scope(push_status, readiness_rows, allowed_pricing_proxy_skus)
+	zero_stock_proxy_skus = get_zero_stock_proxy_skus()
+	scope = compute_outbound_scope(
+		push_status, readiness_rows, allowed_pricing_proxy_skus, zero_stock_proxy_skus
+	)
 	scope["canary_skus"] = get_canary_sku_rows(allowed_pricing_proxy_skus)
 	return scope
 
 
 def compute_outbound_scope(
-	push_status: dict, readiness_rows: list, allowed_pricing_proxy_skus: set | None
+	push_status: dict,
+	readiness_rows: list,
+	allowed_pricing_proxy_skus: set | None,
+	zero_stock_proxy_skus: set | None,
 ) -> dict:
+	# The canary allowlist gates the whole feed, stock included (submit_active_pricing filters to it
+	# before build_pricing_feed), so it bounds stock too — the single-writer boundary that leaves the
+	# old system owning every listing outside canary.
+	active_proxy_skus = {row["proxy_sku"] for row in readiness_rows if row.get("proxy_sku")}
 	ready_proxy_skus = {
 		row["proxy_sku"] for row in readiness_rows if row.get("proxy_sku") and not row.get("violations")
 	}
 	if allowed_pricing_proxy_skus is not None:
+		stock_scope = active_proxy_skus & allowed_pricing_proxy_skus
 		price_ready = ready_proxy_skus & allowed_pricing_proxy_skus
 		canary_total = len(allowed_pricing_proxy_skus)
 		canary_mode = "Selected"
 	else:
+		stock_scope = active_proxy_skus
 		price_ready = ready_proxy_skus
-		canary_total = len(ready_proxy_skus)
+		canary_total = len(active_proxy_skus)
 		canary_mode = "All"
 
-	total_active = len(readiness_rows)
+	# Suppressed SKUs still ride the feed but push 0 — not real stock — so count them apart.
+	suppressed = stock_scope & zero_stock_proxy_skus if zero_stock_proxy_skus is not None else set()
+	live_stock = stock_scope - suppressed
+
 	return {
-		# Stock is sent for every active SKU regardless of price validity — a stock-only feed keeps
-		# updating stock even for SKUs whose pricing is currently invalid.
-		"amazon_stock": total_active if push_status["amazon_stock_live"] else 0,
+		"amazon_stock": len(live_stock) if push_status["amazon_stock_live"] else 0,
+		"amazon_stock_suppressed": len(suppressed) if push_status["amazon_stock_live"] else 0,
 		"amazon_price": len(price_ready) if push_status["amazon_prices_live"] else 0,
 		"repricer_price": len(price_ready) if push_status["repricer_live"] else 0,
 		"canary_total": canary_total,
@@ -183,8 +197,6 @@ def compute_outbound_scope(
 
 
 def get_canary_sku_rows(allowed_pricing_proxy_skus: set | None) -> list:
-	# Only the "Publish Selected Prices Only" allowlist is small enough to enumerate; "Publish All"
-	# is the whole catalog, so there is no canary subset to show.
 	if not allowed_pricing_proxy_skus:
 		return []
 	return frappe.get_all(
