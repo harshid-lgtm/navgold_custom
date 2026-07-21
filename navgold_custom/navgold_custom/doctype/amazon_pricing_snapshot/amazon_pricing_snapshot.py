@@ -4,7 +4,7 @@
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils.data import cint, flt, now_datetime
+from frappe.utils.data import cint, cstr, flt, now_datetime
 
 from navgold_custom.navgold_custom.amazon_pricing.live_pricing_fetcher import fetch_live_prices
 
@@ -169,6 +169,34 @@ class AmazonPricingSnapshot(Document):
 			return bulk_submit_pricing(pricing_names)
 
 		frappe.throw(_("Unknown publish channel {0}").format(channel))
+
+	@frappe.whitelist()
+	def publish_edited(self, updates: str | list, live: bool = False) -> dict:
+		# Direct push of table-edited bands to Amazon. The captured snapshot is never mutated;
+		# the edits live only in the request, so this snapshot stays an immutable rollback point.
+		frappe.only_for("System Manager")
+
+		from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import (
+			get_allowed_pricing_proxy_skus,
+		)
+		from navgold_custom.navgold_custom.amazon_pricing.manual_price_push import push_manual_prices
+
+		updates = frappe.parse_json(updates) if isinstance(updates, str) else updates
+
+		# An edit can only shrink the snapshot — never push a SKU it never captured.
+		snapshot_skus = {row.get("proxy_sku") for row in self.get_rows() if row.get("proxy_sku")}
+		updates = [update for update in updates if cstr(update.get("sku")).strip() in snapshot_skus]
+		if not updates:
+			frappe.throw(_("None of the edited SKUs are in this snapshot."))
+
+		# Honour "Publish Selected Prices Only" so a snapshot push never goes wider than a sync.
+		allowed = get_allowed_pricing_proxy_skus()
+		if allowed is not None:
+			updates = [update for update in updates if cstr(update.get("sku")).strip() in allowed]
+		if not updates:
+			frappe.throw(_("No edited SKUs are in the current 'Publish Selected Prices Only' list."))
+
+		return push_manual_prices(frappe.as_json(updates), live=live)
 
 
 def process_capture(snapshot_name: str, user: str | None = None) -> None:

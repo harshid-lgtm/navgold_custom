@@ -175,15 +175,72 @@ function format_delta(pct) {
 	return `${value > 0 ? '+' : ''}${value}%`;
 }
 
-function get_selected_pricing(frm) {
+function get_checked_rows(frm) {
 	const wrapper = frm.get_field('preview_html').$wrapper;
 	return wrapper
-		.find('input.snapshot-row-check:checked')
-		.map((index, element) => element.dataset.pricing)
+		.find('tbody tr')
+		.filter((index, element) => {
+			const checkbox = element.querySelector('input.snapshot-row-check');
+			return checkbox?.checked;
+		})
 		.get();
 }
 
+function get_selected_pricing(frm) {
+	return get_checked_rows(frm)
+		.map((element) => element.dataset.pricing)
+		.filter(Boolean);
+}
+
+function get_edited_updates(frm) {
+	return get_checked_rows(frm)
+		.filter((element) => element.dataset.sku)
+		.map((element) => ({
+			sku: element.dataset.sku,
+			min: flt(element.querySelector('input.snapshot-min').value),
+			max: flt(element.querySelector('input.snapshot-max').value),
+			our_price: flt(element.querySelector('input.snapshot-price').value),
+		}));
+}
+
 async function publish(frm, channel) {
+	if (channel === 'Repricer') return publish_to_repricer(frm);
+	if (channel === 'Amazon') return push_edited_to_amazon(frm);
+	frappe.msgprint(__('Unknown publish channel {0}', [channel]));
+}
+
+async function push_edited_to_amazon(frm) {
+	const updates = get_edited_updates(frm);
+	if (!updates.length) {
+		frappe.msgprint(__('Tick at least one SKU in the preview to push.'));
+		return;
+	}
+	// Dry run first so a reviewed count (after the publishing allowlist) precedes a real push.
+	const dry = await frm.call('publish_edited', {
+		updates: JSON.stringify(updates),
+		live: 0,
+	});
+	const confirmed = await navgold.confirm_dialog(
+		__(
+			'Push {0} SKU(s) with your edited min/max/selling prices directly to Amazon? Fat-finger and freeze guards still apply.',
+			[dry.message.sku_count],
+		),
+	);
+	if (!confirmed) return;
+	const { message } = await frm.call('publish_edited', {
+		updates: JSON.stringify(updates),
+		live: 1,
+	});
+	frappe.msgprint(
+		__('Pushed {0} SKU(s) to Amazon (feed {1}).', [
+			message.sku_count,
+			message.feed_id || '—',
+		]),
+	);
+	frm.reload_doc();
+}
+
+async function publish_to_repricer(frm) {
 	const pricing_names = get_selected_pricing(frm);
 	if (!pricing_names.length) {
 		frappe.msgprint(__('Tick at least one SKU in the preview to publish.'));
@@ -191,15 +248,24 @@ async function publish(frm, channel) {
 	}
 	const confirmed = await navgold.confirm_dialog(
 		__(
-			'Publish {0} selected SKU(s) from this snapshot to {1}? Guards (zero-cost, deviation, freeze) still apply.',
-			[pricing_names.length, channel],
+			'Sync {0} selected SKU(s) to Repricer using their current ERP prices? Table edits apply to the Amazon push only.',
+			[pricing_names.length],
 		),
 	);
 	if (!confirmed) return;
-	const { message } = await frm.call('publish', { channel, pricing_names });
+	const { message } = await frm.call('publish', {
+		channel: 'Repricer',
+		pricing_names,
+	});
 	const count =
 		message.synced ?? message.message_count ?? message.submitted ?? '';
-	frappe.msgprint(__('Published to {0}: {1}', [channel, count]));
+	frappe.msgprint(__('Published to Repricer: {0}', [count]));
+}
+
+function price_input(css_class, value) {
+	return `<input type="number" step="0.01" min="0" class="form-control ${css_class} text-right" value="${flt(
+		value,
+	)}" style="height:24px;padding:2px 6px">`;
 }
 
 function refresh_preview(frm) {
@@ -210,33 +276,44 @@ function refresh_preview(frm) {
 	} catch {
 		rows = [];
 	}
-	const sample = rows.slice(0, 500);
-	const body = sample
-		.map(
-			(row) => `<tr>
-				<td class="text-center"><input type="checkbox" class="snapshot-row-check" data-pricing="${frappe.utils.escape_html(
-					row.pricing || '',
-				)}" checked></td>
-				<td>${frappe.utils.escape_html(row.proxy_sku || '')}</td>
+
+	const body = rows
+		.map((row) => {
+			const min_price = flt(row.min_price);
+			const max_price = flt(row.max_price);
+			// Pre-fill the selling price with the live price when it sits inside the band, else the floor.
+			const selling =
+				!is_null(row.live_selling_price) &&
+				flt(row.live_selling_price) >= min_price &&
+				flt(row.live_selling_price) <= max_price
+					? flt(row.live_selling_price)
+					: min_price;
+			const sku = frappe.utils.escape_html(row.proxy_sku || '');
+			return `<tr data-sku="${sku}" data-pricing="${frappe.utils.escape_html(
+				row.pricing || '',
+			)}">
+				<td class="text-center"><input type="checkbox" class="snapshot-row-check" checked></td>
+				<td>${sku}</td>
 				<td>${frappe.utils.escape_html(row.active_strategy || '')}</td>
-				<td class="text-right">${format_currency(row.min_price || 0, 'GBP')}</td>
-				<td class="text-right">${format_currency(row.max_price || 0, 'GBP')}</td>
-				<td class="text-right">${
-					is_null(row.live_selling_price)
-						? '—'
-						: format_currency(row.live_selling_price, 'GBP')
-				}</td>
+				<td>${price_input('snapshot-min', min_price)}</td>
+				<td>${price_input('snapshot-max', max_price)}</td>
+				<td>${price_input('snapshot-price', selling)}</td>
 				<td class="text-center">${row.fixed_price ? '✓' : ''}</td>
 				<td>${frappe.utils.escape_html(row.system_status || '')}</td>
-			</tr>`,
-		)
+			</tr>`;
+		})
 		.join('');
 
 	wrapper.html(`
-		<div class="text-muted small" style="margin-bottom:6px">
-			Showing ${sample.length} of ${rows.length} SKUs — only ticked rows are published
+		<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+			<input type="text" class="form-control input-sm snapshot-search" placeholder="${__(
+				'Search SKU…',
+			)}" style="max-width:240px">
+			<span class="text-muted small">${rows.length} ${__(
+				'SKUs — edit min/max/selling inline; only ticked rows are pushed',
+			)}</span>
 		</div>
-		<div style="max-height:420px;overflow:auto">
+		<div style="max-height:460px;overflow:auto">
 			<table class="table table-bordered" style="font-size:12.5px">
 				<thead><tr>
 					<th class="text-center"><input type="checkbox" class="snapshot-check-all" checked></th>
@@ -252,9 +329,18 @@ function refresh_preview(frm) {
 		</div>
 	`);
 
+	// Check-all toggles only the currently visible rows so it stays intuitive under a search filter.
 	wrapper.find('.snapshot-check-all').on('change', (event) => {
 		wrapper
-			.find('input.snapshot-row-check')
+			.find('tbody tr:visible input.snapshot-row-check')
 			.prop('checked', event.target.checked);
+	});
+
+	wrapper.find('.snapshot-search').on('keyup', (event) => {
+		const term = (event.target.value || '').toLowerCase().trim();
+		wrapper.find('tbody tr').each((index, element) => {
+			const sku = (element.dataset.sku || '').toLowerCase();
+			element.style.display = !term || sku.includes(term) ? '' : 'none';
+		});
 	});
 }
