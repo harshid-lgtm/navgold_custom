@@ -177,8 +177,10 @@ function format_delta(pct) {
 
 function get_checked_rows(frm) {
 	const wrapper = frm.get_field('preview_html').$wrapper;
+	// Only visible rows count — a search / canary filter hides rows without unticking them,
+	// so publishing must never reach a row the user has filtered out of view.
 	return wrapper
-		.find('tbody tr')
+		.find('tbody tr:visible')
 		.filter((index, element) => {
 			const checkbox = element.querySelector('input.snapshot-row-check');
 			return checkbox?.checked;
@@ -265,7 +267,7 @@ async function publish_to_repricer(frm) {
 function price_input(css_class, value) {
 	return `<input type="number" step="0.01" min="0" class="form-control ${css_class} text-right" value="${flt(
 		value,
-	)}" style="height:24px;padding:2px 6px">`;
+	)}" style="width:82px;min-width:82px;height:26px;padding:2px 6px">`;
 }
 
 function refresh_preview(frm) {
@@ -293,7 +295,7 @@ function refresh_preview(frm) {
 				row.pricing || '',
 			)}">
 				<td class="text-center"><input type="checkbox" class="snapshot-row-check" checked></td>
-				<td>${sku}</td>
+				<td><div style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${sku}">${sku}</div></td>
 				<td>${frappe.utils.escape_html(row.active_strategy || '')}</td>
 				<td>${price_input('snapshot-min', min_price)}</td>
 				<td>${price_input('snapshot-max', max_price)}</td>
@@ -305,11 +307,16 @@ function refresh_preview(frm) {
 		.join('');
 
 	wrapper.html(`
-		<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+		<div style="display:flex;align-items:center;gap:12px;margin-bottom:6px;flex-wrap:wrap">
 			<input type="text" class="form-control input-sm snapshot-search" placeholder="${__(
 				'Search SKU…',
 			)}" style="max-width:240px">
-			<span class="text-muted small">${rows.length} ${__(
+			<label class="text-muted small" style="margin:0;display:flex;align-items:center;gap:5px;cursor:pointer">
+				<input type="checkbox" class="snapshot-canary-only"> ${__(
+					'Only canary SKUs',
+				)}
+			</label>
+			<span class="text-muted small snapshot-count">${rows.length} ${__(
 				'SKUs — edit min/max/selling inline; only ticked rows are pushed',
 			)}</span>
 		</div>
@@ -336,11 +343,47 @@ function refresh_preview(frm) {
 			.prop('checked', event.target.checked);
 	});
 
-	wrapper.find('.snapshot-search').on('keyup', (event) => {
-		const term = (event.target.value || '').toLowerCase().trim();
+	const apply_filter = () => {
+		const term = (wrapper.find('.snapshot-search').val() || '')
+			.toLowerCase()
+			.trim();
+		const canary_only = wrapper.find('.snapshot-canary-only').prop('checked');
+		const canary = frm.__canary_skus || new Set();
+		let shown = 0;
 		wrapper.find('tbody tr').each((index, element) => {
-			const sku = (element.dataset.sku || '').toLowerCase();
-			element.style.display = !term || sku.includes(term) ? '' : 'none';
+			const sku = element.dataset.sku || '';
+			const match_search = !term || sku.toLowerCase().includes(term);
+			const match_canary = !canary_only || canary.has(sku);
+			const visible = match_search && match_canary;
+			element.style.display = visible ? '' : 'none';
+			if (visible) shown += 1;
 		});
+		wrapper
+			.find('.snapshot-count')
+			.text(
+				__('{0} of {1} shown — only ticked & visible rows are pushed', [
+					shown,
+					rows.length,
+				]),
+			);
+	};
+
+	wrapper.find('.snapshot-search').on('keyup', apply_filter);
+	wrapper.find('.snapshot-canary-only').on('change', async (event) => {
+		if (event.target.checked && !frm.__canary_skus) {
+			const { message } = await frappe.call({
+				method:
+					'navgold_custom.navgold_custom.doctype.amazon_pricing_snapshot.amazon_pricing_snapshot.get_canary_proxy_skus',
+			});
+			frm.__canary_skus = new Set(message || []);
+			if (!frm.__canary_skus.size) {
+				frappe.show_alert(
+					__(
+						'No canary list is configured (Navgold Settings → Publish Selected Prices Only).',
+					),
+				);
+			}
+		}
+		apply_filter();
 	});
 }

@@ -199,6 +199,18 @@ class AmazonPricingSnapshot(Document):
 		return push_manual_prices(frappe.as_json(updates), live=live)
 
 
+@frappe.whitelist()
+def get_canary_proxy_skus() -> list:
+	# The "Publish Selected Prices Only" list from Navgold Settings — the canary allowlist.
+	# Empty means no restriction is configured (mode is "Publish All Prices").
+	from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import (
+		get_allowed_pricing_proxy_skus,
+	)
+
+	allowed = get_allowed_pricing_proxy_skus()
+	return sorted(allowed) if allowed is not None else []
+
+
 def process_capture(snapshot_name: str, user: str | None = None) -> None:
 	target_user = user or frappe.session.user
 	snapshot = frappe.get_doc("Amazon Pricing Snapshot", snapshot_name)
