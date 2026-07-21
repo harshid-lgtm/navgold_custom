@@ -213,6 +213,9 @@ def sync_to_repricer(pricing_names: list) -> dict:
 		# "Skipped" so it stays out of the failed-sync triage queue and doesn't read as a real error.
 		log.status = "Skipped"
 		log.error_message = str(e)
+		# The feed was fully rendered before the gate — keep it so a Dry Run / frozen canary push
+		# still logs the exact payload that would have been sent.
+		log.feed_content = csv_data
 		log.save()
 		return {
 			"synced": 0,
