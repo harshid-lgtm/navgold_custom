@@ -396,6 +396,7 @@ def get_proxy_sku_map(sku_names=None, item_codes=None, only_fba=False):
 			proxy_sku.uom,
 			proxy_sku.is_fba,
 			proxy_sku.fnsku,
+			proxy_sku.afn_stock,
 		)
 		.where(proxy_sku.is_active == 1)
 	)
@@ -418,6 +419,7 @@ def get_proxy_sku_map(sku_names=None, item_codes=None, only_fba=False):
 			"uom": row["uom"],
 			"is_fba": row["is_fba"],
 			"fnsku": row["fnsku"] or "",
+			"afn_stock": row["afn_stock"],
 		}
 		for row in rows
 	}
