@@ -99,12 +99,11 @@ def sync_to_repricer(pricing_names: list) -> dict:
 	}
 
 	proxy_sku_names = [row.proxy_sku for row in pricing_records.values() if row.proxy_sku]
-	fba_map = {
-		row.name: row.is_fba
-		for row in frappe.get_all(
-			"Proxy SKU", filters={"name": ["in", proxy_sku_names]}, fields=["name", "is_fba"]
-		)
-	}
+	proxy_sku_rows = frappe.get_all(
+		"Proxy SKU", filters={"name": ["in", proxy_sku_names]}, fields=["name", "is_fba", "is_active"]
+	)
+	fba_map = {row.name: row.is_fba for row in proxy_sku_rows}
+	inactive_proxy_skus = {row.name for row in proxy_sku_rows if not row.is_active}
 
 	strategy_names = [row.active_strategy for row in pricing_records.values() if row.active_strategy]
 	strategy_map = {
@@ -147,6 +146,10 @@ def sync_to_repricer(pricing_names: list) -> dict:
 
 			if not pricing.is_active:
 				errors.append(f"{pricing_name}: Inactive")
+				continue
+
+			if pricing.proxy_sku in inactive_proxy_skus:
+				errors.append(f"{pricing_name}: Proxy SKU inactive")
 				continue
 
 			if pricing_name in violations_by_pricing:
