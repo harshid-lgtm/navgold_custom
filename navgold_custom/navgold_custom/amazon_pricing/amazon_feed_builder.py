@@ -524,6 +524,17 @@ def get_allowed_pricing_proxy_skus() -> set | None:
 	return None
 
 
+def filter_active_proxy_sku_pricings(pricing_records: list) -> list:
+	# A Proxy SKU can be deactivated (superseded via create_next_proxy_sku, or flipped inactive by
+	# the listings import) while its Amazon Product Pricing stays active. The old system still owns
+	# those listings, so the feed must not push them — neither stock nor price.
+	proxy_sku_names = [pricing.proxy_sku for pricing in pricing_records if pricing.proxy_sku]
+	if not proxy_sku_names:
+		return pricing_records
+	active_proxy_skus = get_proxy_sku_map(sku_names=proxy_sku_names)
+	return [pricing for pricing in pricing_records if pricing.proxy_sku in active_proxy_skus]
+
+
 def get_zero_stock_proxy_skus() -> set | None:
 	settings = frappe.get_cached_doc("Navgold Settings")
 	mode = settings.stock_publishing_mode or "Publish Actual Stock"
@@ -607,6 +618,8 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 		pricing_records = [
 			pricing for pricing in pricing_records if pricing.proxy_sku in allowed_pricing_proxy_skus
 		]
+
+	pricing_records = filter_active_proxy_sku_pricings(pricing_records)
 
 	publishing_mode = (
 		frappe.get_cached_value("Navgold Settings", "Navgold Settings", "amazon_publishing_mode")
