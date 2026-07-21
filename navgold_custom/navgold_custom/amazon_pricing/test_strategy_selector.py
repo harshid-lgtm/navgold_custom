@@ -153,11 +153,11 @@ class TestStrategySelectorAFNBridge(IntegrationTestCase):
 		super().setUpClass()
 		cls.template_name = create_strategy_template()
 
-	@change_settings("Navgold Settings", {"enable_afn_stock_sync": 1})
-	def test_sync_on_fetched_stock_with_empty_bin_selects_fba(self):
-		item_code, proxy_sku = create_fba_fixture(self.template_name)
-		# Stock exists only in Amazon's report (the go-live failure mode): Bin is empty.
-		frappe.db.set_value("Item", item_code, ITEM_AFN_FIELD, 5, update_modified=False)
+	def test_per_sku_fetched_stock_selects_fba(self):
+		_item_code, proxy_sku = create_fba_fixture(self.template_name)
+		# FBA stock is now sourced from the SKU's own afn_stock, not the item-level aggregate.
+		frappe.db.set_value("Proxy SKU", proxy_sku, "afn_stock", 5, update_modified=False)
+		frappe.clear_document_cache("Proxy SKU", proxy_sku)
 
 		stock_info = get_stock_info(proxy_sku)
 		self.assertEqual(stock_info["fba_stock"], 5)
@@ -165,10 +165,9 @@ class TestStrategySelectorAFNBridge(IntegrationTestCase):
 		pricing = frappe.get_doc("Amazon Product Pricing", {"proxy_sku": proxy_sku})
 		self.assertEqual(select_strategy(pricing), pricing.fba_strategy)
 
-	@change_settings("Navgold Settings", {"enable_afn_stock_sync": 1})
-	def test_sync_on_batch_path_uses_fetched_stock(self):
-		item_code, proxy_sku = create_fba_fixture(self.template_name)
-		frappe.db.set_value("Item", item_code, ITEM_AFN_FIELD, 3, update_modified=False)
+	def test_batch_path_uses_per_sku_fetched_stock(self):
+		_item_code, proxy_sku = create_fba_fixture(self.template_name)
+		frappe.db.set_value("Proxy SKU", proxy_sku, "afn_stock", 3, update_modified=False)
 
 		stock_info_map = get_stock_info_batch([proxy_sku])
 		self.assertEqual(stock_info_map[proxy_sku]["fba_stock"], 3)
@@ -209,3 +208,46 @@ class TestStrategySelectorAFNBridge(IntegrationTestCase):
 		):
 			stock_map = get_fba_stock_map([item_code], "Any Warehouse")
 		self.assertEqual(stock_map[item_code], 12.0)
+
+
+class TestFBAStockPerProxySKU(IntegrationTestCase):
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.template_name = create_strategy_template()
+
+	@change_settings("Navgold Settings", {"enable_afn_stock_sync": 1})
+	def test_sibling_fba_stock_does_not_leak_into_mfn_sku(self):
+		# MRG1 regression: one item, an FBA SKU holding its own afn_stock and an MFN sibling with
+		# none. The item-level aggregate carries the FBA sibling's stock (48); the MFN SKU must read
+		# its own afn_stock (0) and never ride the sibling into the FBA strategy.
+		pack_uom = ensure_uom(f"NG MRG {frappe.generate_hash(length=6)}")
+		item_code = create_pack_item(pack_uom, 3)
+		frappe.db.set_value("Item", item_code, ITEM_AFN_FIELD, 48, update_modified=False)
+
+		fba_proxy = frappe.new_doc("Proxy SKU")
+		fba_proxy.item = item_code
+		fba_proxy.uom = "Nos"
+		fba_proxy.is_fba = 1
+		fba_proxy.afn_stock = 48
+		fba_proxy.insert()
+		apply_template_to_proxy_sku(self.template_name, fba_proxy.name)
+
+		mfn_proxy = frappe.new_doc("Proxy SKU")
+		mfn_proxy.item = item_code
+		mfn_proxy.uom = pack_uom
+		mfn_proxy.is_fba = 0
+		mfn_proxy.afn_stock = 0
+		mfn_proxy.insert()
+		apply_template_to_proxy_sku(self.template_name, mfn_proxy.name)
+
+		fba_pricing = frappe.get_doc("Amazon Product Pricing", {"proxy_sku": fba_proxy.name})
+		self.assertEqual(select_strategy(fba_pricing), fba_pricing.fba_strategy)
+
+		mfn_stock_info = get_stock_info(mfn_proxy.name)
+		self.assertEqual(mfn_stock_info["fba_stock"], 0)
+
+		mfn_pricing = frappe.get_doc("Amazon Product Pricing", {"proxy_sku": mfn_proxy.name})
+		selected_strategy = select_strategy(mfn_pricing)
+		self.assertNotEqual(selected_strategy, mfn_pricing.fba_strategy)
+		self.assertEqual(selected_strategy, mfn_pricing.backorder_strategy)

@@ -13,7 +13,6 @@ from navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku import get_proxy_
 from navgold_custom.navgold_custom.utils import (
 	calculate_adjusted_qty,
 	get_conversion_factor,
-	get_fba_stock_map,
 	get_free_qty_map,
 	get_restock_data_map,
 )
@@ -87,9 +86,9 @@ def get_stock_info(proxy_sku: str) -> dict:
 			"total_stock": 0,
 		}
 
-	sp_api_settings = frappe.get_single("Amazon SP API Settings")
-
-	fba_stock = get_fba_stock_map([proxy.item], sp_api_settings.afn_warehouse).get(proxy.item, 0)
+	# Per-SKU fulfillable qty populated by afn_stock_fetcher. Sourcing this instead of the
+	# item-level aggregate stops a sibling FBA SKU's stock from leaking into an MFN SKU.
+	fba_stock = flt(proxy.afn_stock)
 
 	buildable_map = get_buildable_bundle_qty_map([proxy.item])
 	if proxy.item in buildable_map:
@@ -132,8 +131,6 @@ def get_stock_info_batch(proxy_sku_names: list) -> dict:
 	if not all_item_codes:
 		return {name: dict(empty) for name in proxy_sku_names}
 
-	sp_api_settings = frappe.get_cached_doc("Amazon SP API Settings")
-	afn_stock_map = get_fba_stock_map(all_item_codes, sp_api_settings.afn_warehouse)
 	mfn_stock_data = get_free_qty_map(all_item_codes)
 	restock_map = get_restock_data_map(all_item_codes)
 	buildable_map = get_buildable_bundle_qty_map(all_item_codes)
@@ -162,7 +159,7 @@ def get_stock_info_batch(proxy_sku_names: list) -> dict:
 			result[proxy_sku_name] = dict(empty)
 			continue
 
-		fba_stock = afn_stock_map.get(item_code, 0)
+		fba_stock = flt(proxy_sku_map[proxy_sku_name]["afn_stock"])
 		if item_code in buildable_map:
 			mfn_stock = buildable_map[item_code]
 			sellable_mfn_stock = mfn_stock
