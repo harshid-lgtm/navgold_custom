@@ -10,8 +10,7 @@ from navgold_custom.navgold_custom.amazon_pricing.control_center import (
 	get_oldest_open_feed_minutes,
 )
 
-# Canary posture live on prod: prices restricted to a selected allowlist, Amazon on Stock Only,
-# Repricer live — the exact combination that made "4119 ready to push" look alarming.
+# Prod canary posture: selected-price allowlist, Amazon Stock Only, Repricer live.
 CANARY_STOCK_ONLY = {
 	"amazon_stock_live": True,
 	"amazon_prices_live": False,
@@ -26,9 +25,9 @@ READINESS_ROWS = [
 
 
 class TestControlCenterScope(IntegrationTestCase):
-	def test_stock_only_canary_sends_no_prices_to_amazon(self):
+	def test_stock_only_canary_gates_stock_and_prices(self):
 		scope = compute_outbound_scope(
-			CANARY_STOCK_ONLY, READINESS_ROWS, {"PROXY-CANARY-READY", "PROXY-CANARY-BLOCKED"}
+			CANARY_STOCK_ONLY, READINESS_ROWS, {"PROXY-CANARY-READY", "PROXY-CANARY-BLOCKED"}, None
 		)
 
 		# Stock Only mode => zero prices reach Amazon even though SKUs are "ready".
@@ -36,10 +35,27 @@ class TestControlCenterScope(IntegrationTestCase):
 		# Only the ready SKU inside the canary allowlist gets a price to Repricer — the blocked
 		# canary SKU and the ready SKU outside the allowlist are both excluded.
 		self.assertEqual(scope["repricer_price"], 1)
-		# Stock ignores price validity and the allowlist: every active SKU is stock-fed.
-		self.assertEqual(scope["amazon_stock"], len(READINESS_ROWS))
+		# Stock is gated by the SAME canary allowlist (single-writer boundary): only the two canary
+		# SKUs are stock-fed, NOT the non-canary ready SKU. The blocked canary SKU IS stock-fed
+		# because stock ignores price validity.
+		self.assertEqual(scope["amazon_stock"], 2)
+		self.assertEqual(scope["amazon_stock_suppressed"], 0)
 		self.assertEqual(scope["canary_total"], 2)
 		self.assertEqual(scope["canary_mode"], "Selected")
+
+	def test_zero_stock_suppression_reduces_real_stock_footprint(self):
+		# One canary SKU is on the zero-stock list — it rides the feed but pushes 0, so it is not
+		# publishing real stock.
+		scope = compute_outbound_scope(
+			CANARY_STOCK_ONLY,
+			READINESS_ROWS,
+			{"PROXY-CANARY-READY", "PROXY-CANARY-BLOCKED"},
+			{"PROXY-CANARY-BLOCKED"},
+		)
+
+		# Two canary SKUs in the feed, one zeroed => one publishing real stock.
+		self.assertEqual(scope["amazon_stock"], 1)
+		self.assertEqual(scope["amazon_stock_suppressed"], 1)
 
 	def test_publish_all_scopes_prices_to_every_ready_sku(self):
 		# allowed=None models "Publish All Prices" — no canary restriction.
@@ -47,17 +63,21 @@ class TestControlCenterScope(IntegrationTestCase):
 			{"amazon_stock_live": True, "amazon_prices_live": True, "repricer_live": True},
 			READINESS_ROWS,
 			None,
+			None,
 		)
 
 		# Both ready SKUs get prices; the blocked one does not.
 		self.assertEqual(scope["amazon_price"], 2)
 		self.assertEqual(scope["repricer_price"], 2)
+		# No canary gate => stock covers every active SKU.
+		self.assertEqual(scope["amazon_stock"], len(READINESS_ROWS))
 		self.assertEqual(scope["canary_mode"], "All")
 
 	def test_frozen_channels_zero_every_destination(self):
 		scope = compute_outbound_scope(
 			{"amazon_stock_live": False, "amazon_prices_live": False, "repricer_live": False},
 			READINESS_ROWS,
+			None,
 			None,
 		)
 
