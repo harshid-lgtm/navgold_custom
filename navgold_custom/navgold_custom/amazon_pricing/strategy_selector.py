@@ -88,7 +88,10 @@ def get_stock_info(proxy_sku: str) -> dict:
 
 	# Per-SKU fulfillable qty populated by afn_stock_fetcher. Sourcing this instead of the
 	# item-level aggregate stops a sibling FBA SKU's stock from leaking into an MFN SKU.
-	fba_stock = flt(proxy.afn_stock)
+	# With the sync off, afn_stock is never refreshed, so treat FBA as out of stock rather
+	# than select it on a frozen value.
+	sync_on = frappe.get_cached_doc("Navgold Settings").enable_afn_stock_sync
+	fba_stock = flt(proxy.afn_stock) if sync_on else 0
 
 	buildable_map = get_buildable_bundle_qty_map([proxy.item])
 	if proxy.item in buildable_map:
@@ -131,6 +134,8 @@ def get_stock_info_batch(proxy_sku_names: list) -> dict:
 	if not all_item_codes:
 		return {name: dict(empty) for name in proxy_sku_names}
 
+	# afn_stock is only refreshed while the sync is on; off means treat FBA as out of stock.
+	sync_on = frappe.get_cached_doc("Navgold Settings").enable_afn_stock_sync
 	mfn_stock_data = get_free_qty_map(all_item_codes)
 	restock_map = get_restock_data_map(all_item_codes)
 	buildable_map = get_buildable_bundle_qty_map(all_item_codes)
@@ -159,7 +164,7 @@ def get_stock_info_batch(proxy_sku_names: list) -> dict:
 			result[proxy_sku_name] = dict(empty)
 			continue
 
-		fba_stock = flt(proxy_sku_map[proxy_sku_name]["afn_stock"])
+		fba_stock = flt(proxy_sku_map[proxy_sku_name]["afn_stock"]) if sync_on else 0
 		if item_code in buildable_map:
 			mfn_stock = buildable_map[item_code]
 			sellable_mfn_stock = mfn_stock

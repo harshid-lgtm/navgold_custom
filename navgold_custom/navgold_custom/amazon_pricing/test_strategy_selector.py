@@ -153,6 +153,7 @@ class TestStrategySelectorAFNBridge(IntegrationTestCase):
 		super().setUpClass()
 		cls.template_name = create_strategy_template()
 
+	@change_settings("Navgold Settings", {"enable_afn_stock_sync": 1})
 	def test_per_sku_fetched_stock_selects_fba(self):
 		_item_code, proxy_sku = create_fba_fixture(self.template_name)
 		# FBA stock is now sourced from the SKU's own afn_stock, not the item-level aggregate.
@@ -165,6 +166,7 @@ class TestStrategySelectorAFNBridge(IntegrationTestCase):
 		pricing = frappe.get_doc("Amazon Product Pricing", {"proxy_sku": proxy_sku})
 		self.assertEqual(select_strategy(pricing), pricing.fba_strategy)
 
+	@change_settings("Navgold Settings", {"enable_afn_stock_sync": 1})
 	def test_batch_path_uses_per_sku_fetched_stock(self):
 		_item_code, proxy_sku = create_fba_fixture(self.template_name)
 		frappe.db.set_value("Proxy SKU", proxy_sku, "afn_stock", 3, update_modified=False)
@@ -173,10 +175,12 @@ class TestStrategySelectorAFNBridge(IntegrationTestCase):
 		self.assertEqual(stock_info_map[proxy_sku]["fba_stock"], 3)
 
 	@change_settings("Navgold Settings", {"enable_afn_stock_sync": 0})
-	def test_sync_off_keeps_bin_based_behavior(self):
-		item_code, proxy_sku = create_fba_fixture(self.template_name)
-		# With sync off, the fetched figure must be ignored: behavior is exactly Bin-based.
-		frappe.db.set_value("Item", item_code, ITEM_AFN_FIELD, 5, update_modified=False)
+	def test_sync_off_zeroes_fba_stock(self):
+		_item_code, proxy_sku = create_fba_fixture(self.template_name)
+		# With sync off, afn_stock is never refreshed, so the stale per-SKU value must be ignored
+		# and FBA treated as out of stock on both the single and batch paths.
+		frappe.db.set_value("Proxy SKU", proxy_sku, "afn_stock", 5, update_modified=False)
+		frappe.clear_document_cache("Proxy SKU", proxy_sku)
 
 		stock_info = get_stock_info(proxy_sku)
 		self.assertEqual(stock_info["fba_stock"], 0)
