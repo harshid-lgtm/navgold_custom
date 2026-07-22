@@ -100,7 +100,9 @@ def get_stock_info(proxy_sku: str) -> dict:
 	else:
 		# mfn_stock stays the raw base-unit free qty: the feed builder divides it itself.
 		mfn_stock = get_free_qty_map([proxy.item]).get(proxy.item, {}).get("free_qty", 0)
-		pool_size = frappe.db.count("Proxy SKU", {"item": proxy.item, "is_active": 1}) or 1
+		# Only active MFN SKUs draw from the physical warehouse stock; FBA SKUs sell from Amazon's
+		# own inventory, so excluding them from the pool gives MFN listings a larger, truer share.
+		pool_size = frappe.db.count("Proxy SKU", {"item": proxy.item, "is_active": 1, "is_fba": 0}) or 1
 		pack_size = get_conversion_factor(proxy.item, proxy.uom)
 		sellable_mfn_stock = calculate_adjusted_qty(mfn_stock, pool_size, pack_size)
 
@@ -141,10 +143,16 @@ def get_stock_info_batch(proxy_sku_names: list) -> dict:
 	buildable_map = get_buildable_bundle_qty_map(all_item_codes)
 
 	proxy_sku_dt = DocType("Proxy SKU")
+	# Only active MFN SKUs share the physical warehouse stock; FBA SKUs sell from Amazon's own
+	# inventory and must not dilute the pool.
 	pool_counts = (
 		frappe.qb.from_(proxy_sku_dt)
 		.select(proxy_sku_dt.item, Count("*").as_("pool_size"))
-		.where((proxy_sku_dt.item.isin(all_item_codes)) & (proxy_sku_dt.is_active == 1))
+		.where(
+			(proxy_sku_dt.item.isin(all_item_codes))
+			& (proxy_sku_dt.is_active == 1)
+			& (proxy_sku_dt.is_fba == 0)
+		)
 		.groupby(proxy_sku_dt.item)
 	).run(as_dict=True)
 	pool_size_map = {row.item: row.pool_size for row in pool_counts}
