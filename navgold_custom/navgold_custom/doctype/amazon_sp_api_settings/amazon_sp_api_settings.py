@@ -6,12 +6,10 @@
 # Copyright (c) 2025, BWH Studios and contributors
 # For license information, please see license.txt
 
-from datetime import datetime
-
 import frappe
 from frappe import _
 from frappe.model.document import Document
-from frappe.utils import add_days, get_date_str, today
+from frappe.utils import add_days, get_datetime, today
 from frappe.utils.background_jobs import is_job_enqueued
 
 from navgold_custom.navgold_custom.amazon_repository import get_orders
@@ -81,6 +79,11 @@ class AmazonSPAPISettings(Document):
 	def validate(self):
 		self.validate_after_date()
 
+		# Keep the scheduled-sync watermark and the manual "Sync Orders" start point aligned:
+		# editing after_date resets last_synced_at so both paths fetch orders from the same moment.
+		if self.has_value_changed("after_date"):
+			self.last_synced_at = get_datetime(self.after_date)
+
 		if self.is_active == 0:
 			self.enable_sync = 0
 
@@ -93,9 +96,7 @@ class AmazonSPAPISettings(Document):
 		super().save()
 
 	def validate_after_date(self):
-		if datetime.strptime(add_days(today(), -60), "%Y-%m-%d") > datetime.strptime(
-			get_date_str(self.after_date), "%Y-%m-%d"
-		):
+		if get_datetime(self.after_date) < get_datetime(add_days(today(), -60)):
 			frappe.throw(_("The date must be within the last 60 days."))
 
 	@frappe.whitelist()
