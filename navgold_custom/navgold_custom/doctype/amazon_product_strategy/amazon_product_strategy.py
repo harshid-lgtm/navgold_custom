@@ -112,7 +112,7 @@ class AmazonProductStrategy(Document):
 
 		precision = self.precision("value", "costs")
 
-		before_values = {row.name: row.value for row in before.costs}
+		before_rows = {row.name: row for row in before.costs}
 
 		for cost in self.costs:
 			if cost.value_mode == "Manual":
@@ -124,11 +124,14 @@ class AmazonProductStrategy(Document):
 				# here is not a human override, so it must not be pinned.
 				continue
 
-			previous = before_values.get(cost.name)
-			if previous is None:
+			previous_row = before_rows.get(cost.name)
+			if previous_row is None:
 				continue
 
-			if flt(cost.value, precision) != flt(previous, precision):
+			if previous_row.value_mode == "Manual":
+				continue
+
+			if flt(cost.value, precision) != flt(previous_row.value, precision):
 				cost.value_mode = "Manual"
 
 	def on_update(self):
