@@ -128,8 +128,6 @@ class AmazonProductStrategy(Document):
 			if previous_row is None:
 				continue
 
-			# A deliberate Manual→Auto switch zeroes the value in the grid; that drop is a mode change,
-			# not an external override, so hand the row to populate_costs instead of pinning it back.
 			if previous_row.value_mode == "Manual":
 				continue
 
