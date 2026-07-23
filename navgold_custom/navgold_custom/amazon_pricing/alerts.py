@@ -189,7 +189,7 @@ def check_sales_order_below_min(doc, method=None) -> None:
 		mapped = min_price_map.get((item.item_code, item.uom))
 		if not mapped:
 			continue
-		if flt(item.rate) < flt(mapped["min_price"]):
+		if 0 < flt(item.rate) < flt(mapped["min_price"]):
 			alert_below_min_sale(doc.name, mapped["proxy_sku"], item.rate, mapped["min_price"], item.qty)
 			order_loss += max(flt(mapped["min_price"]) - flt(item.rate), 0) * flt(item.qty)
 
