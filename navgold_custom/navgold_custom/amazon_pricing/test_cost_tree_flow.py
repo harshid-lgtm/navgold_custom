@@ -145,6 +145,40 @@ class TestCostTreeFlow(IntegrationTestCase):
 		self.assertAlmostEqual(reloaded.calculated_min_price, 9.55, places=2)
 		self.assertNotAlmostEqual(reloaded.calculated_min_price, 6.82, places=2)
 
+	def test_manual_to_auto_switch_is_not_pinned_back(self):
+		# Bug: switching a row Manual→Auto zeroes its value in the grid; the pin guard read that drop
+		# as an external override and flipped it straight back to Manual, freezing the value at 0.
+		proxy_sku = create_proxy_sku(last_transfer_rate=4.0)
+		strategy = cost_tree_test_fixtures.build_strategy(
+			proxy_sku,
+			[
+				{
+					"cost_type": PURCHASE_GROUP,
+					"cost_sub_type": FED_LEAF,
+					"value": 1.0,
+					"value_mode": "Manual",
+					"rank": 1,
+				}
+			],
+			min_margin=10,
+			max_margin=20,
+			insert=False,
+		)
+		insert_with_fixed_settings(strategy)
+
+		(row,) = persisted_costs(strategy.name)
+		self.assertEqual((row.value, row.value_mode), (1.0, "Manual"))
+
+		# User flips it to Auto; the grid drops the hand-set value to 0 before saving.
+		reloaded = frappe.get_doc("Amazon Product Strategy", strategy.name)
+		reloaded.costs[0].value_mode = "Auto"
+		reloaded.costs[0].value = 0
+		with patch.object(price_calculator, "get_pricing_settings", return_value=FIXED_SETTINGS):
+			reloaded.save()
+
+		(row,) = persisted_costs(strategy.name)
+		self.assertEqual((row.value, row.value_mode), (4.0, "Auto"))
+
 	def test_fed_leaf_resolves_to_zero_when_feed_not_ready(self):
 		# A fed leaf whose resolver has no data (PO-Sync, no purchase history) must land at 0, and the
 		# row must stay Auto (unsynced) rather than being pinned Manual or holding a stale value.
