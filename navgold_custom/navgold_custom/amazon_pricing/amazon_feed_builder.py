@@ -314,10 +314,14 @@ def build_proxy_sku_info_map(proxy_sku_names: list) -> dict:
 
 	item_codes = list({row.item for row in proxy_sku_rows if row.item})
 	proxy_sku_dt = DocType("Proxy SKU")
+	# Only active MFN SKUs share the physical warehouse stock; FBA SKUs sell from Amazon's own
+	# inventory and must not dilute the pool.
 	pool_counts = (
 		frappe.qb.from_(proxy_sku_dt)
 		.select(proxy_sku_dt.item, Count("*").as_("pool_size"))
-		.where((proxy_sku_dt.item.isin(item_codes)) & (proxy_sku_dt.is_active == 1))
+		.where(
+			(proxy_sku_dt.item.isin(item_codes)) & (proxy_sku_dt.is_active == 1) & (proxy_sku_dt.is_fba == 0)
+		)
 		.groupby(proxy_sku_dt.item)
 	).run(as_dict=True)
 	pool_size_map = {row.item: row.pool_size for row in pool_counts}
@@ -411,7 +415,10 @@ def get_sku_inventory_data(
 		item_code = proxy_sku_row.get("item")
 		proxy_uom = proxy_sku_row.get("uom")
 		sku_shipping_group_choice = proxy_sku_row.get("merchant_shipping_group")
-		pool_size = frappe.db.count("Proxy SKU", filters={"item": item_code, "is_active": 1}) or 1
+		# FBA SKUs sell from Amazon's own inventory, so only active MFN SKUs share the warehouse pool.
+		pool_size = (
+			frappe.db.count("Proxy SKU", filters={"item": item_code, "is_active": 1, "is_fba": 0}) or 1
+		)
 		pack_size = (
 			flt(
 				frappe.db.get_value(

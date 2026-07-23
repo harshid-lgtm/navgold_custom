@@ -152,10 +152,10 @@
 			"label": "Syncing"
 		},
 		{
-			"default": "Today",
+			"default": "Now",
 			"fieldname": "after_date",
-			"fieldtype": "Date",
-			"label": "After Date",
+			"fieldtype": "Datetime",
+			"label": "After Date/Time",
 			"reqd": 1
 		},
 		{

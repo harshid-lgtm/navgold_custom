@@ -60,6 +60,7 @@ def get_data(filters):
 			(sales_order.docstatus == 1)
 			& (sales_order.amazon_order_id.isnotnull())
 			& (sales_order.creation > add_days(now_datetime(), -days_back))
+			& (sales_order_item.rate > 0)
 		)
 	).run(as_dict=True)
 
