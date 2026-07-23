@@ -79,8 +79,6 @@ class AmazonSPAPISettings(Document):
 	def validate(self):
 		self.validate_after_date()
 
-		# Keep the scheduled-sync watermark and the manual "Sync Orders" start point aligned:
-		# editing after_date resets last_synced_at so both paths fetch orders from the same moment.
 		if self.has_value_changed("after_date"):
 			self.last_synced_at = get_datetime(self.after_date)
 
