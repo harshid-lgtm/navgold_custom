@@ -28,9 +28,6 @@ from navgold_custom.navgold_custom.utils import (
 
 PRICING_FEED_TYPE = "JSON_LISTINGS_FEED"
 
-# Serialises the Amazon Pricing Submission Log insert across the concurrent pricing +
-# repricer jobs (both fire on the same cron). Without this the naming-series row lock is
-# held across the slow SP-API calls, so the second job hits a 50s "Lock wait timeout".
 SUBMISSION_LOG_LOCK = "navgold_pricing_submission_log"
 
 
