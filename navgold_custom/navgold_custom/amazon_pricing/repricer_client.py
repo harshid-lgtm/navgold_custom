@@ -10,12 +10,14 @@ import frappe
 from frappe import _
 from frappe.integrations.utils import make_get_request, make_post_request
 from frappe.utils import flt, now_datetime
+from frappe.utils.synchronization import filelock
 
 from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import (
 	format_supplier_fallback_notes,
 	get_allowed_pricing_proxy_skus,
 	recompute_backorder_prices_with_fallback_supplier,
 )
+from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_submitter import SUBMISSION_LOG_LOCK
 from navgold_custom.navgold_custom.amazon_pricing.price_guard import (
 	notify_price_deviation_blocks,
 	partition_pricing_by_price_deviation,
@@ -79,7 +81,9 @@ def sync_to_repricer(pricing_names: list) -> dict:
 	log.submission_type = "Repricer"
 	log.status = "Pending"
 	log.pricing_records = "\n".join(pricing_names)
-	log.insert()
+	with filelock(SUBMISSION_LOG_LOCK, timeout=120):
+		log.insert()
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- free the APSL series lock before the repricer HTTP call
 
 	pricing_records = {
 		row.name: row

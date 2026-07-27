@@ -5,6 +5,7 @@ import frappe
 from frappe import _
 from frappe.utils import now_datetime
 from frappe.utils.data import convert_utc_to_system_timezone, cstr, get_datetime
+from frappe.utils.synchronization import filelock
 
 from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import (
 	build_pricing_feed,
@@ -26,6 +27,8 @@ from navgold_custom.navgold_custom.utils import (
 )
 
 PRICING_FEED_TYPE = "JSON_LISTINGS_FEED"
+
+SUBMISSION_LOG_LOCK = "navgold_pricing_submission_log"
 
 
 def get_feeds_client(settings=None):
@@ -85,7 +88,9 @@ def submit_pricing(pricing_names: list, test_mode: bool = False) -> dict:
 	if blocked_reasons:
 		log.blocked_records = format_blocked_records(blocked_reasons)
 		log.blocked_count = len(blocked_reasons)
-	log.insert()
+	with filelock(SUBMISSION_LOG_LOCK, timeout=120):
+		log.insert()
+		frappe.db.commit()  # nosemgrep: frappe-manual-commit -- free the APSL series lock before slow SP-API calls
 	try:
 		feeds_client = get_feeds_client(settings)
 
