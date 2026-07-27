@@ -508,11 +508,6 @@ def get_sku_inventory_data(
 	else:
 		shipping_group = SHIPPING_GROUPS["main_revised"]
 
-	# When a backorder is deferred via a restock date, the supplier lead time is already priced into that
-	# date (time to acquire stock). Handling time is only the dispatch window once stock lands, ~1 day.
-	# Emitting the full lead time as handling too would double-count it (Amazon promise ~= today + 2x lead
-	# time). Mirrors OrderWiseHelper's hardcoded backorder handling. restock_date itself keeps the real
-	# lead time.
 	ship_lead_time = 1 if (is_backorder and restock_date) else lead_time_days
 
 	return {
