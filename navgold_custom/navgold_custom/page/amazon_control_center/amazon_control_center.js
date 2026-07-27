@@ -422,8 +422,13 @@ class AmazonControlCenter {
 		const minutes_since_fba_sync =
 			fba_stock['Minutes Since Last FBA Stock Sync'];
 
-		const cards = [
-			this.format_card('Active SKUs', readiness.total_active, 'neutral'),
+		const complete_system_cards = [
+			this.format_card(
+				'Active SKUs',
+				readiness.total_active,
+				'neutral',
+				'total items',
+			),
 			this.format_card(
 				'Ready to push',
 				readiness.ok_total,
@@ -435,6 +440,9 @@ class AmazonControlCenter {
 				readiness.blocked_total,
 				readiness.blocked_total ? 'bad' : 'good',
 			),
+		];
+
+		const canary_cards = [
 			this.format_card(
 				'Amazon · Stock',
 				scope.amazon_stock,
@@ -443,9 +451,7 @@ class AmazonControlCenter {
 					? 'stock OFF'
 					: scope.amazon_stock_suppressed
 					  ? `SKUs sending stock · ${scope.amazon_stock_suppressed} zeroed`
-					  : scope.canary_mode === 'Selected'
-						  ? 'SKUs sending stock (canary)'
-						  : 'SKUs sending stock',
+					  : 'SKUs sending stock',
 			),
 			this.format_card(
 				'Amazon · Price',
@@ -459,10 +465,17 @@ class AmazonControlCenter {
 				'Repricer · Price',
 				scope.repricer_price,
 				scope.repricer_price ? 'good' : 'neutral',
-				scope.canary_mode === 'Selected'
-					? `${scope.canary_total} canary SKUs`
-					: 'all ready prices',
+				'prices to Repricer',
 			),
+			this.format_card(
+				'Canary · Blocked',
+				scope.canary_blocked,
+				scope.canary_blocked ? 'bad' : 'good',
+				`of ${scope.canary_active} active canary SKUs`,
+			),
+		];
+
+		const health_cards = [
 			this.format_card(
 				`Below-min sales (${data.below_min.days_back}d)`,
 				data.below_min.count,
@@ -505,7 +518,22 @@ class AmazonControlCenter {
 					: 'good',
 			),
 		];
-		return $('<div class="acc-cards">').append(cards);
+
+		const canary_title =
+			scope.canary_mode === 'Selected'
+				? `Canary Rollout · ${scope.canary_total} SKUs`
+				: 'Outbound Scope · Publish All';
+
+		return $('<div>')
+			.append(this.format_card_group('Complete System', complete_system_cards))
+			.append(this.format_card_group(canary_title, canary_cards))
+			.append(this.format_card_group('System Health', health_cards));
+	}
+
+	format_card_group(title, cards) {
+		return $(
+			`<div class="acc-section"><div class="acc-section-title">${title}</div></div>`,
+		).append($('<div class="acc-cards">').append(cards));
 	}
 
 	format_card(label, value, tone, subtitle) {
