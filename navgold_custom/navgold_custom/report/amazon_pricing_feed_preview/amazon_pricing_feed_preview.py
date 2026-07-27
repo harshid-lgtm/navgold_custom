@@ -27,6 +27,7 @@ AMAZON_COLUMNS = {
 	"quantity",
 	"fulfillment",
 	"shipping_group",
+	"restock_date",
 }
 REPRICER_COLUMNS = {"repricer_min", "repricer_max", "repricer_rule"}
 
@@ -86,6 +87,7 @@ def get_columns(channel: str) -> list[dict]:
 		{"label": _("Qty"), "fieldname": "quantity", "fieldtype": "Int", "width": 70},
 		{"label": _("Fulfillment"), "fieldname": "fulfillment", "fieldtype": "Data", "width": 200},
 		{"label": _("Shipping Group"), "fieldname": "shipping_group", "fieldtype": "Data", "width": 130},
+		{"label": _("Restock Date"), "fieldname": "restock_date", "fieldtype": "Date", "width": 110},
 		{"label": _("Repricer Min"), "fieldname": "repricer_min", "fieldtype": "Currency", "width": 110},
 		{"label": _("Repricer Max"), "fieldname": "repricer_max", "fieldtype": "Currency", "width": 110},
 		{"label": _("Repricer Rule"), "fieldname": "repricer_rule", "fieldtype": "Data", "width": 160},
@@ -119,6 +121,7 @@ def extract_amazon_values(message: dict) -> dict:
 		"quantity": None,
 		"fulfillment": None,
 		"shipping_group": None,
+		"restock_date": None,
 	}
 	for patch in message.get("patches", []):
 		path = patch.get("path") or ""
@@ -134,11 +137,10 @@ def extract_amazon_values(message: dict) -> dict:
 		elif path.endswith("fulfillment_availability") and patch_value:
 			availability = patch_value[0]
 			values["quantity"] = availability.get("quantity")
+			values["restock_date"] = availability.get("restock_date")
 			parts = [availability.get("fulfillment_channel_code")]
 			if availability.get("lead_time_to_ship_max_days") is not None:
 				parts.append(f"lead {availability['lead_time_to_ship_max_days']}d")
-			if availability.get("restock_date"):
-				parts.append(f"restock {availability['restock_date']}")
 			values["fulfillment"] = " · ".join(str(part) for part in parts if part)
 	return values
 
@@ -233,6 +235,7 @@ def build_preview_row(
 		"quantity": amazon_values.get("quantity"),
 		"fulfillment": amazon_values.get("fulfillment"),
 		"shipping_group": amazon_values.get("shipping_group"),
+		"restock_date": amazon_values.get("restock_date"),
 		"repricer_min": repricer.get("repricer_min"),
 		"repricer_max": repricer.get("repricer_max"),
 		"repricer_rule": repricer.get("repricer_rule"),

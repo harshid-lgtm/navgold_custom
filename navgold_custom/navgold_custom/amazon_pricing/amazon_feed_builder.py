@@ -489,6 +489,8 @@ def get_sku_inventory_data(
 	if stock_info.get("has_restock_date", False):
 		po_date = stock_info.get("restock_date")
 		restock_date = cstr(po_date) if po_date else cstr(add_days(today(), lead_time_days))
+	elif is_backorder and resolved_supplier_stock > 0:
+		restock_date = cstr(add_days(today(), lead_time_days))
 
 	if is_sfp:
 		is_two_day = (sku_shipping_group_choice or "").strip().lower() == "twoday"
@@ -503,11 +505,13 @@ def get_sku_inventory_data(
 	else:
 		shipping_group = SHIPPING_GROUPS["main_revised"]
 
+	ship_lead_time = 1 if (is_backorder and restock_date) else lead_time_days
+
 	return {
 		"quantity": quantity,
 		"fulfillment_channel": "DEFAULT",
 		"restock_date": restock_date,
-		"lead_time_days": lead_time_days,
+		"lead_time_days": ship_lead_time,
 		"send_lead_time": not is_sfp,
 		"shipping_group": shipping_group,
 		"is_fba": False,
