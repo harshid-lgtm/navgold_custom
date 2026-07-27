@@ -8,11 +8,20 @@ from frappe.utils.data import cstr
 
 from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import (
 	SHIPPING_GROUPS,
+	build_inventory_patches,
 	get_sku_inventory_data,
 )
 
 # inventory_for_backorder threads lead_time_map={"TEST-SUPPLIER": 2}, so the supplier lead time is 2 days.
 SUPPLIER_LEAD_TIME_DAYS = 2
+TEST_MARKETPLACE_ID = "A1F83G8C2ARO7P"
+
+
+def emitted_fulfillment(inventory):
+	for patch in build_inventory_patches(inventory, TEST_MARKETPLACE_ID):
+		if patch["path"].endswith("fulfillment_availability"):
+			return patch["value"][0]
+	return {}
 
 
 def backorder_pricing():
@@ -58,6 +67,43 @@ def inventory_for_backorder(supplier_sfp_eligible, row_sfp, has_restock_date, su
 		lead_time_map={"TEST-SUPPLIER": 2},
 		bundle_buildable_map={},
 		supplier_sfp_eligible_map={"TEST-SUPPLIER": supplier_sfp_eligible},
+	)
+
+
+def inventory_for_default_in_stock():
+	# A non-backorder listing (active strategy is neither FBA/SFP/backorder) selling from own warehouse
+	# stock — the path that still emits the real supplier handling time.
+	pricing = frappe._dict(
+		proxy_sku="TEST-PROXY-SKU",
+		active_strategy="TEST-STRAT-DEFAULT",
+		fba_strategy="TEST-STRAT-FBA",
+		sfp_strategy="TEST-STRAT-SFP",
+		backorder_strategy="TEST-STRAT-BACKORDER",
+	)
+	proxy_sku_info = {
+		"TEST-PROXY-SKU": {
+			"item": "TEST-ITEM",
+			"uom": "Nos",
+			"pool_size": 1,
+			"pack_size": 1.0,
+			"merchant_shipping_group": None,
+		}
+	}
+	stock_info_map = {"TEST-PROXY-SKU": {"mfn_stock": 10, "has_restock_date": False, "restock_date": None}}
+	resolved_supplier = frappe._dict(supplier="TEST-SUPPLIER", stock_qty=5, rank=1, price=10, sfp=0)
+	supplier_data_map = {
+		"TEST-ITEM": {"top_supplier": resolved_supplier, "in_stock_supplier": resolved_supplier}
+	}
+
+	return get_sku_inventory_data(
+		pricing,
+		zero_stock_proxy_skus=None,
+		proxy_sku_info=proxy_sku_info,
+		stock_info_map=stock_info_map,
+		supplier_data_map=supplier_data_map,
+		lead_time_map={"TEST-SUPPLIER": 2},
+		bundle_buildable_map={},
+		supplier_sfp_eligible_map={"TEST-SUPPLIER": False},
 	)
 
 
@@ -121,6 +167,33 @@ class TestBackorderSupplierRestockDate(IntegrationTestCase):
 		)
 		# has_restock_date fixture pins the PO date to 2026-07-10; the supplier-lead-time fallback must not override it.
 		self.assertEqual(inventory["restock_date"], "2026-07-10")
+
+
+class TestBackorderHandlingTime(IntegrationTestCase):
+	# The supplier lead time is already priced into restock_date; handling time must not double-count it.
+	# Assert the actual emitted fulfillment patch, not just the intermediate dict.
+	def test_main_revised_backorder_emits_nominal_one_day_handling(self):
+		inventory = inventory_for_backorder(
+			supplier_sfp_eligible=False, row_sfp=True, has_restock_date=False, supplier_stock=5
+		)
+		self.assertEqual(inventory["shipping_group"], SHIPPING_GROUPS["main_revised"])
+		fulfillment = emitted_fulfillment(inventory)
+		self.assertEqual(fulfillment["lead_time_to_ship_max_days"], 1)
+		self.assertEqual(fulfillment["restock_date"], cstr(add_days(today(), SUPPLIER_LEAD_TIME_DAYS)))
+
+	def test_sfp_backorder_emits_nominal_one_day_handling(self):
+		inventory = inventory_for_backorder(
+			supplier_sfp_eligible=True, row_sfp=True, has_restock_date=False, supplier_stock=5
+		)
+		self.assertEqual(inventory["shipping_group"], SHIPPING_GROUPS["sfp"])
+		fulfillment = emitted_fulfillment(inventory)
+		self.assertEqual(fulfillment["lead_time_to_ship_max_days"], 1)
+		self.assertEqual(fulfillment["restock_date"], cstr(add_days(today(), SUPPLIER_LEAD_TIME_DAYS)))
+
+	def test_non_backorder_listing_keeps_real_handling_time(self):
+		inventory = inventory_for_default_in_stock()
+		fulfillment = emitted_fulfillment(inventory)
+		self.assertEqual(fulfillment["lead_time_to_ship_max_days"], SUPPLIER_LEAD_TIME_DAYS)
 
 
 def make_supplier(name, custom_sfp_eligible):
