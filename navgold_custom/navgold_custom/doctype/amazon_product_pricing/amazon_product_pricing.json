@@ -7,7 +7,6 @@
 	"engine": "InnoDB",
 	"field_order": [
 		"proxy_sku",
-		"item",
 		"is_active",
 		"column_break_main",
 		"active_strategy",
@@ -38,15 +37,6 @@
 			"options": "Proxy SKU",
 			"reqd": 1,
 			"unique": 1
-		},
-		{
-			"fetch_from": "proxy_sku.item",
-			"fieldname": "item",
-			"fieldtype": "Link",
-			"in_standard_filter": 1,
-			"label": "Item",
-			"options": "Item",
-			"read_only": 1
 		},
 		{
 			"default": "1",

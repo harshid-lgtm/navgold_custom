@@ -78,7 +78,6 @@ class AmazonProductStrategy(Document):
 		calculated_profit: DF.Currency
 		costs: DF.Table[AmazonProductCost]
 		is_active: DF.Check
-		item: DF.Link | None
 		max_margin: DF.Percent
 		min_margin: DF.Percent
 		proxy_sku: DF.Link

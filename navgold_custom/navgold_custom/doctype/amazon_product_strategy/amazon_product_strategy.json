@@ -11,7 +11,6 @@
 		"is_active",
 		"column_break_strategy",
 		"repricer_rule",
-		"item",
 		"margin_section",
 		"min_margin",
 		"max_margin",
@@ -42,15 +41,6 @@
 			"label": "Proxy SKU",
 			"options": "Proxy SKU",
 			"reqd": 1
-		},
-		{
-			"fetch_from": "proxy_sku.item",
-			"fieldname": "item",
-			"fieldtype": "Link",
-			"in_standard_filter": 1,
-			"label": "Item",
-			"options": "Item",
-			"read_only": 1
 		},
 		{
 			"default": "1",
