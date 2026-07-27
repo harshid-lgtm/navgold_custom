@@ -45,6 +45,35 @@ class TestFeedPreviewShippingGroup(IntegrationTestCase):
 		self.assertIsNone(values["shipping_group"])
 
 
+def fulfillment_message(restock_date=None):
+	availability = {"fulfillment_channel_code": "DEFAULT", "quantity": 5, "lead_time_to_ship_max_days": 2}
+	if restock_date is not None:
+		availability["restock_date"] = restock_date
+	return {
+		"sku": "TEST-SKU",
+		"patches": [
+			{
+				"op": "replace",
+				"path": "/attributes/fulfillment_availability",
+				"value": [availability],
+			}
+		],
+	}
+
+
+class TestFeedPreviewRestockDate(IntegrationTestCase):
+	def test_restock_date_surfaces_in_its_own_field(self):
+		values = feed_preview.extract_amazon_values(fulfillment_message(restock_date="2026-07-30"))
+		self.assertEqual(values["restock_date"], "2026-07-30")
+		# The lead time stays in the fulfillment string; the restock date must not be duplicated there.
+		self.assertNotIn("restock", values["fulfillment"])
+		self.assertIn("lead 2d", values["fulfillment"])
+
+	def test_no_restock_date_yields_none(self):
+		values = feed_preview.extract_amazon_values(fulfillment_message(restock_date=None))
+		self.assertIsNone(values["restock_date"])
+
+
 class TestFeedPreviewStatusFilter(IntegrationTestCase):
 	def run_execute(self, status):
 		preview_rows = [
