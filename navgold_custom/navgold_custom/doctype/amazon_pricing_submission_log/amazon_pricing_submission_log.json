@@ -114,7 +114,7 @@
 		{
 			"description": "SKUs excluded from this submission by the pricing validators or the price-deviation guard, one per line: PROXY-SKU: reason1; reason2",
 			"fieldname": "blocked_records",
-			"fieldtype": "Small Text",
+			"fieldtype": "Long Text",
 			"label": "Blocked Records",
 			"read_only": 1
 		},
