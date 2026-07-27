@@ -490,9 +490,6 @@ def get_sku_inventory_data(
 		po_date = stock_info.get("restock_date")
 		restock_date = cstr(po_date) if po_date else cstr(add_days(today(), lead_time_days))
 	elif is_backorder and resolved_supplier_stock > 0:
-		# Backorder fulfils from supplier stock, not on-hand inventory. Without a restock date Amazon
-		# reads the qty as ship-now and promises immediate dispatch; defer to the supplier lead time so
-		# both the SFP-backorder and Main Revised listings read as backorder. Mirrors OrderWiseHelper.
 		restock_date = cstr(add_days(today(), lead_time_days))
 
 	if is_sfp:
