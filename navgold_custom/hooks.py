@@ -367,7 +367,6 @@ scheduler_events = {
 		"20 * * * *": [
 			"navgold_custom.navgold_custom.amazon_pricing.feed_ledger.sync_amazon_feed_ledger",
 		],
-		# CLF stock then price, hourly, offset off the Amazon sync cluster
 		"40 * * * *": [
 			"navgold_custom.navgold_custom.doctype.supplier_stock_import.clf_stock_api.schedule_clf_fetch",
 		],
