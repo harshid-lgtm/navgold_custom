@@ -191,8 +191,6 @@ def compute_outbound_scope(
 		"amazon_stock_suppressed": len(suppressed) if push_status["amazon_stock_live"] else 0,
 		"amazon_price": len(price_ready) if push_status["amazon_prices_live"] else 0,
 		"repricer_price": len(price_ready) if push_status["repricer_live"] else 0,
-		# Canary readiness is a fact about the population, independent of whether a channel is live:
-		# every active canary SKU is stock-fed, and the ones with violations can't be priced.
 		"canary_active": len(stock_scope),
 		"canary_blocked": len(stock_scope) - len(price_ready),
 		"canary_total": canary_total,
