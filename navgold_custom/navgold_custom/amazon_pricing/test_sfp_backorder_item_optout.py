@@ -3,11 +3,16 @@
 
 import frappe
 from frappe.tests import IntegrationTestCase
+from frappe.utils import add_days, today
+from frappe.utils.data import cstr
 
 from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import (
 	SHIPPING_GROUPS,
 	get_sku_inventory_data,
 )
+
+# inventory_for_backorder threads lead_time_map={"TEST-SUPPLIER": 2}, so the supplier lead time is 2 days.
+SUPPLIER_LEAD_TIME_DAYS = 2
 
 
 def backorder_pricing():
@@ -83,6 +88,39 @@ class TestSfpBackorderItemOptOut(IntegrationTestCase):
 			supplier_sfp_eligible=True, row_sfp=True, has_restock_date=False, supplier_stock=0
 		)
 		self.assertEqual(inventory["shipping_group"], SHIPPING_GROUPS["main_revised"])
+
+
+class TestBackorderSupplierRestockDate(IntegrationTestCase):
+	# Supplier-backed backorder with no open PO must still carry a restock date. Without it Amazon reads
+	# the qty as ship-now and promises immediate dispatch instead of a deferred backorder window.
+	def test_main_revised_backorder_sends_supplier_lead_time_restock_date(self):
+		inventory = inventory_for_backorder(
+			supplier_sfp_eligible=False, row_sfp=True, has_restock_date=False, supplier_stock=5
+		)
+		self.assertEqual(inventory["shipping_group"], SHIPPING_GROUPS["main_revised"])
+		self.assertEqual(inventory["restock_date"], cstr(add_days(today(), SUPPLIER_LEAD_TIME_DAYS)))
+		self.assertTrue(inventory["send_lead_time"])
+
+	def test_sfp_backorder_sends_supplier_lead_time_restock_date(self):
+		inventory = inventory_for_backorder(
+			supplier_sfp_eligible=True, row_sfp=True, has_restock_date=False, supplier_stock=5
+		)
+		self.assertEqual(inventory["shipping_group"], SHIPPING_GROUPS["sfp"])
+		self.assertEqual(inventory["restock_date"], cstr(add_days(today(), SUPPLIER_LEAD_TIME_DAYS)))
+		self.assertTrue(inventory["send_lead_time"])
+
+	def test_no_supplier_stock_leaves_restock_date_unset(self):
+		inventory = inventory_for_backorder(
+			supplier_sfp_eligible=True, row_sfp=True, has_restock_date=False, supplier_stock=0
+		)
+		self.assertIsNone(inventory["restock_date"])
+
+	def test_open_po_restock_date_wins_over_supplier_lead_time(self):
+		inventory = inventory_for_backorder(
+			supplier_sfp_eligible=True, row_sfp=True, has_restock_date=True, supplier_stock=5
+		)
+		# has_restock_date fixture pins the PO date to 2026-07-10; the supplier-lead-time fallback must not override it.
+		self.assertEqual(inventory["restock_date"], "2026-07-10")
 
 
 def make_supplier(name, custom_sfp_eligible):
