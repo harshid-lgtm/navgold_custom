@@ -515,6 +515,7 @@
 			"options": "Publish Actual Stock\nPublish Zero Stock for All Items\nPublish Zero Stock for Selected Items"
 		},
 		{
+			"allow_bulk_edit": 1,
 			"depends_on": "eval:doc.stock_publishing_mode === 'Publish Zero Stock for Selected Items'",
 			"fieldname": "zero_stock_items",
 			"fieldtype": "Table",
@@ -713,7 +714,7 @@
 	"index_web_pages_for_search": 1,
 	"issingle": 1,
 	"links": [],
-	"modified": "2026-07-03 08:28:23.156099",
+	"modified": "2026-07-28 00:00:00.000000",
 	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Navgold Settings",
