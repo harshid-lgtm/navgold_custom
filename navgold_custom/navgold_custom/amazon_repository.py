@@ -53,6 +53,10 @@ UNAUTHORISED_ORDER_STATUSES = ("Pending", "PendingAvailability")
 
 CLOSED_ORDER_STATUSES = ("Canceled", "Unfulfillable")
 
+# Amazon states that still owe a dispatch. Anything else is either not yet payable, already gone, or
+# cancelled, so it has no business on a pick list.
+PICKABLE_ORDER_STATUSES = ("Unshipped", "PartiallyShipped")
+
 
 def parse_amazon_utc(utc_time_str):
 	utc_time = datetime.strptime(utc_time_str, "%Y-%m-%dT%H:%M:%SZ")
