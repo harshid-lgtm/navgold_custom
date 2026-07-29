@@ -258,6 +258,78 @@ class TestOrderStatusRefresh(IntegrationTestCase):
 
 		self.assertIsNone(repository.update_order_status(self.build_order("Shipped", 27.46), None))
 
+	def fetch_one_order(self, repository, order, rate):
+		with (
+			patch.object(repository, "get_orders_instance"),
+			patch.object(repository, "call_sp_api_method", return_value=order),
+			patch.object(repository, "get_order_items", return_value=build_items(self.item_code, rate)),
+			patch.object(repository, "create_customer", return_value=self.customer),
+			patch.object(repository, "create_address", return_value=None),
+		):
+			return repository.get_order(ORDER_ID)
+
+	def test_fetching_an_unseen_order_creates_it(self):
+		repository = self.build_repository()
+
+		result = self.fetch_one_order(repository, self.build_order("Unshipped", 27.46), rate=27.46)
+
+		self.assertTrue(result)
+		self.assertEqual(self.get_sales_order("docstatus").docstatus, 1)
+
+	def test_fetching_a_submitted_order_updates_its_status(self):
+		repository = self.build_repository()
+		self.sync(repository, self.build_order("Unshipped", 27.46), rate=27.46)
+
+		# Before, this returned early on docstatus == 1 and the status never moved.
+		result = self.fetch_one_order(repository, self.build_order("Shipped", 27.46), rate=27.46)
+
+		self.assertTrue(result)
+		self.assertEqual(self.get_sales_order("amazon_order_status").amazon_order_status, "Shipped")
+
+	def test_fetching_a_draft_whose_payment_cleared_promotes_it(self):
+		repository = self.build_repository()
+		self.sync(repository, self.build_order("Pending", 0), rate=0)
+
+		self.fetch_one_order(repository, self.build_order("Unshipped", 27.46), rate=27.46)
+
+		sales_order = self.get_sales_order("docstatus", "grand_total")
+		self.assertEqual(sales_order.docstatus, 1)
+		self.assertGreater(sales_order.grand_total, 0)
+
+	def test_fetching_an_unchanged_order_still_reports_it(self):
+		repository = self.build_repository()
+		self.sync(repository, self.build_order("Unshipped", 27.46), rate=27.46)
+
+		# The failed-sync retry treats an empty result as "still failed", so an unchanged order
+		# must report its Sales Order rather than the no-op None from update_order_status.
+		result = self.fetch_one_order(repository, self.build_order("Unshipped", 27.46), rate=27.46)
+
+		self.assertEqual(result, [self.get_sales_order("name").name])
+
+	def test_refresh_endpoint_rejects_a_non_amazon_order(self):
+		sales_order = frappe.new_doc("Sales Order")
+		sales_order.customer = self.customer
+		sales_order.company = self.settings.company
+		sales_order.transaction_date = frappe.utils.nowdate()
+		sales_order.delivery_date = frappe.utils.nowdate()
+		sales_order.append(
+			"items",
+			{
+				"item_code": self.item_code,
+				"qty": 1,
+				"rate": 10,
+				"warehouse": self.settings.warehouse,
+				"delivery_date": frappe.utils.nowdate(),
+			},
+		)
+		sales_order.flags.ignore_mandatory = True
+		sales_order.save(ignore_permissions=True)
+
+		with self.assertRaises(frappe.ValidationError):
+			amazon_repository.refresh_sales_order_status(sales_order.name)
+
+		sales_order.delete(force=True)
+
 
 class TestStatusRefreshWindow(IntegrationTestCase):
 	def test_a_week_old_watermark_is_walked_not_skipped(self):
