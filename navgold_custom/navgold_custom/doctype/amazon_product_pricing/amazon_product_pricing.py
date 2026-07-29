@@ -25,7 +25,7 @@ class AmazonProductPricing(Document):
 		from frappe.types import DF
 
 		active_strategy: DF.Link | None
-		amazon_sync_status: DF.Literal["Pending", "Submitted", "Error"]
+		amazon_sync_status: DF.Literal["Pending", "Submitted", "Error", "Skipped"]
 		backorder_strategy: DF.Link | None
 		current_max_price: DF.Currency
 		current_min_price: DF.Currency

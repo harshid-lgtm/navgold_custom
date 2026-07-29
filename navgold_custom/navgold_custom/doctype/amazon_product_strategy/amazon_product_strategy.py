@@ -82,8 +82,10 @@ class AmazonProductStrategy(Document):
 			AmazonProductCost,
 		)
 
+		calculated_margin: DF.Percent
 		calculated_max_price: DF.Currency
 		calculated_min_price: DF.Currency
+		calculated_profit: DF.Currency
 		costs: DF.Table[AmazonProductCost]
 		is_active: DF.Check
 		max_margin: DF.Percent
@@ -91,6 +93,7 @@ class AmazonProductStrategy(Document):
 		proxy_sku: DF.Link
 		repricer_rule: DF.Link | None
 		strategy_name: DF.Data
+		target_price: DF.Currency
 	# end: auto-generated types
 
 	def validate(self):

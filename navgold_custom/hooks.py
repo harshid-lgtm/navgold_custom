@@ -291,6 +291,7 @@ doctype_js = {
 	"Pick List": ["navgold_custom/custom_script/pick_list/pick_list.js"],
 	"Packing Slip": ["navgold_custom/custom_script/packing_slip/packing_slip.js"],
 	"Supplier": ["navgold_custom/custom_script/supplier/supplier.js"],
+	"Item": ["navgold_custom/custom_script/item/item.js"],
 }
 
 doc_events = {

@@ -9,4 +9,8 @@ def get_data(data):
 		{"label": _("Supplier"), "items": ["Supplier Item Price and Stock"]}
 	)
 
+	data["non_standard_fieldnames"]["Proxy SKU"] = "item"
+
+	data["transactions"].append({"label": _("Amazon Linked"), "items": ["Proxy SKU"]})
+
 	return data
