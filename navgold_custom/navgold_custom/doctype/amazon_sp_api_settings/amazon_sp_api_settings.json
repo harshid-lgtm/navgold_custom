@@ -28,6 +28,7 @@
 		"after_date",
 		"sync_selected_date_only",
 		"sync_orders",
+		"refresh_order_statuses",
 		"column_break_4",
 		"enable_sync",
 		"last_synced_at",
@@ -172,6 +173,14 @@
 			"fieldtype": "Button",
 			"label": "Sync Orders",
 			"options": "get_order_details"
+		},
+		{
+			"depends_on": "eval: !doc.__islocal && doc.is_active",
+			"description": "Click this button to re-read the status of orders Amazon has updated since the last status sync.",
+			"fieldname": "refresh_order_statuses",
+			"fieldtype": "Button",
+			"label": "Refresh Order Statuses",
+			"options": "refresh_order_statuses_now"
 		},
 		{
 			"fieldname": "column_break_4",

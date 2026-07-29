@@ -467,9 +467,18 @@ class AmazonRepository:
 			if not orders_list:
 				break
 
+			existing_orders = self.get_sales_orders_by_amazon_id(
+				[order.get("AmazonOrderId") for order in orders_list]
+			)
+
 			for order in orders_list:
 				try:
-					sales_order = self.create_sales_order(order)
+					existing_so = existing_orders.get(order.get("AmazonOrderId"))
+					if existing_so:
+						sales_order = self.update_order_status(order, existing_so)
+					else:
+						sales_order = self.create_sales_order(order)
+
 					if sales_order:
 						sales_orders.append(sales_order)
 					order_count += 1
@@ -593,13 +602,16 @@ class AmazonRepository:
 			order_id=amazon_order_ids,
 		)
 
-		sales_orders = []
-		if order_payload:
-			sales_order = self.create_sales_order(order_payload)
-			if sales_order:
-				sales_orders.append(sales_order)
+		if not order_payload:
+			return []
 
-		return sales_orders
+		existing_so = self.get_sales_orders_by_amazon_id([amazon_order_ids]).get(amazon_order_ids)
+		if existing_so:
+			sales_order = self.update_order_status(order_payload, existing_so) or existing_so.name
+		else:
+			sales_order = self.create_sales_order(order_payload)
+
+		return [sales_order] if sales_order else []
 
 
 @frappe.whitelist()
@@ -615,8 +627,27 @@ def get_orders(created_after: str, sync_selected_date_only: int = 0):
 
 @frappe.whitelist()
 def get_order(amazon_order_ids: str):
+	frappe.only_for("System Manager")
+
 	repository = AmazonRepository()
 	return repository.get_order(amazon_order_ids)
+
+
+@frappe.whitelist()
+def refresh_sales_order_status(sales_order: str):
+	frappe.only_for("System Manager")
+
+	amazon_order_id = frappe.db.get_value("Sales Order", sales_order, "amazon_order_id")
+	if not amazon_order_id:
+		frappe.throw(frappe._("{0} is not an Amazon order.").format(sales_order))
+
+	repository = AmazonRepository()
+	if not repository.get_order(amazon_order_id):
+		frappe.throw(frappe._("Amazon did not return order {0}.").format(amazon_order_id))
+
+	return frappe.db.get_value(
+		"Sales Order", sales_order, ["amazon_order_status", "docstatus", "status"], as_dict=True
+	)
 
 
 def get_status_refresh_window(watermark, run_started_at):
