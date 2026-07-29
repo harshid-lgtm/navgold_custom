@@ -29,6 +29,7 @@ STATUS_REFRESH_OVERLAP_MINUTES = 15
 STATUS_REFRESH_WINDOW_HOURS = 6
 STATUS_REFRESH_MAX_BACKLOG_DAYS = 7
 STATUS_REFRESH_MAX_PAGES = 10
+STATUS_REFRESH_LAG_MINUTES = 3
 
 AMAZON_ORDER_STATUSES = (
 	"PendingAvailability",
@@ -656,8 +657,10 @@ def get_status_refresh_window(watermark, run_started_at):
 
 	skipped_hours = max((backlog_floor - resume_from).total_seconds() / 3600, 0)
 
+	latest_allowed = add_to_date(run_started_at, minutes=-STATUS_REFRESH_LAG_MINUTES)
+
 	window_start = add_to_date(max(resume_from, backlog_floor), minutes=-STATUS_REFRESH_OVERLAP_MINUTES)
-	window_end = min(add_to_date(window_start, hours=STATUS_REFRESH_WINDOW_HOURS), run_started_at)
+	window_end = min(add_to_date(window_start, hours=STATUS_REFRESH_WINDOW_HOURS), latest_allowed)
 
 	return window_start, window_end, skipped_hours
 
