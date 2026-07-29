@@ -177,6 +177,21 @@ def alert_below_min_sale(sales_order: str, proxy_sku: str, rate, min_price, qty)
 	)
 
 
+def alert_order_canceled(sales_order: str, amazon_order_id: str, amazon_status: str) -> None:
+	notify(
+		"Amazon order cancelled",
+		[
+			f"{frappe.utils.escape_html(amazon_order_id)} is now "
+			f"<b>{frappe.utils.escape_html(amazon_status)}</b> on Amazon.",
+			f"{frappe.utils.escape_html(sales_order)} has been closed — check any stock reservation "
+			f"and linked Material Request.",
+		],
+		severity="warning",
+		dedupe_key=f"ordercancel:{sales_order}",
+		dedupe_seconds=86400,
+	)
+
+
 def check_sales_order_below_min(doc, method=None) -> None:
 	# Detection runs regardless of Telegram config — the circuit breaker depends on it.
 	if not doc.get("amazon_order_id"):
