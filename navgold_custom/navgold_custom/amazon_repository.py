@@ -17,6 +17,7 @@ from frappe.utils.synchronization import filelock
 
 from navgold_custom.navgold_custom.amazon_pricing.alerts import (
 	alert_orders_canceled,
+	alert_status_refresh_gap,
 	alert_status_refresh_truncated,
 )
 from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import (
@@ -24,18 +25,11 @@ from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api 
 	SPAPIError,
 )
 
-# Overlap so a status change landing between two runs is never skipped.
 STATUS_REFRESH_OVERLAP_MINUTES = 15
-# Hard floor on the fetch window. A watermark that stops advancing (failed run, disabled sync) must
-# not be able to grow the batch without bound — that is what tripped Amazon's 429 quota in 4f89d7c.
-STATUS_REFRESH_MAX_WINDOW_HOURS = 24
-# Largest slice one run will close. A backlog is walked in chunks this size instead of in one sweep.
 STATUS_REFRESH_WINDOW_HOURS = 6
+STATUS_REFRESH_MAX_BACKLOG_DAYS = 7
 STATUS_REFRESH_MAX_PAGES = 10
 
-# Every status the Orders API can report. The create path requests all of them; the refresh sends no
-# filter at all, so anything here can also come back from LastUpdatedAfter and must be a valid option
-# on the amazon_order_status field (see setup.py).
 AMAZON_ORDER_STATUSES = (
 	"PendingAvailability",
 	"Pending",
@@ -47,14 +41,10 @@ AMAZON_ORDER_STATUSES = (
 	"Unfulfillable",
 )
 
-# Amazon suppresses ItemPrice and BuyerName until payment is authorised. PendingAvailability is the
-# pre-order equivalent, so it carries the same missing data.
 UNAUTHORISED_ORDER_STATUSES = ("Pending", "PendingAvailability")
 
 CLOSED_ORDER_STATUSES = ("Canceled", "Unfulfillable")
 
-# Amazon states that still owe a dispatch. Anything else is either not yet payable, already gone, or
-# cancelled, so it has no business on a pick list.
 PICKABLE_ORDER_STATUSES = ("Unshipped", "PartiallyShipped")
 
 
@@ -333,8 +323,6 @@ class AmazonRepository:
 				return None
 
 			if existing_so:
-				# Not get_cached_doc: this instance is mutated and saved, and a failure mid-run would
-				# leave the poisoned copy in the document cache for the rest of the batch.
 				sales_order = frappe.get_doc("Sales Order", existing_so.name)
 			else:
 				sales_order = frappe.new_doc("Sales Order")
@@ -342,9 +330,6 @@ class AmazonRepository:
 			customer_name = self.create_customer(order)
 			self.create_address(order, customer_name)
 
-			# Promotion swaps the order-id placeholder for the real buyer. customer_name and the rest
-			# of the party block are only filled by update_if_missing, so they keep the placeholder
-			# unless cleared first.
 			if sales_order.customer and sales_order.customer != customer_name:
 				sales_order.customer_name = None
 				sales_order.customer_address = None
@@ -528,8 +513,6 @@ class AmazonRepository:
 		if not existing_so or existing_so.amazon_order_status == amazon_status:
 			return None
 
-		# The create cron and this one can both reach the same order; they run on different job ids
-		# so enqueue deduplication does not exclude them.
 		with filelock(f"amazon_order_{order.get('AmazonOrderId')}", timeout=60):
 			if amazon_status in CLOSED_ORDER_STATUSES:
 				frappe.db.set_value("Sales Order", existing_so.name, "amazon_order_status", amazon_status)
@@ -537,12 +520,9 @@ class AmazonRepository:
 					frappe.get_doc("Sales Order", existing_so.name).update_status("Closed")
 				return existing_so.name
 
-			# Payment cleared: Amazon will now return prices and a buyer name, so rebuild from the
-			# full payload rather than relabelling a £0 draft.
 			if existing_so.docstatus == 0:
 				return self.create_sales_order(order)
 
-			# A submitted order's money is settled — only the status field may move.
 			frappe.db.set_value("Sales Order", existing_so.name, "amazon_order_status", amazon_status)
 			return existing_so.name
 
@@ -597,8 +577,6 @@ class AmazonRepository:
 				next_token=next_token,
 			)
 
-			# Retries are exhausted. Without this the loop would exit as if pagination had finished
-			# and the caller would advance the watermark past pages that were never read.
 			if orders_payload is None:
 				self.refresh_truncated = True
 				break
@@ -642,16 +620,15 @@ def get_order(amazon_order_ids: str):
 
 
 def get_status_refresh_window(watermark, run_started_at):
-	window_start = max(
-		add_to_date(get_datetime(watermark or run_started_at), minutes=-STATUS_REFRESH_OVERLAP_MINUTES),
-		add_to_date(run_started_at, hours=-STATUS_REFRESH_MAX_WINDOW_HOURS),
-	)
-	# Walking a bounded slice rather than "everything since the watermark" is what keeps a backlog
-	# making forward progress: each run closes its own window instead of re-reading the same first
-	# pages forever, which is how 4f89d7c's 429 loop started.
+	resume_from = get_datetime(watermark or run_started_at)
+	backlog_floor = add_to_date(run_started_at, days=-STATUS_REFRESH_MAX_BACKLOG_DAYS)
+
+	skipped_hours = max((backlog_floor - resume_from).total_seconds() / 3600, 0)
+
+	window_start = add_to_date(max(resume_from, backlog_floor), minutes=-STATUS_REFRESH_OVERLAP_MINUTES)
 	window_end = min(add_to_date(window_start, hours=STATUS_REFRESH_WINDOW_HOURS), run_started_at)
 
-	return window_start, window_end
+	return window_start, window_end, skipped_hours
 
 
 @frappe.whitelist()
@@ -660,14 +637,15 @@ def refresh_order_statuses():
 
 	repository = AmazonRepository()
 	run_started_at = now_datetime()
-	window_start, window_end = get_status_refresh_window(
+	window_start, window_end, skipped_hours = get_status_refresh_window(
 		repository.amz_setting.last_status_synced_at, run_started_at
 	)
 
+	if skipped_hours:
+		alert_status_refresh_gap(skipped_hours, window_start)
+
 	result = repository.refresh_order_statuses(window_start, window_end)
 
-	# Only a pass that both succeeded and read every page may close its window. A truncated or
-	# throttled pass leaves the watermark alone so the unread orders are retried, never skipped.
 	if result is not None and not repository.refresh_truncated:
 		frappe.db.set_single_value("Amazon SP API Settings", "last_status_synced_at", window_end)
 

@@ -10,8 +10,9 @@ from frappe.utils import add_to_date, get_datetime, now_datetime
 from navgold_custom.navgold_custom import amazon_repository
 from navgold_custom.navgold_custom.amazon_repository import (
 	AMAZON_ORDER_STATUSES,
+	STATUS_REFRESH_MAX_BACKLOG_DAYS,
 	STATUS_REFRESH_MAX_PAGES,
-	STATUS_REFRESH_MAX_WINDOW_HOURS,
+	STATUS_REFRESH_OVERLAP_MINUTES,
 	STATUS_REFRESH_WINDOW_HOURS,
 	AmazonRepository,
 	get_status_refresh_window,
@@ -52,7 +53,6 @@ class TestOrderStatusRefresh(IntegrationTestCase):
 
 	def clean_up(self):
 		for name in frappe.get_all("Sales Order", filters={"amazon_order_id": ORDER_ID}, pluck="name"):
-			# The cancel test leaves the order Closed, which blocks cancel(); reopen it first.
 			frappe.db.set_value("Sales Order", name, "status", "To Deliver and Bill")
 			sales_order = frappe.get_doc("Sales Order", name)
 			if sales_order.docstatus == 1:
@@ -120,7 +120,6 @@ class TestOrderStatusRefresh(IntegrationTestCase):
 	def test_pending_order_is_parked_in_draft(self):
 		repository = self.build_repository()
 
-		# Amazon withholds ItemPrice while payment is unauthorised, so this arrives at rate 0.
 		self.sync(repository, self.build_order("Pending", 0), rate=0)
 
 		sales_order = self.get_sales_order("docstatus", "amazon_order_status")
@@ -139,7 +138,6 @@ class TestOrderStatusRefresh(IntegrationTestCase):
 		self.assertGreater(sales_order.grand_total, 0, "promotion must pick up the real price")
 
 	def test_promotion_replaces_the_order_id_placeholder_customer_name(self):
-		# Amazon suppresses BuyerName while Pending, so create_customer falls back to the order id.
 		placeholder = self.ensure_customer(ORDER_ID)
 		repository = self.build_repository()
 		with (
@@ -174,8 +172,6 @@ class TestOrderStatusRefresh(IntegrationTestCase):
 		)
 
 	def test_a_submitted_order_is_not_double_counted_against_free_stock(self):
-		# Once submitted, erpnext maintains Bin.reserved_qty itself; counting the draft too would
-		# understate free stock and suppress listings.
 		repository = self.build_repository()
 		self.sync(repository, self.build_order("Pending", 0), rate=0)
 		self.refresh(repository, self.build_order("Unshipped", 27.46), rate=27.46)
@@ -228,8 +224,6 @@ class TestOrderStatusRefresh(IntegrationTestCase):
 		self.assertTrue(frappe.db.exists("Amazon Failed Sync Record", {"amazon_order_id": ORDER_ID}))
 
 	def test_every_status_amazon_can_return_is_a_valid_option(self):
-		# The refresh sends no OrderStatuses filter, so Amazon can hand back any status in the
-		# lifecycle. db_set bypasses validation, so an unlisted one would be stored silently.
 		options = frappe.get_meta("Sales Order").get_field("amazon_order_status").options.split("\n")
 
 		self.assertEqual([status for status in AMAZON_ORDER_STATUSES if status not in options], [])
@@ -266,20 +260,32 @@ class TestOrderStatusRefresh(IntegrationTestCase):
 
 
 class TestStatusRefreshWindow(IntegrationTestCase):
-	def test_window_is_clamped_when_the_watermark_stalls(self):
+	def test_a_week_old_watermark_is_walked_not_skipped(self):
 		run_started_at = now_datetime()
-		stalled = add_to_date(run_started_at, days=-30)
+		stalled = add_to_date(run_started_at, days=-7)
 
-		window_start, _ = get_status_refresh_window(stalled, run_started_at)
+		window_start, _, skipped_hours = get_status_refresh_window(stalled, run_started_at)
 
-		floor = add_to_date(run_started_at, hours=-STATUS_REFRESH_MAX_WINDOW_HOURS)
-		self.assertEqual(get_datetime(window_start), get_datetime(floor))
+		self.assertEqual(skipped_hours, 0, "a backlog inside the bound must be walked, not skipped")
+		self.assertLess(get_datetime(window_start), add_to_date(run_started_at, days=-6))
+
+	def test_a_watermark_past_the_bound_reports_the_gap(self):
+		run_started_at = now_datetime()
+		stalled = add_to_date(run_started_at, days=-STATUS_REFRESH_MAX_BACKLOG_DAYS - 5)
+
+		window_start, _, skipped_hours = get_status_refresh_window(stalled, run_started_at)
+
+		self.assertAlmostEqual(skipped_hours, 5 * 24, delta=1)
+		floor = add_to_date(run_started_at, days=-STATUS_REFRESH_MAX_BACKLOG_DAYS)
+		self.assertEqual(
+			get_datetime(window_start),
+			get_datetime(add_to_date(floor, minutes=-STATUS_REFRESH_OVERLAP_MINUTES)),
+		)
 
 	def test_a_backlog_is_walked_in_bounded_slices(self):
-		# Closing a slice per run is what stops a truncated pass re-reading page 1 forever.
 		run_started_at = now_datetime()
-		window_start, window_end = get_status_refresh_window(
-			add_to_date(run_started_at, days=-30), run_started_at
+		window_start, window_end, _ = get_status_refresh_window(
+			add_to_date(run_started_at, days=-3), run_started_at
 		)
 
 		span_hours = (get_datetime(window_end) - get_datetime(window_start)).total_seconds() / 3600
@@ -288,17 +294,16 @@ class TestStatusRefreshWindow(IntegrationTestCase):
 
 	def test_a_caught_up_watermark_reads_up_to_now(self):
 		run_started_at = now_datetime()
-		window_start, window_end = get_status_refresh_window(
+		window_start, window_end, skipped_hours = get_status_refresh_window(
 			add_to_date(run_started_at, minutes=-20), run_started_at
 		)
 
+		self.assertEqual(skipped_hours, 0)
 		self.assertEqual(get_datetime(window_end), run_started_at)
 		self.assertLess(get_datetime(window_start), run_started_at)
 
 
 def init_without_credentials(self):
-	# A bare CI site has no SP-API secret, and __init__ reads it eagerly. These tests never make a
-	# call, so stand the repository up without one.
 	self.refresh_truncated = False
 	self.amz_setting = frappe.get_single("Amazon SP API Settings")
 	self.instance_params = {}
@@ -312,7 +317,6 @@ class TestStatusRefreshPagination(IntegrationTestCase):
 		return repository
 
 	def run_refresh(self, repository, pages):
-		# pages is a list of payloads; None simulates call_sp_api_method exhausting its retries.
 		calls = iter(pages)
 
 		def fake_call(sp_api_method, **kwargs):
@@ -340,9 +344,6 @@ class TestStatusRefreshPagination(IntegrationTestCase):
 		self.assertIsNone(self.run_refresh(repository, [None]))
 
 	def test_a_mid_pagination_failure_must_not_look_like_a_clean_finish(self):
-		# Regression: call_sp_api_method returns None on exhausted retries. Assigning that into the
-		# loop variable ended the walk silently, and the caller then advanced the watermark past
-		# pages that were never read — losing those orders from both cursors permanently.
 		repository = self.build_repository()
 		pages = [{"Orders": [], "NextToken": "t1"}, None]
 

@@ -83,8 +83,6 @@ class AmazonSPAPISettings(Document):
 
 		if self.has_value_changed("after_date"):
 			self.last_synced_at = get_datetime(self.after_date)
-			# Both watermarks are read-only, so rewinding after_date is the only lever an operator
-			# has to force a wider catch-up once the 24h clamp has moved past an outage.
 			self.last_status_synced_at = get_datetime(self.after_date)
 
 		if self.is_active == 0:

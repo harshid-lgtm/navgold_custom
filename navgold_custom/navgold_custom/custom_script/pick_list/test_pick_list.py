@@ -112,8 +112,6 @@ class TestPickListWalkRouteSort(IntegrationTestCase):
 
 class TestPickListOpenOrderFilter(IntegrationTestCase):
 	def setUp(self):
-		# The configured company, not the first one found: a bare site's fixture company has no
-		# fiscal year covering today, so every Sales Order insert would abort.
 		settings = frappe.get_single("Amazon SP API Settings")
 		self.company = settings.company
 		self.warehouse = settings.warehouse
@@ -198,5 +196,4 @@ class TestPickListOpenOrderFilter(IntegrationTestCase):
 		sales_order.submit()
 		self.created.append(sales_order.name)
 
-		# Filtering on an Amazon field must not silently drop orders raised outside Amazon.
 		self.assertIn(sales_order.name, self.get_offered_orders())

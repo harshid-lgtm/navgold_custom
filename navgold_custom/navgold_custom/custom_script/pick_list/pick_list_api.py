@@ -23,8 +23,6 @@ def get_open_sales_orders_for_delivery(customer: str | None = None, company: str
 	if customer:
 		filters["customer"] = customer
 
-	# An Amazon order is only pickable while it still owes a dispatch. Orders raised outside Amazon
-	# carry no status and are matched by the second clause so they stay visible.
 	or_filters = [
 		["amazon_order_status", "in", PICKABLE_ORDER_STATUSES],
 		["amazon_order_id", "is", "not set"],
