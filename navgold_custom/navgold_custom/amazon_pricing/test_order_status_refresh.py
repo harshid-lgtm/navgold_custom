@@ -296,6 +296,14 @@ class TestStatusRefreshWindow(IntegrationTestCase):
 		self.assertLess(get_datetime(window_start), run_started_at)
 
 
+def init_without_credentials(self):
+	# A bare CI site has no SP-API secret, and __init__ reads it eagerly. These tests never make a
+	# call, so stand the repository up without one.
+	self.refresh_truncated = False
+	self.amz_setting = frappe.get_single("Amazon SP API Settings")
+	self.instance_params = {}
+
+
 class TestStatusRefreshPagination(IntegrationTestCase):
 	def build_repository(self):
 		repository = AmazonRepository.__new__(AmazonRepository)
@@ -364,7 +372,10 @@ class TestStatusRefreshPagination(IntegrationTestCase):
 			repository_self.refresh_truncated = True
 			return []
 
-		with patch.object(AmazonRepository, "refresh_order_statuses", autospec=True) as mock_refresh:
+		with (
+			patch.object(AmazonRepository, "__init__", init_without_credentials),
+			patch.object(AmazonRepository, "refresh_order_statuses", autospec=True) as mock_refresh,
+		):
 			mock_refresh.side_effect = truncated_refresh
 			amazon_repository.refresh_order_statuses()
 
@@ -378,7 +389,10 @@ class TestStatusRefreshPagination(IntegrationTestCase):
 		settings = frappe.get_single("Amazon SP API Settings")
 		settings.db_set("last_status_synced_at", add_to_date(now_datetime(), hours=-2))
 
-		with patch.object(AmazonRepository, "refresh_order_statuses", return_value=[]):
+		with (
+			patch.object(AmazonRepository, "__init__", init_without_credentials),
+			patch.object(AmazonRepository, "refresh_order_statuses", return_value=[]),
+		):
 			amazon_repository.refresh_order_statuses()
 
 		advanced = get_datetime(frappe.db.get_single_value("Amazon SP API Settings", "last_status_synced_at"))

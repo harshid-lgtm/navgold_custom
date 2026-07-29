@@ -486,7 +486,8 @@ class AmazonRepository:
 					order_count += 1
 
 					if order_count % 10 == 0:
-						frappe.db.commit()  # nosemgrep: manual-commit, batch commit every 10 orders
+						# nosemgrep: frappe-manual-commit -- background job batch, commit every 10 orders
+						frappe.db.commit()
 
 				except Exception:
 					order_id = (order or {}).get("AmazonOrderId", "Unknown")
@@ -574,7 +575,8 @@ class AmazonRepository:
 				except Exception:
 					self.create_failed_sync_record(order_id or "Unknown", frappe.get_traceback(), order=order)
 
-			frappe.db.commit()  # nosemgrep: manual-commit, commit each page so a later failure keeps progress
+			# nosemgrep: frappe-manual-commit -- background job batch, keep progress if a later page fails
+			frappe.db.commit()
 			pages_read += 1
 
 			next_token = orders_payload.get("NextToken")
