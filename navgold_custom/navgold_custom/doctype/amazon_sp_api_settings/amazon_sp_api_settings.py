@@ -59,6 +59,8 @@ class AmazonSPAPISettings(Document):
 		enable_sync: DF.Check
 		is_active: DF.Check
 		is_old_data_migrated: DF.Check
+		last_status_synced_at: DF.Datetime | None
+		last_synced_at: DF.Datetime | None
 		map_state_data: DF.Check
 		market_place_account_group: DF.Link
 		max_retry_limit: DF.Int
@@ -81,6 +83,7 @@ class AmazonSPAPISettings(Document):
 
 		if self.has_value_changed("after_date"):
 			self.last_synced_at = get_datetime(self.after_date)
+			self.last_status_synced_at = get_datetime(self.after_date)
 
 		if self.is_active == 0:
 			self.enable_sync = 0

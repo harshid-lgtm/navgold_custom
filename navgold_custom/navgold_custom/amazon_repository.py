@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 import frappe
 from frappe.utils import (
 	add_days,
+	add_to_date,
 	convert_utc_to_system_timezone,
 	flt,
 	get_datetime,
@@ -12,11 +13,39 @@ from frappe.utils import (
 	getdate,
 	now_datetime,
 )
+from frappe.utils.synchronization import filelock
 
+from navgold_custom.navgold_custom.amazon_pricing.alerts import (
+	alert_orders_canceled,
+	alert_status_refresh_gap,
+	alert_status_refresh_truncated,
+)
 from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import (
 	Orders,
 	SPAPIError,
 )
+
+STATUS_REFRESH_OVERLAP_MINUTES = 15
+STATUS_REFRESH_WINDOW_HOURS = 6
+STATUS_REFRESH_MAX_BACKLOG_DAYS = 7
+STATUS_REFRESH_MAX_PAGES = 10
+
+AMAZON_ORDER_STATUSES = (
+	"PendingAvailability",
+	"Pending",
+	"Unshipped",
+	"PartiallyShipped",
+	"Shipped",
+	"InvoiceUnconfirmed",
+	"Canceled",
+	"Unfulfillable",
+)
+
+UNAUTHORISED_ORDER_STATUSES = ("Pending", "PendingAvailability")
+
+CLOSED_ORDER_STATUSES = ("Canceled", "Unfulfillable")
+
+PICKABLE_ORDER_STATUSES = ("Unshipped", "PartiallyShipped")
 
 
 def parse_amazon_utc(utc_time_str):
@@ -34,6 +63,7 @@ def format_local_as_amazon_utc(local_datetime):
 
 class AmazonRepository:
 	def __init__(self):
+		self.refresh_truncated = False
 		self.amz_setting = frappe.get_single("Amazon SP API Settings")
 		self.instance_params = {
 			"client_id": self.amz_setting.client_id,
@@ -293,12 +323,17 @@ class AmazonRepository:
 				return None
 
 			if existing_so:
-				sales_order = frappe.get_cached_doc("Sales Order", existing_so.name)
+				sales_order = frappe.get_doc("Sales Order", existing_so.name)
 			else:
 				sales_order = frappe.new_doc("Sales Order")
 
 			customer_name = self.create_customer(order)
 			self.create_address(order, customer_name)
+
+			if sales_order.customer and sales_order.customer != customer_name:
+				sales_order.customer_name = None
+				sales_order.customer_address = None
+				sales_order.address_display = None
 
 			purchase_date_str = order.get("PurchaseDate")
 			latest_ship_date_str = order.get("LatestShipDate")
@@ -366,7 +401,10 @@ class AmazonRepository:
 			sales_order.run_method("calculate_taxes_and_totals")
 
 			sales_order.save(ignore_permissions=True)
-			sales_order.submit()
+
+			if order.get("OrderStatus") not in UNAUTHORISED_ORDER_STATUSES:
+				sales_order.submit()
+
 			return sales_order.name
 
 		except Exception as error:
@@ -394,7 +432,7 @@ class AmazonRepository:
 
 	def get_orders(self, created_after, sync_selected_date_only=0):
 		orders = self.get_orders_instance()
-		order_statuses = ["Shipped", "InvoiceUnconfirmed", "Canceled", "Unfulfillable"]
+		order_statuses = list(AMAZON_ORDER_STATUSES)
 		fulfillment_channels = ["FBA", "SellerFulfilled"]
 
 		kwargs = {
@@ -437,7 +475,8 @@ class AmazonRepository:
 					order_count += 1
 
 					if order_count % 10 == 0:
-						frappe.db.commit()  # nosemgrep: manual-commit, batch commit every 10 orders
+						# nosemgrep: frappe-manual-commit -- background job batch, commit every 10 orders
+						frappe.db.commit()
 
 				except Exception:
 					order_id = (order or {}).get("AmazonOrderId", "Unknown")
@@ -455,6 +494,97 @@ class AmazonRepository:
 			)
 
 		return sales_orders
+
+	@staticmethod
+	def get_sales_orders_by_amazon_id(order_ids):
+		if not order_ids:
+			return {}
+
+		rows = frappe.get_all(
+			"Sales Order",
+			filters={"amazon_order_id": ["in", order_ids], "docstatus": ["!=", 2]},
+			fields=["name", "docstatus", "amazon_order_status", "amazon_order_id"],
+		)
+		return {row.amazon_order_id: row for row in rows}
+
+	def update_order_status(self, order, existing_so):
+		amazon_status = order.get("OrderStatus")
+
+		if not existing_so or existing_so.amazon_order_status == amazon_status:
+			return None
+
+		with filelock(f"amazon_order_{order.get('AmazonOrderId')}", timeout=60):
+			if amazon_status in CLOSED_ORDER_STATUSES:
+				frappe.db.set_value("Sales Order", existing_so.name, "amazon_order_status", amazon_status)
+				if existing_so.docstatus == 1:
+					frappe.get_doc("Sales Order", existing_so.name).update_status("Closed")
+				return existing_so.name
+
+			if existing_so.docstatus == 0:
+				return self.create_sales_order(order)
+
+			frappe.db.set_value("Sales Order", existing_so.name, "amazon_order_status", amazon_status)
+			return existing_so.name
+
+	def refresh_order_statuses(self, window_start, window_end):
+		orders = self.get_orders_instance()
+		orders_payload = self.call_sp_api_method(
+			sp_api_method=orders.get_orders,
+			last_updated_after=format_local_as_amazon_utc(window_start),
+			last_updated_before=format_local_as_amazon_utc(window_end),
+			fulfillment_channels=["FBA", "SellerFulfilled"],
+			max_results=100,
+		)
+
+		if orders_payload is None:
+			return None
+
+		updated_orders = []
+		closed_orders = []
+		pages_read = 0
+
+		while orders_payload:
+			orders_list = orders_payload.get("Orders", [])
+			existing_orders = self.get_sales_orders_by_amazon_id(
+				[order.get("AmazonOrderId") for order in orders_list]
+			)
+
+			for order in orders_list:
+				order_id = order.get("AmazonOrderId")
+				try:
+					if self.update_order_status(order, existing_orders.get(order_id)):
+						updated_orders.append(order_id)
+						if order.get("OrderStatus") in CLOSED_ORDER_STATUSES:
+							closed_orders.append(order_id)
+				except Exception:
+					self.create_failed_sync_record(order_id or "Unknown", frappe.get_traceback(), order=order)
+
+			# nosemgrep: frappe-manual-commit -- background job batch, keep progress if a later page fails
+			frappe.db.commit()
+			pages_read += 1
+
+			next_token = orders_payload.get("NextToken")
+			if not next_token:
+				break
+
+			if pages_read >= STATUS_REFRESH_MAX_PAGES:
+				self.refresh_truncated = True
+				alert_status_refresh_truncated(len(updated_orders), STATUS_REFRESH_MAX_PAGES)
+				break
+
+			orders_payload = self.call_sp_api_method(
+				sp_api_method=orders.get_orders,
+				next_token=next_token,
+			)
+
+			if orders_payload is None:
+				self.refresh_truncated = True
+				break
+
+		if closed_orders:
+			alert_orders_canceled(closed_orders)
+
+		return updated_orders
 
 	def get_order(self, amazon_order_ids):
 		orders = self.get_orders_instance()
@@ -487,3 +617,49 @@ def get_orders(created_after: str, sync_selected_date_only: int = 0):
 def get_order(amazon_order_ids: str):
 	repository = AmazonRepository()
 	return repository.get_order(amazon_order_ids)
+
+
+def get_status_refresh_window(watermark, run_started_at):
+	resume_from = get_datetime(watermark or run_started_at)
+	backlog_floor = add_to_date(run_started_at, days=-STATUS_REFRESH_MAX_BACKLOG_DAYS)
+
+	skipped_hours = max((backlog_floor - resume_from).total_seconds() / 3600, 0)
+
+	window_start = add_to_date(max(resume_from, backlog_floor), minutes=-STATUS_REFRESH_OVERLAP_MINUTES)
+	window_end = min(add_to_date(window_start, hours=STATUS_REFRESH_WINDOW_HOURS), run_started_at)
+
+	return window_start, window_end, skipped_hours
+
+
+@frappe.whitelist()
+def refresh_order_statuses():
+	frappe.only_for("System Manager")
+
+	repository = AmazonRepository()
+	run_started_at = now_datetime()
+	window_start, window_end, skipped_hours = get_status_refresh_window(
+		repository.amz_setting.last_status_synced_at, run_started_at
+	)
+
+	if skipped_hours:
+		alert_status_refresh_gap(skipped_hours, window_start)
+
+	result = repository.refresh_order_statuses(window_start, window_end)
+
+	if result is not None and not repository.refresh_truncated:
+		frappe.db.set_single_value("Amazon SP API Settings", "last_status_synced_at", window_end)
+
+	return result
+
+
+def schedule_refresh_order_statuses():
+	if not frappe.db.get_single_value("Amazon SP API Settings", "enable_sync"):
+		return
+
+	frappe.enqueue(
+		job_id="navgold.amazon_order_status_refresh",
+		deduplicate=True,
+		method=refresh_order_statuses,
+		queue="long",
+		timeout=6000,
+	)

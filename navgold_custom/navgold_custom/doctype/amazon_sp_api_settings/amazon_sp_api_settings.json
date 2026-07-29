@@ -31,6 +31,7 @@
 		"column_break_4",
 		"enable_sync",
 		"last_synced_at",
+		"last_status_synced_at",
 		"max_retry_limit",
 		"is_old_data_migrated"
 	],
@@ -188,6 +189,13 @@
 			"fieldname": "last_synced_at",
 			"fieldtype": "Datetime",
 			"label": "Last Synced At",
+			"read_only": 1
+		},
+		{
+			"description": "Watermark for the order status refresh. Kept separate from Last Synced At so a failure on one pass cannot widen the other's fetch window.",
+			"fieldname": "last_status_synced_at",
+			"fieldtype": "Datetime",
+			"label": "Last Status Synced At",
 			"read_only": 1
 		},
 		{
