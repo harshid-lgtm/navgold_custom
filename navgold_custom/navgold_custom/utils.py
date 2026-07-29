@@ -114,9 +114,6 @@ def get_free_qty_map(item_codes: list[str]) -> dict[str, dict[str, float]]:
 
 
 def get_draft_amazon_order_qty_map(item_codes: list[str]) -> dict[str, float]:
-	# Amazon orders awaiting payment authorisation are parked in draft, and erpnext only maintains
-	# Bin.reserved_qty on submit. Without this the stock feed would advertise quantity that is
-	# already sold for the whole Pending window.
 	if not item_codes:
 		return {}
 

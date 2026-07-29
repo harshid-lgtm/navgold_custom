@@ -209,6 +209,21 @@ def alert_status_refresh_truncated(updated_count: int, page_cap: int) -> None:
 	)
 
 
+def alert_status_refresh_gap(skipped_hours: float, resuming_from) -> None:
+	notify(
+		"Amazon status refresh skipped a gap",
+		[
+			f"The watermark was too stale to walk back, so {skipped_hours:.0f}h of status changes "
+			f"were passed over.",
+			f"Resuming from {cstr(resuming_from)}. Rewind After Date on Amazon SP API Settings to "
+			f"re-read the gap.",
+		],
+		severity="critical",
+		dedupe_key="status_refresh_gap",
+		dedupe_seconds=3600,
+	)
+
+
 def alert_stale_draft_orders(draft_count: int, oldest_hours: float) -> None:
 	notify(
 		"Amazon orders stuck in draft",
@@ -417,8 +432,6 @@ def safety_sweep() -> None:
 
 
 def check_stale_draft_orders(max_age_hours: int = 6) -> None:
-	# A draft that never promoted is a paid customer order holding no stock reservation, and the
-	# order-sync health report counts by creation regardless of docstatus, so nothing else sees it.
 	cutoff = add_to_date(now_datetime(), hours=-max_age_hours)
 	oldest = frappe.db.get_value(
 		"Sales Order",
