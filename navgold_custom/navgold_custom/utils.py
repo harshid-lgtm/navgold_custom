@@ -102,13 +102,39 @@ def get_free_qty_map(item_codes: list[str]) -> dict[str, dict[str, float]]:
 		.groupby(bin_dt.item_code)
 	).run(as_dict=True)
 
+	draft_qty_map = get_draft_amazon_order_qty_map(item_codes)
+
 	return {
 		r["item_code"]: {
 			"actual_qty": flt(r.get("actual_qty", 0)),
-			"free_qty": flt(r.get("free_qty", 0)),
+			"free_qty": flt(r.get("free_qty", 0)) - draft_qty_map.get(r["item_code"], 0),
 		}
 		for r in result
 	}
+
+
+def get_draft_amazon_order_qty_map(item_codes: list[str]) -> dict[str, float]:
+	if not item_codes:
+		return {}
+
+	sales_order = DocType("Sales Order")
+	sales_order_item = DocType("Sales Order Item")
+
+	rows = (
+		frappe.qb.from_(sales_order_item)
+		.join(sales_order)
+		.on(sales_order_item.parent == sales_order.name)
+		.select(sales_order_item.item_code, Sum(sales_order_item.stock_qty).as_("draft_qty"))
+		.where(
+			sales_order_item.item_code.isin(item_codes)
+			& (sales_order.docstatus == 0)
+			& (sales_order.amazon_order_id.notnull())
+			& (sales_order.amazon_order_id != "")
+		)
+		.groupby(sales_order_item.item_code)
+	).run(as_dict=True)
+
+	return {row["item_code"]: flt(row.get("draft_qty", 0)) for row in rows}
 
 
 def calculate_adjusted_qty(raw_qty: float, pool_size: int, pack_size: float) -> int:

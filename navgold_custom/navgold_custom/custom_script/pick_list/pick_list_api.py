@@ -5,6 +5,7 @@ import frappe
 from frappe import _
 from frappe.utils import flt
 
+from navgold_custom.navgold_custom.amazon_repository import PICKABLE_ORDER_STATUSES
 from navgold_custom.navgold_custom.erpnext_compat import create_pick_list, create_stock_entry
 
 
@@ -22,9 +23,15 @@ def get_open_sales_orders_for_delivery(customer: str | None = None, company: str
 	if customer:
 		filters["customer"] = customer
 
+	or_filters = [
+		["amazon_order_status", "in", PICKABLE_ORDER_STATUSES],
+		["amazon_order_id", "is", "not set"],
+	]
+
 	sales_orders = frappe.db.get_all(
 		"Sales Order",
 		filters=filters,
+		or_filters=or_filters,
 		fields=[
 			"name",
 			"customer",

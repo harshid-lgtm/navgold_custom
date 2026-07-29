@@ -12,7 +12,7 @@ from frappe.model.document import Document
 from frappe.utils import add_days, get_datetime, today
 from frappe.utils.background_jobs import is_job_enqueued
 
-from navgold_custom.navgold_custom.amazon_repository import get_orders
+from navgold_custom.navgold_custom.amazon_repository import get_orders, refresh_order_statuses
 
 
 class AmazonSPAPISettings(Document):
@@ -59,6 +59,8 @@ class AmazonSPAPISettings(Document):
 		enable_sync: DF.Check
 		is_active: DF.Check
 		is_old_data_migrated: DF.Check
+		last_status_synced_at: DF.Datetime | None
+		last_synced_at: DF.Datetime | None
 		map_state_data: DF.Check
 		market_place_account_group: DF.Link
 		max_retry_limit: DF.Int
@@ -81,6 +83,7 @@ class AmazonSPAPISettings(Document):
 
 		if self.has_value_changed("after_date"):
 			self.last_synced_at = get_datetime(self.after_date)
+			self.last_status_synced_at = get_datetime(self.after_date)
 
 		if self.is_active == 0:
 			self.enable_sync = 0
@@ -122,6 +125,31 @@ class AmazonSPAPISettings(Document):
 		)
 
 		frappe.msgprint(_("Order details will be fetched in the background."))
+
+	@frappe.whitelist()
+	def refresh_order_statuses_now(self):
+		if not self.is_active:
+			frappe.msgprint(_("Please enable the Amazon SP API Settings {0}.").format(frappe.bold(self.name)))
+			return
+
+		if frappe.conf.developer_mode:
+			refresh_order_statuses()
+			return
+
+		if is_job_enqueued("navgold.amazon_order_status_refresh"):
+			frappe.msgprint(_("Order statuses are currently being refreshed in the background."))
+			return
+
+		frappe.enqueue(
+			job_id="navgold.amazon_order_status_refresh",
+			deduplicate=True,
+			method=refresh_order_statuses,
+			queue="long",
+			timeout=6000,
+			now=frappe.flags.in_test,
+		)
+
+		frappe.msgprint(_("Order statuses will be refreshed in the background."))
 
 	def get_marketplace_id(self) -> str:
 		from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import MARKETPLACES

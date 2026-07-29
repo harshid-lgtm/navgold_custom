@@ -108,3 +108,92 @@ class TestPickListWalkRouteSort(IntegrationTestCase):
 
 		warehouses = [row.warehouse for row in pick_list.locations]
 		self.assertEqual(warehouses, [self.warehouse_late, self.warehouse_unrouted])
+
+
+class TestPickListOpenOrderFilter(IntegrationTestCase):
+	def setUp(self):
+		settings = frappe.get_single("Amazon SP API Settings")
+		self.company = settings.company
+		self.warehouse = settings.warehouse
+		self.customer = frappe.db.get_value("Customer", {}, "name")
+		if not (self.company and self.customer and self.warehouse):
+			self.skipTest("Amazon SP API Settings has no company/warehouse configured")
+
+		self.item_code = make_item("TEST-PICKABLE-ITEM", {"is_stock_item": 0})
+		self.created = []
+
+	def tearDown(self):
+		for name in self.created:
+			sales_order = frappe.get_doc("Sales Order", name)
+			if sales_order.docstatus == 1:
+				sales_order.cancel()
+			sales_order.delete(force=True)
+
+	def make_amazon_sales_order(self, amazon_order_status):
+		sales_order = frappe.new_doc("Sales Order")
+		sales_order.customer = self.customer
+		sales_order.company = self.company
+		sales_order.transaction_date = frappe.utils.nowdate()
+		sales_order.delivery_date = frappe.utils.nowdate()
+		sales_order.amazon_order_id = f"PICKFILTER-{amazon_order_status}"
+		sales_order.amazon_order_status = amazon_order_status
+		sales_order.fulfillment_channel = "MFN"
+		sales_order.append(
+			"items",
+			{
+				"item_code": self.item_code,
+				"qty": 1,
+				"rate": 10,
+				"warehouse": self.warehouse,
+				"delivery_date": frappe.utils.nowdate(),
+			},
+		)
+		sales_order.flags.ignore_mandatory = True
+		sales_order.save(ignore_permissions=True)
+		sales_order.submit()
+		self.created.append(sales_order.name)
+		return sales_order.name
+
+	def get_offered_orders(self):
+		from navgold_custom.navgold_custom.custom_script.pick_list.pick_list_api import (
+			get_open_sales_orders_for_delivery,
+		)
+
+		offered = get_open_sales_orders_for_delivery(company=self.company)
+		return {row["sales_order"] for row in offered}
+
+	def test_only_orders_still_owing_a_dispatch_are_offered(self):
+		unshipped = self.make_amazon_sales_order("Unshipped")
+		partially_shipped = self.make_amazon_sales_order("PartiallyShipped")
+		shipped = self.make_amazon_sales_order("Shipped")
+		pending = self.make_amazon_sales_order("Pending")
+
+		offered = self.get_offered_orders()
+
+		self.assertIn(unshipped, offered)
+		self.assertIn(partially_shipped, offered)
+		self.assertNotIn(shipped, offered, "a shipped order has already gone")
+		self.assertNotIn(pending, offered, "payment is not authorised, so it must not be picked")
+
+	def test_a_non_amazon_order_is_still_offered(self):
+		sales_order = frappe.new_doc("Sales Order")
+		sales_order.customer = self.customer
+		sales_order.company = self.company
+		sales_order.transaction_date = frappe.utils.nowdate()
+		sales_order.delivery_date = frappe.utils.nowdate()
+		sales_order.append(
+			"items",
+			{
+				"item_code": self.item_code,
+				"qty": 1,
+				"rate": 10,
+				"warehouse": self.warehouse,
+				"delivery_date": frappe.utils.nowdate(),
+			},
+		)
+		sales_order.flags.ignore_mandatory = True
+		sales_order.save(ignore_permissions=True)
+		sales_order.submit()
+		self.created.append(sales_order.name)
+
+		self.assertIn(sales_order.name, self.get_offered_orders())

@@ -28,9 +28,11 @@
 		"after_date",
 		"sync_selected_date_only",
 		"sync_orders",
+		"refresh_order_statuses",
 		"column_break_4",
 		"enable_sync",
 		"last_synced_at",
+		"last_status_synced_at",
 		"max_retry_limit",
 		"is_old_data_migrated"
 	],
@@ -173,6 +175,14 @@
 			"options": "get_order_details"
 		},
 		{
+			"depends_on": "eval: !doc.__islocal && doc.is_active",
+			"description": "Click this button to re-read the status of orders Amazon has updated since the last status sync.",
+			"fieldname": "refresh_order_statuses",
+			"fieldtype": "Button",
+			"label": "Refresh Order Statuses",
+			"options": "refresh_order_statuses_now"
+		},
+		{
 			"fieldname": "column_break_4",
 			"fieldtype": "Column Break"
 		},
@@ -188,6 +198,13 @@
 			"fieldname": "last_synced_at",
 			"fieldtype": "Datetime",
 			"label": "Last Synced At",
+			"read_only": 1
+		},
+		{
+			"description": "Watermark for the order status refresh. Kept separate from Last Synced At so a failure on one pass cannot widen the other's fetch window.",
+			"fieldname": "last_status_synced_at",
+			"fieldtype": "Datetime",
+			"label": "Last Status Synced At",
 			"read_only": 1
 		},
 		{

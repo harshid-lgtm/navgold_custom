@@ -177,6 +177,64 @@ def alert_below_min_sale(sales_order: str, proxy_sku: str, rate, min_price, qty)
 	)
 
 
+def alert_orders_canceled(amazon_order_ids: list[str]) -> None:
+	if not amazon_order_ids:
+		return
+
+	lines = [f"{len(amazon_order_ids)} order(s) cancelled on Amazon and closed in ERPNext."]
+	lines.append(", ".join(frappe.utils.escape_html(order_id) for order_id in amazon_order_ids[:10]))
+	if len(amazon_order_ids) > 10:
+		lines.append(f"…and {len(amazon_order_ids) - 10} more.")
+	lines.append("Check stock reservations and any linked Material Request.")
+
+	notify(
+		"Amazon orders cancelled",
+		lines,
+		severity="warning",
+		dedupe_key=f"ordercancel:{','.join(sorted(amazon_order_ids))[:100]}",
+		dedupe_seconds=3600,
+	)
+
+
+def alert_status_refresh_truncated(updated_count: int, page_cap: int) -> None:
+	notify(
+		"Amazon status refresh hit its page cap",
+		[
+			f"Stopped after {page_cap} pages with {updated_count} order(s) updated.",
+			"The window was not advanced, so the same batch retries next run — investigate if this repeats.",
+		],
+		severity="warning",
+		dedupe_key="status_refresh_truncated",
+		dedupe_seconds=3600,
+	)
+
+
+def alert_status_refresh_gap(skipped_hours: float, resuming_from) -> None:
+	skipped_line = f"The watermark was too stale to walk back, so {skipped_hours:.0f}h of status changes were passed over."
+	resume_line = f"Resuming from {cstr(resuming_from)}. Rewind After Date on Amazon SP API Settings to re-read the gap."
+
+	notify(
+		"Amazon status refresh skipped a gap",
+		[skipped_line, resume_line],
+		severity="critical",
+		dedupe_key="status_refresh_gap",
+		dedupe_seconds=3600,
+	)
+
+
+def alert_stale_draft_orders(draft_count: int, oldest_hours: float) -> None:
+	notify(
+		"Amazon orders stuck in draft",
+		[
+			f"{draft_count} Amazon Sales Order(s) still in draft, oldest {oldest_hours:.0f}h old.",
+			"These are paid customer orders whose promotion never completed — they reserve no stock.",
+		],
+		severity="critical",
+		dedupe_key="stale_draft_orders",
+		dedupe_seconds=3600,
+	)
+
+
 def check_sales_order_below_min(doc, method=None) -> None:
 	# Detection runs regardless of Telegram config — the circuit breaker depends on it.
 	if not doc.get("amazon_order_id"):
@@ -367,6 +425,27 @@ def safety_sweep() -> None:
 				dedupe_key="sweep:orders_stalled",
 				dedupe_seconds=1800,
 			)
+
+	check_stale_draft_orders()
+
+
+def check_stale_draft_orders(max_age_hours: int = 6) -> None:
+	cutoff = add_to_date(now_datetime(), hours=-max_age_hours)
+	oldest = frappe.db.get_value(
+		"Sales Order",
+		{"amazon_order_id": ("is", "set"), "docstatus": 0, "creation": ("<", cutoff)},
+		"creation",
+		order_by="creation asc",
+	)
+	if not oldest:
+		return
+
+	draft_count = frappe.db.count(
+		"Sales Order",
+		{"amazon_order_id": ("is", "set"), "docstatus": 0, "creation": ("<", cutoff)},
+	)
+	oldest_hours = (now_datetime() - get_datetime(oldest)).total_seconds() / 3600
+	alert_stale_draft_orders(draft_count, oldest_hours)
 
 
 @frappe.whitelist()
