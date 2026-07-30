@@ -206,21 +206,24 @@ def get_total_stock(item_code):
 
 
 def create_pack_sales_order(item_code, pack_qty=1):
+	"""item_code takes a list for a multi-line order."""
+	item_codes = [item_code] if isinstance(item_code, str) else item_code
 	sales_order = frappe.new_doc("Sales Order")
 	sales_order.customer = create_test_customer()
 	sales_order.company = COMPANY
 	sales_order.delivery_date = nowdate()
-	sales_order.append(
-		"items",
-		{
-			"item_code": item_code,
-			"qty": pack_qty,
-			"uom": PACK_UOM,
-			"conversion_factor": PACK_SIZE,
-			"rate": 100,
-			"reserve_stock": 1,
-		},
-	)
+	for code in item_codes:
+		sales_order.append(
+			"items",
+			{
+				"item_code": code,
+				"qty": pack_qty,
+				"uom": PACK_UOM,
+				"conversion_factor": PACK_SIZE,
+				"rate": 100,
+				"reserve_stock": 1,
+			},
+		)
 	sales_order.save()
 	sales_order.submit()
 	return sales_order
@@ -346,32 +349,76 @@ class TestDeliveryConsolidation(IntegrationTestCase):
 		)
 		self.assertEqual(flt(remaining), 0)
 
-	def test_partial_pick_stages_stock_without_delivery_note(self):
+	def test_short_stock_refuses_the_pick_list(self):
 		item_code = "TEST-DC-PARTIAL-ITEM"
 		create_pack_item(item_code)
 		receive_stock(item_code, self.shelf_b, 4)
 		sales_order = create_pack_sales_order(item_code)
 
-		pick_list = submit_pick_list_for(sales_order)
-
-		transfer = get_consolidation_transfer(pick_list)
-		self.assertIsNotNone(transfer)
-		self.assertEqual(sum(flt(row.qty) for row in transfer.items), 4)
+		with self.assertRaises(frappe.ValidationError):
+			submit_pick_list_for(sales_order)
 
 		self.assertFalse(
-			get_delivery_note_items(sales_order),
-			"a partial pack must not produce a Delivery Note (fractional qty)",
+			frappe.get_all("Pick List Item", filters={"sales_order": sales_order.name}),
+			"a Sales Order short of stock must leave no Pick List behind",
 		)
-		staged = frappe.db.get_value(
-			"Bin",
-			{"item_code": item_code, "warehouse": self.consolidation_warehouse},
-			"actual_qty",
+
+	def test_sales_order_short_on_one_line_is_not_picked_at_all(self):
+		stocked_item = "TEST-DC-TWO-LINE-STOCKED"
+		short_item = "TEST-DC-TWO-LINE-SHORT"
+		create_pack_item(stocked_item)
+		create_pack_item(short_item)
+		receive_stock(stocked_item, self.shelf_a, PACK_SIZE)
+		receive_stock(short_item, self.shelf_a, PACK_SIZE - 2)
+		sales_order = create_pack_sales_order([stocked_item, short_item])
+
+		with self.assertRaises(frappe.ValidationError):
+			create_pick_list(sales_order.name).save()
+
+		self.assertFalse(
+			frappe.get_all("Pick List Item", filters={"sales_order": sales_order.name}),
+			"one short line must keep the whole order off the Pick List",
 		)
-		self.assertEqual(flt(staged), 4, "remainder must wait in the consolidation warehouse")
+
+	def test_short_sales_order_is_left_out_and_the_stocked_ones_are_picked(self):
+		item_code = "TEST-DC-SOME-SHORT-ITEM"
+		create_pack_item(item_code)
+		receive_stock(item_code, self.shelf_a, PACK_SIZE)  # enough for one of the two orders
+		stocked_sales_order = create_pack_sales_order(item_code)
+		short_sales_order = create_pack_sales_order(item_code)
+
+		pick_list = create_pick_list(stocked_sales_order.name)
+		pick_list = create_pick_list(short_sales_order.name, target_doc=pick_list)
+		pick_list.save()
+
 		self.assertEqual(
-			frappe.db.get_value("Pick List", pick_list.name, "status"),
-			"Open",
-			"nothing delivered yet, the pick list must stay Open",
+			{row.sales_order for row in pick_list.locations},
+			{stocked_sales_order.name},
+			"the order short of stock must be dropped, the stocked one kept",
+		)
+		self.assertEqual(sum(flt(row.stock_qty) for row in pick_list.locations), PACK_SIZE)
+
+	def test_app_map_flow_keeps_only_the_stocked_sales_orders(self):
+		from navgold_custom.navgold_custom.custom_script.pick_list.pick_list_api import (
+			map_sales_orders_to_pick_list,
+		)
+
+		item_code = "TEST-DC-APP-SOME-SHORT-ITEM"
+		create_pack_item(item_code)
+		receive_stock(item_code, self.shelf_a, PACK_SIZE)
+		stocked_sales_order = create_pack_sales_order(item_code)
+		short_sales_order = create_pack_sales_order(item_code)
+
+		pick_list = map_sales_orders_to_pick_list(
+			frappe.as_json([stocked_sales_order.name, short_sales_order.name]),
+			frappe.as_json(frappe.new_doc("Pick List").as_dict()),
+		)
+		pick_list.save()
+
+		self.assertEqual(
+			{row.sales_order for row in pick_list.locations},
+			{stocked_sales_order.name},
+			"the tote selection must keep only the orders that are fully in stock",
 		)
 
 	def test_feature_off_keeps_legacy_direct_delivery_note(self):
@@ -452,32 +499,33 @@ class TestDeliveryConsolidation(IntegrationTestCase):
 		item_code = "TEST-DC-SEQ-ITEM"
 		create_pack_item(item_code)
 		receive_stock(item_code, self.shelf_a, 6)
-		sales_order = create_pack_sales_order(item_code, pack_qty=2)
+		# one pack per Sales Order: a short pick is refused, so sequential picks need an order each
+		first_sales_order = create_pack_sales_order(item_code)
 
-		first_pick_list = submit_pick_list_for(sales_order)
-		first_delivery_items = get_delivery_note_items(sales_order)
+		first_pick_list = submit_pick_list_for(first_sales_order)
+		first_delivery_items = get_delivery_note_items(first_sales_order)
 		self.assertEqual(len(first_delivery_items), 1)
 		self.assertEqual(flt(first_delivery_items[0].qty), 1)
 		frappe.get_doc("Delivery Note", first_delivery_items[0].parent).submit()
-
-		# SO-level delivery_status gates completion: half-delivered SO keeps every pick list Open
-		self.assertEqual(frappe.db.get_value("Pick List", first_pick_list.name, "status"), "Open")
+		self.assertEqual(frappe.db.get_value("Pick List", first_pick_list.name, "status"), "Completed")
 
 		receive_stock(item_code, self.shelf_b, 6)
-		second_pick_list = submit_pick_list_for(sales_order)
+		second_sales_order = create_pack_sales_order(item_code)
+		second_pick_list = submit_pick_list_for(second_sales_order)
 		self.assertNotEqual(first_pick_list.name, second_pick_list.name)
 
-		second_delivery_items = get_delivery_note_items(sales_order)
+		second_delivery_items = get_delivery_note_items(second_sales_order)
 		self.assertEqual(len(second_delivery_items), 1)
 		self.assertEqual(
 			flt(second_delivery_items[0].qty),
 			1,
-			"second DN must ship only the second pick list's pack, not every reservation on the SO",
+			"second DN must ship only the second pick list's pack, not every reservation on the item",
 		)
 
 		frappe.get_doc("Delivery Note", second_delivery_items[0].parent).submit()
-		self.assertEqual(flt(frappe.db.get_value("Sales Order", sales_order.name, "per_delivered")), 100)
-		self.assertEqual(frappe.db.get_value("Pick List", first_pick_list.name, "status"), "Completed")
+		self.assertEqual(
+			flt(frappe.db.get_value("Sales Order", second_sales_order.name, "per_delivered")), 100
+		)
 		self.assertEqual(frappe.db.get_value("Pick List", second_pick_list.name, "status"), "Completed")
 
 	def test_delivery_note_cancel_reopens_pick_list(self):

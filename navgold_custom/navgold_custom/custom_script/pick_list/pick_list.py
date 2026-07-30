@@ -20,6 +20,164 @@ def on_submit(doc, method):
 	auto_create_delivery_notes(doc)
 
 
+def block_partial_pick(doc, method=None):
+	# hook entry: runs after erpnext's before_save has allocated the locations
+	drop_sales_orders_short_of_stock(doc)
+
+
+def drop_sales_orders_short_of_stock(pick_list, requested_sales_orders=None):
+	"""A Sales Order is picked whole or not at all, however many lines it has. An order the shelves
+	cannot cover is dropped so the orders that are fully in stock can still be picked, and nothing left
+	to pick means no Pick List at all. Pass requested_sales_orders to name the orders that were asked
+	for, so an order the allocation stripped of every row is reported instead of quietly disappearing.
+	Tick Pick Manually to keep a deliberate short pick."""
+	if pick_list.docstatus > 0 or pick_list.purpose != "Delivery" or pick_list.pick_manually:
+		return
+
+	shortages = get_pick_shortages(pick_list)
+	remove_short_sales_orders(pick_list, shortages)
+
+	messages = [line for lines in shortages.values() for line in lines]
+	picked_sales_orders = {row.sales_order for row in pick_list.locations if row.sales_order}
+	for sales_order in requested_sales_orders or []:
+		if sales_order not in picked_sales_orders and sales_order not in shortages:
+			messages.append(_("{0}: nothing available to pick").format(sales_order))
+
+	if not pick_list.get("locations"):
+		if messages:
+			reason = (
+				_("No Sales Order can be picked in full, so no Pick List was created:")
+				+ "<br><br>"
+				+ "<br>".join(messages)
+			)
+		else:
+			reason = _("No stock is available to pick for this order.")
+
+		frappe.throw(reason, title=_("Insufficient Stock"))
+
+	if messages:
+		frappe.msgprint(
+			_("These Sales Orders are not fully in stock and were left out of this Pick List:")
+			+ "<br><br>"
+			+ "<br>".join(messages),
+			title=_("Insufficient Stock"),
+			indicator="orange",
+		)
+
+
+def get_pick_shortages(pick_list):
+	"""Shortfall lines of every Sales Order the allocation could not cover in full, keyed by order."""
+	sales_orders = {row.sales_order for row in pick_list.locations if row.sales_order}
+	if not sales_orders:
+		return {}
+
+	allocated_stock_qty = {}
+	for row in pick_list.locations:
+		demand_row = row.product_bundle_item or row.sales_order_item
+		if demand_row:
+			allocated_stock_qty[demand_row] = allocated_stock_qty.get(demand_row, 0) + flt(row.stock_qty)
+
+	precision = frappe.get_precision("Pick List Item", "stock_qty")
+	shortages = {}
+	for demand in get_ordered_stock_qty(sales_orders):
+		short_qty = flt(demand.stock_qty - allocated_stock_qty.get(demand.row_name, 0), precision)
+		if short_qty > 0:
+			shortages.setdefault(demand.sales_order, []).append(
+				_("{0} for {1}: {2} {3} short").format(
+					frappe.bold(demand.item_code),
+					demand.sales_order,
+					short_qty,
+					demand.stock_uom,
+				)
+			)
+
+	return shortages
+
+
+def remove_short_sales_orders(pick_list, shortages):
+	# a row already scanned into a tote stays: that stock is physically off the shelf already
+	short_rows = [
+		row for row in pick_list.locations if row.sales_order in shortages and not flt(row.picked_qty)
+	]
+	for row in short_rows:
+		pick_list.remove(row)
+
+	for idx, row in enumerate(pick_list.locations, start=1):
+		row.idx = idx
+
+
+def get_ordered_stock_qty(sales_orders):
+	"""Yet-to-be-picked stock qty of every line the pick list is expected to cover, sized the same way
+	erpnext's Sales Order -> Pick List mapper sizes its rows. Read back from the Sales Orders rather
+	than the pick list because a line with no stock at all is dropped from the pick list entirely."""
+	sales_orders = list(sales_orders)
+	sales_order_items = frappe.get_all(
+		"Sales Order Item",
+		filters={"parent": ("in", sales_orders), "docstatus": 1},
+		fields=[
+			"name",
+			"parent",
+			"item_code",
+			"stock_uom",
+			"qty",
+			"picked_qty",
+			"delivered_qty",
+			"conversion_factor",
+			"delivered_by_supplier",
+		],
+	)
+	packed_items = frappe.get_all(
+		"Packed Item",
+		filters={"parent": ("in", sales_orders), "docstatus": 1},
+		fields=["name", "parent", "parent_detail_docname", "item_code", "uom", "qty"],
+	)
+	bundle_rows = {row.parent_detail_docname for row in packed_items}
+
+	demand = []
+	pending_fraction = {}
+	for item in sales_order_items:
+		picked_qty = flt(item.picked_qty) / (flt(item.conversion_factor) or 1)
+		pending_qty = flt(item.qty) - max(picked_qty, flt(item.delivered_qty))
+		pending_fraction[item.name] = pending_qty / flt(item.qty) if item.qty else 0
+
+		if item.delivered_by_supplier or item.name in bundle_rows or pending_qty <= 0:
+			continue
+
+		demand.append(
+			frappe._dict(
+				row_name=item.name,
+				sales_order=item.parent,
+				item_code=item.item_code,
+				stock_uom=item.stock_uom,
+				stock_qty=pending_qty * flt(item.conversion_factor),
+			)
+		)
+
+	for packed_item in packed_items:
+		pending_qty = flt(packed_item.qty) * pending_fraction.get(packed_item.parent_detail_docname, 0)
+		if pending_qty <= 0:
+			continue
+
+		demand.append(
+			frappe._dict(
+				row_name=packed_item.name,
+				sales_order=packed_item.parent,
+				item_code=packed_item.item_code,
+				stock_uom=packed_item.uom,
+				stock_qty=pending_qty,
+			)
+		)
+
+	# non-stock lines (services, non-bundle non-stock items) never get a pick location
+	return [row for row in demand if is_pickable(row.item_code)]
+
+
+def is_pickable(item_code):
+	return cint(frappe.get_cached_value("Item", item_code, "is_stock_item")) or bool(
+		get_product_bundle_items(item_code)
+	)
+
+
 def sort_item_locations_by_walk_route(doc, method):
 	warehouses = {row.warehouse for row in doc.locations if row.warehouse}
 	if not warehouses:

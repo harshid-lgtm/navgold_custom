@@ -6,6 +6,9 @@ from frappe import _
 from frappe.utils import flt
 
 from navgold_custom.navgold_custom.amazon_repository import PICKABLE_ORDER_STATUSES
+from navgold_custom.navgold_custom.custom_script.pick_list.pick_list import (
+	drop_sales_orders_short_of_stock,
+)
 from navgold_custom.navgold_custom.erpnext_compat import create_pick_list, create_stock_entry
 
 
@@ -159,10 +162,15 @@ def map_sales_orders_to_pick_list(sales_order_names: str, target_pr_doc_json: st
 	if isinstance(target_doc, dict):
 		target_doc = frappe.get_cached_doc(target_doc)
 
+	notice_count = len(frappe.local.message_log or [])
+
 	for so_name in sales_order_names:
 		target_doc = create_pick_list(source_name=so_name, target_doc=target_doc)
 
 	target_doc.run_method("set_item_locations")
+	del frappe.local.message_log[notice_count:]
+
+	drop_sales_orders_short_of_stock(target_doc, sales_order_names)
 
 	return target_doc
 
