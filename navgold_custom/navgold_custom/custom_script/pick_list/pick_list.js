@@ -238,9 +238,15 @@ frappe.ui.form.on('Pick List', {
 
 				dialog.hide();
 
+				const picked_orders = new Set(
+					(response.message.locations || [])
+						.map((row) => row.sales_order)
+						.filter(Boolean),
+				);
+
 				frappe.show_alert({
 					message: __('Items added from {0} Sales Orders', [
-						selected_orders.length,
+						picked_orders.size,
 					]),
 					indicator: 'green',
 				});
