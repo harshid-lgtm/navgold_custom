@@ -121,8 +121,11 @@ class TestPickListOpenOrderFilter(IntegrationTestCase):
 
 		self.item_code = make_item("TEST-PICKABLE-ITEM", {"is_stock_item": 0})
 		self.created = []
+		self.pick_lists = []
 
 	def tearDown(self):
+		for name in self.pick_lists:
+			frappe.delete_doc("Pick List", name, force=True, ignore_permissions=True)
 		for name in self.created:
 			sales_order = frappe.get_doc("Sales Order", name)
 			if sales_order.docstatus == 1:
@@ -174,6 +177,37 @@ class TestPickListOpenOrderFilter(IntegrationTestCase):
 		self.assertIn(partially_shipped, offered)
 		self.assertNotIn(shipped, offered, "a shipped order has already gone")
 		self.assertNotIn(pending, offered, "payment is not authorised, so it must not be picked")
+
+	def make_draft_pick_list(self, sales_order_name):
+		pick_list = frappe.new_doc("Pick List")
+		pick_list.company = self.company
+		pick_list.purpose = "Delivery"
+		pick_list.pick_manually = 1
+		pick_list.append(
+			"locations",
+			{
+				"item_code": self.item_code,
+				"qty": 1,
+				"stock_qty": 1,
+				"warehouse": self.warehouse,
+				"sales_order": sales_order_name,
+			},
+		)
+		pick_list.flags.ignore_mandatory = True
+		pick_list.save(ignore_permissions=True)
+		self.pick_lists.append(pick_list.name)
+		return pick_list.name
+
+	def test_an_order_on_a_draft_pick_list_is_not_offered_again(self):
+		claimed = self.make_amazon_sales_order("Unshipped")
+		untouched = self.make_amazon_sales_order("PartiallyShipped")
+
+		self.make_draft_pick_list(claimed)
+
+		offered = self.get_offered_orders()
+
+		self.assertNotIn(claimed, offered, "a draft Pick List already claims this order")
+		self.assertIn(untouched, offered)
 
 	def test_a_non_amazon_order_is_still_offered(self):
 		sales_order = frappe.new_doc("Sales Order")
