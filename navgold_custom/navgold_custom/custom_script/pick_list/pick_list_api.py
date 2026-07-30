@@ -53,6 +53,19 @@ def get_open_sales_orders_for_delivery(customer: str | None = None, company: str
 	if not sales_orders:
 		return []
 
+	already_on_draft_pick_list = set(
+		frappe.get_all(
+			"Pick List Item",
+			filters={"sales_order": ["in", [so.name for so in sales_orders]], "docstatus": 0},
+			pluck="sales_order",
+			distinct=True,
+		)
+	)
+	sales_orders = [so for so in sales_orders if so.name not in already_on_draft_pick_list]
+
+	if not sales_orders:
+		return []
+
 	so_names = [so.name for so in sales_orders]
 	so_map = {so.name: so for so in sales_orders}
 
