@@ -1,7 +1,9 @@
 {
 	"actions": [],
+	"allow_bulk_edit": 1,
 	"creation": "2026-04-06 00:00:00.000000",
 	"doctype": "DocType",
+	"editable_grid": 1,
 	"engine": "InnoDB",
 	"field_order": ["proxy_sku"],
 	"fields": [
@@ -17,7 +19,7 @@
 	"index_web_pages_for_search": 0,
 	"istable": 1,
 	"links": [],
-	"modified": "2026-04-06 00:00:00.000000",
+	"modified": "2026-07-28 00:00:00.000000",
 	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Navgold Zero Stock Item",

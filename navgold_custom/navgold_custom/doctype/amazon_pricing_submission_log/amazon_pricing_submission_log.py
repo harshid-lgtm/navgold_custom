@@ -22,7 +22,7 @@ class AmazonPricingSubmissionLog(Document):
 
 		amazon_status: DF.Data | None
 		blocked_count: DF.Int
-		blocked_records: DF.SmallText | None
+		blocked_records: DF.LongText | None
 		completed_at: DF.Datetime | None
 		error_log: DF.Link | None
 		error_message: DF.LongText | None

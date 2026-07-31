@@ -10,6 +10,7 @@ from frappe.utils import add_to_date, get_datetime, now_datetime
 from navgold_custom.navgold_custom import amazon_repository
 from navgold_custom.navgold_custom.amazon_repository import (
 	AMAZON_ORDER_STATUSES,
+	STATUS_REFRESH_LAG_MINUTES,
 	STATUS_REFRESH_MAX_BACKLOG_DAYS,
 	STATUS_REFRESH_MAX_PAGES,
 	STATUS_REFRESH_OVERLAP_MINUTES,
@@ -364,15 +365,27 @@ class TestStatusRefreshWindow(IntegrationTestCase):
 		self.assertEqual(round(span_hours), STATUS_REFRESH_WINDOW_HOURS)
 		self.assertLess(get_datetime(window_end), run_started_at)
 
-	def test_a_caught_up_watermark_reads_up_to_now(self):
+	def test_a_caught_up_watermark_stops_short_of_now(self):
 		run_started_at = now_datetime()
 		window_start, window_end, skipped_hours = get_status_refresh_window(
 			add_to_date(run_started_at, minutes=-20), run_started_at
 		)
 
 		self.assertEqual(skipped_hours, 0)
-		self.assertEqual(get_datetime(window_end), run_started_at)
-		self.assertLess(get_datetime(window_start), run_started_at)
+		self.assertEqual(
+			get_datetime(window_end), add_to_date(run_started_at, minutes=-STATUS_REFRESH_LAG_MINUTES)
+		)
+		self.assertLess(get_datetime(window_start), get_datetime(window_end))
+
+	def test_a_blank_watermark_still_yields_a_usable_window(self):
+		run_started_at = now_datetime()
+		window_start, window_end, skipped_hours = get_status_refresh_window(None, run_started_at)
+
+		self.assertEqual(skipped_hours, 0)
+		self.assertLess(get_datetime(window_start), get_datetime(window_end))
+		self.assertLessEqual(
+			get_datetime(window_end), add_to_date(run_started_at, minutes=-STATUS_REFRESH_LAG_MINUTES)
+		)
 
 
 def init_without_credentials(self):

@@ -374,6 +374,9 @@ scheduler_events = {
 		"20 * * * *": [
 			"navgold_custom.navgold_custom.amazon_pricing.feed_ledger.sync_amazon_feed_ledger",
 		],
+		"40 * * * *": [
+			"navgold_custom.navgold_custom.doctype.supplier_stock_import.clf_stock_api.schedule_clf_fetch",
+		],
 	},
 	"daily": [
 		"navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku.schedule_bulk_fetch_selling_prices",

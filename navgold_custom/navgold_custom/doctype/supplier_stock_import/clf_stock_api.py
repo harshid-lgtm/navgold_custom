@@ -28,6 +28,7 @@ CLF_PRICE_BATCH_SIZE = 250
 CLF_SUPPLIER = "CLF Distribution"
 CLF_STOCK_FETCH_JOB_ID = "clf_stock_fetch"
 CLF_PRICE_FETCH_JOB_ID = "clf_price_fetch"
+CLF_SCHEDULED_FETCH_JOB_ID = "clf_scheduled_fetch"
 CLF_FETCH_LOCK = "clf_fetch"
 
 
@@ -173,6 +174,25 @@ def fetch_clf_stock():
 @frappe.whitelist()
 def fetch_clf_price():
 	enqueue_clf_fetch("price", CLF_PRICE_FETCH_JOB_ID)
+
+
+def schedule_clf_fetch():
+	settings = frappe.get_cached_doc("Navgold Settings")
+	if not (settings.clf_endpoint and settings.clf_username and settings.clf_password):
+		return
+
+	enqueue(
+		run_scheduled_clf_fetch,
+		queue="long",
+		job_id=CLF_SCHEDULED_FETCH_JOB_ID,
+		deduplicate=True,
+		timeout=3600,
+	)
+
+
+def run_scheduled_clf_fetch():
+	for metric in ("stock", "price"):
+		run_clf_fetch("Administrator", metric)
 
 
 def enqueue_clf_fetch(metric, job_id):
