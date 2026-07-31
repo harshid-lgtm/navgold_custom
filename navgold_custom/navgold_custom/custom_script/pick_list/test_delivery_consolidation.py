@@ -1,6 +1,8 @@
 # Copyright (c) 2026, developers@buildwithhussain.com and Contributors
 # See license.txt
 
+from unittest.mock import patch
+
 import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import flt, nowdate
@@ -866,3 +868,73 @@ class TestDeliveryConsolidation(IntegrationTestCase):
 			6,
 			"staged pick list still claims the restocked shelf stock",
 		)
+
+
+class TestReservedBatchBundleCompat(IntegrationTestCase):
+	"""erpnext v16 and v17 disagree on get_ssb_bundle_for_voucher's parameter and return value.
+	Local runs v17, so the v16 shape is pinned here with stand-ins for both signatures."""
+
+	def setUp(self):
+		from navgold_custom.navgold_custom import erpnext_compat
+
+		self.compat = erpnext_compat
+		self.sre_list = [
+			{"name": "SRE-A", "item_code": "X", "warehouse": "W", "has_serial_no": 0, "has_batch_no": 1},
+			{"name": "SRE-B", "item_code": "X", "warehouse": "W", "has_serial_no": 0, "has_batch_no": 1},
+		]
+
+	def test_v17_signature_returns_the_bundle_name(self):
+		def v17_style(sre_list):
+			return frappe._dict(name="BUNDLE-17")
+
+		with patch.object(self.compat.sre_module, "get_ssb_bundle_for_voucher", v17_style):
+			self.assertEqual(self.compat.get_reserved_batch_bundle_name(self.sre_list), "BUNDLE-17")
+
+	def test_v16_signature_is_given_one_sre_and_its_name_is_returned(self):
+		seen = []
+
+		def v16_style(sre):
+			seen.append(sre)
+			return "BUNDLE-16"
+
+		with (
+			patch.object(self.compat.sre_module, "get_ssb_bundle_for_voucher", v16_style),
+			patch.object(self.compat.sre_module, "get_serial_batch_entries_for_voucher", lambda name: []),
+			patch.object(self.compat.frappe, "get_doc") as mock_get_doc,
+		):
+			mock_get_doc.return_value = frappe._dict(
+				name="BUNDLE-16", append=lambda *args: None, save=lambda: None
+			)
+			result = self.compat.get_reserved_batch_bundle_name(self.sre_list)
+
+		# The v16 crash was passing the whole list where a single dict was expected.
+		self.assertEqual(seen, [self.sre_list[0]])
+		self.assertEqual(result, "BUNDLE-16")
+
+	def test_v16_folds_the_remaining_reservations_into_one_bundle(self):
+		appended = []
+
+		def v16_style(sre):
+			return "BUNDLE-16"
+
+		bundle = frappe._dict(
+			name="BUNDLE-16",
+			append=lambda field, value: appended.append(value),
+			save=lambda: None,
+		)
+		with (
+			patch.object(self.compat.sre_module, "get_ssb_bundle_for_voucher", v16_style),
+			patch.object(
+				self.compat.sre_module,
+				"get_serial_batch_entries_for_voucher",
+				lambda name: [{"batch_no": f"BATCH-{name}", "qty": 1}],
+			),
+			patch.object(self.compat.frappe, "get_doc", return_value=bundle),
+		):
+			self.compat.get_reserved_batch_bundle_name(self.sre_list)
+
+		# A row reserved across two SREs must not deliver a bundle missing the second one's batches.
+		self.assertEqual([entry["batch_no"] for entry in appended], ["BATCH-SRE-B"])
+
+	def test_no_reservations_returns_nothing(self):
+		self.assertIsNone(self.compat.get_reserved_batch_bundle_name([]))

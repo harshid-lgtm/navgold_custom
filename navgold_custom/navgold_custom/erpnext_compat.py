@@ -5,6 +5,11 @@
 # new location and fall back to the old one so the app keeps working on v15/v16 and v17+.
 # When we drop pre-v17 support, delete the fallbacks here — and nowhere else.
 
+import inspect
+
+import frappe
+from erpnext.stock.doctype.stock_reservation_entry import stock_reservation_entry as sre_module
+
 try:
 	from erpnext.stock.doctype.delivery_note.mapper import make_packing_slip, make_sales_invoice
 except ImportError:
@@ -47,11 +52,40 @@ except ImportError:
 		return get_product_bundle_items_by_name(bundle_name)
 
 
+def get_reserved_batch_bundle_name(sre_list):
+	"""Serial and Batch Bundle name covering every reservation on one Delivery Note row.
+
+	v17 takes the whole SRE list and returns the Bundle document; v16 takes a single SRE dict and
+	returns its name. Both differences are normalised here so callers only ever see a name.
+	"""
+	if not sre_list:
+		return None
+
+	if "sre_list" in inspect.signature(sre_module.get_ssb_bundle_for_voucher).parameters:
+		bundle = sre_module.get_ssb_bundle_for_voucher(sre_list)
+		return bundle.name if bundle else None
+
+	bundle_name = sre_module.get_ssb_bundle_for_voucher(sre_list[0])
+	if not bundle_name or len(sre_list) == 1:
+		return bundle_name
+
+	# v16 builds one bundle per SRE, but a row can only point at one, so fold the rest in rather
+	# than delivering a bundle that is short the other reservations' batches.
+	bundle = frappe.get_doc("Serial and Batch Bundle", bundle_name)
+	for sre in sre_list[1:]:
+		for sb_entry in sre_module.get_serial_batch_entries_for_voucher(sre["name"]):
+			bundle.append("entries", sb_entry)
+	bundle.save()
+
+	return bundle.name
+
+
 __all__ = [
 	"create_delivery_note",
 	"create_pick_list",
 	"create_stock_entry",
 	"get_product_bundle_items",
+	"get_reserved_batch_bundle_name",
 	"make_delivery_note",
 	"make_material_request",
 	"make_packing_slip",
