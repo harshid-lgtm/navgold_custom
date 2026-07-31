@@ -10,12 +10,15 @@ from frappe.utils import add_to_date, get_datetime, now_datetime
 from navgold_custom.navgold_custom import amazon_repository
 from navgold_custom.navgold_custom.amazon_repository import (
 	AMAZON_ORDER_STATUSES,
+	ORDER_SYNC_LAG_MINUTES,
+	ORDER_SYNC_OVERLAP_MINUTES,
 	STATUS_REFRESH_LAG_MINUTES,
 	STATUS_REFRESH_MAX_BACKLOG_DAYS,
 	STATUS_REFRESH_MAX_PAGES,
 	STATUS_REFRESH_OVERLAP_MINUTES,
 	STATUS_REFRESH_WINDOW_HOURS,
 	AmazonRepository,
+	get_order_sync_watermark,
 	get_status_refresh_window,
 )
 from navgold_custom.navgold_custom.utils import get_draft_amazon_order_qty_map
@@ -86,6 +89,7 @@ class TestOrderStatusRefresh(IntegrationTestCase):
 		repository = AmazonRepository.__new__(AmazonRepository)
 		repository.amz_setting = self.settings
 		repository.refresh_truncated = False
+		repository.sync_truncated = False
 		return repository
 
 	def build_order(self, order_status, amount):
@@ -259,6 +263,38 @@ class TestOrderStatusRefresh(IntegrationTestCase):
 
 		self.assertIsNone(repository.update_order_status(self.build_order("Shipped", 27.46), None))
 
+	def test_the_refresh_creates_an_order_the_sync_never_landed(self):
+		repository = self.build_repository()
+
+		# The order sync lost this one to a throttled page or a watermark gap, so the status
+		# refresh is the only pass that will ever see it again.
+		with (
+			patch.object(repository, "get_order_items", return_value=build_items(self.item_code, 27.46)),
+			patch.object(repository, "create_customer", return_value=self.customer),
+			patch.object(repository, "create_address", return_value=None),
+		):
+			result = repository.sync_order(self.build_order("Unshipped", 27.46), None)
+
+		self.assertTrue(result)
+		self.assertEqual(self.get_sales_order("docstatus").docstatus, 1)
+
+	def test_the_refresh_does_not_manufacture_an_order_amazon_already_closed(self):
+		repository = self.build_repository()
+
+		self.assertIsNone(repository.sync_order(self.build_order("Canceled", 27.46), None))
+		self.assertIsNone(self.get_sales_order("name"))
+
+	def test_a_known_order_still_takes_the_status_update_path(self):
+		repository = self.build_repository()
+		self.sync(repository, self.build_order("Unshipped", 27.46), rate=27.46)
+		existing = repository.get_sales_orders_by_amazon_id([ORDER_ID]).get(ORDER_ID)
+
+		with patch.object(repository, "create_sales_order") as mock_create:
+			repository.sync_order(self.build_order("Shipped", 27.46), existing)
+
+		mock_create.assert_not_called()
+		self.assertEqual(self.get_sales_order("amazon_order_status").amazon_order_status, "Shipped")
+
 	def fetch_one_order(self, repository, order, rate):
 		with (
 			patch.object(repository, "get_orders_instance"),
@@ -390,6 +426,7 @@ class TestStatusRefreshWindow(IntegrationTestCase):
 
 def init_without_credentials(self):
 	self.refresh_truncated = False
+	self.sync_truncated = False
 	self.amz_setting = frappe.get_single("Amazon SP API Settings")
 	self.instance_params = {}
 
@@ -399,6 +436,7 @@ class TestStatusRefreshPagination(IntegrationTestCase):
 		repository = AmazonRepository.__new__(AmazonRepository)
 		repository.amz_setting = frappe.get_single("Amazon SP API Settings")
 		repository.refresh_truncated = False
+		repository.sync_truncated = False
 		return repository
 
 	def run_refresh(self, repository, pages):
@@ -483,3 +521,138 @@ class TestStatusRefreshPagination(IntegrationTestCase):
 
 		advanced = get_datetime(frappe.db.get_single_value("Amazon SP API Settings", "last_status_synced_at"))
 		self.assertGreater(advanced, add_to_date(now_datetime(), hours=-2))
+
+
+class TestOrderSyncPagination(IntegrationTestCase):
+	def build_repository(self):
+		repository = AmazonRepository.__new__(AmazonRepository)
+		repository.amz_setting = frappe.get_single("Amazon SP API Settings")
+		repository.refresh_truncated = False
+		repository.sync_truncated = False
+		return repository
+
+	def run_sync(self, repository, pages):
+		calls = iter(pages)
+		self.page_reads = 0
+
+		def fake_call(sp_api_method, **kwargs):
+			self.page_reads += 1
+			return next(calls, None)
+
+		with (
+			patch.object(repository, "get_orders_instance"),
+			patch.object(repository, "call_sp_api_method", side_effect=fake_call),
+		):
+			return repository.get_orders(now_datetime())
+
+	def test_a_clean_run_reads_every_page_and_is_not_truncated(self):
+		repository = self.build_repository()
+		pages = [{"Orders": [], "NextToken": "t1"}, {"Orders": [], "NextToken": "t2"}, {"Orders": []}]
+
+		result = self.run_sync(repository, pages)
+
+		self.assertIsNotNone(result)
+		self.assertFalse(repository.sync_truncated)
+		self.assertEqual(self.page_reads, 3)
+
+	def test_an_empty_page_does_not_end_the_run_early(self):
+		repository = self.build_repository()
+		# Before, the loop broke on the first empty page and dropped every page behind it.
+		pages = [{"Orders": [], "NextToken": "t1"}, {"Orders": [], "NextToken": "t2"}, {"Orders": []}]
+
+		self.run_sync(repository, pages)
+
+		self.assertEqual(self.page_reads, len(pages))
+
+	def test_a_first_page_failure_returns_none(self):
+		repository = self.build_repository()
+
+		self.assertIsNone(self.run_sync(repository, [None]))
+		self.assertFalse(repository.sync_truncated)
+
+	def test_a_mid_pagination_failure_must_not_look_like_a_clean_finish(self):
+		repository = self.build_repository()
+
+		self.run_sync(repository, [{"Orders": [], "NextToken": "t1"}, None])
+
+		self.assertTrue(
+			repository.sync_truncated,
+			"a throttled page must mark the sync truncated so the watermark holds",
+		)
+
+
+class TestOrderSyncWatermark(IntegrationTestCase):
+	def set_watermark(self, watermark):
+		frappe.get_single("Amazon SP API Settings").db_set("last_synced_at", watermark)
+
+	def get_watermark(self):
+		return get_datetime(frappe.db.get_single_value("Amazon SP API Settings", "last_synced_at"))
+
+	def run_module_sync(self, side_effect, sync_selected_date_only=0):
+		with (
+			patch.object(AmazonRepository, "__init__", init_without_credentials),
+			patch.object(AmazonRepository, "get_orders", autospec=True) as mock_sync,
+		):
+			mock_sync.side_effect = side_effect
+			return amazon_repository.get_orders("2026-07-01", sync_selected_date_only)
+
+	def test_the_watermark_resumes_behind_the_start_of_the_run(self):
+		run_started_at = now_datetime()
+
+		watermark = get_order_sync_watermark(run_started_at)
+
+		self.assertEqual(
+			get_datetime(watermark),
+			add_to_date(run_started_at, minutes=-(ORDER_SYNC_LAG_MINUTES + ORDER_SYNC_OVERLAP_MINUTES)),
+		)
+		self.assertLess(get_datetime(watermark), run_started_at)
+
+	def test_a_clean_run_moves_the_watermark_back_from_the_run_start_not_to_its_end(self):
+		self.set_watermark(add_to_date(now_datetime(), hours=-4))
+		run_started_at = now_datetime()
+
+		self.run_module_sync(lambda repository, created_after, sync_selected_date_only: [])
+
+		advanced = self.get_watermark()
+		self.assertGreater(advanced, add_to_date(run_started_at, hours=-1), "a clean run must advance")
+		self.assertLessEqual(
+			advanced,
+			add_to_date(run_started_at, minutes=-ORDER_SYNC_LAG_MINUTES),
+			"the watermark must stay behind now or orders still being indexed are skipped",
+		)
+
+	def test_a_truncated_pass_does_not_advance_the_watermark(self):
+		watermark = add_to_date(now_datetime(), hours=-4)
+		self.set_watermark(watermark)
+
+		def truncated_sync(repository, created_after, sync_selected_date_only):
+			repository.sync_truncated = True
+			return []
+
+		self.run_module_sync(truncated_sync)
+
+		self.assertEqual(
+			self.get_watermark(),
+			get_datetime(watermark),
+			"pages that were never read must be re-queried, not skipped",
+		)
+
+	def test_a_failed_first_page_does_not_advance_the_watermark(self):
+		watermark = add_to_date(now_datetime(), hours=-4)
+		self.set_watermark(watermark)
+
+		self.run_module_sync(lambda repository, created_after, sync_selected_date_only: None)
+
+		self.assertEqual(self.get_watermark(), get_datetime(watermark))
+
+	def test_a_selected_date_backfill_leaves_the_watermark_alone(self):
+		watermark = add_to_date(now_datetime(), hours=-4)
+		self.set_watermark(watermark)
+
+		self.run_module_sync(lambda repository, created_after, sync_selected_date_only: [], 1)
+
+		self.assertEqual(
+			self.get_watermark(),
+			get_datetime(watermark),
+			"backfilling one past day must not skip everything between that day and today",
+		)

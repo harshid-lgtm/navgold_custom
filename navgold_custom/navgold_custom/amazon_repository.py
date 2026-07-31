@@ -6,6 +6,7 @@ import frappe
 from frappe.utils import (
 	add_days,
 	add_to_date,
+	cint,
 	convert_utc_to_system_timezone,
 	flt,
 	get_datetime,
@@ -30,6 +31,9 @@ STATUS_REFRESH_WINDOW_HOURS = 6
 STATUS_REFRESH_MAX_BACKLOG_DAYS = 7
 STATUS_REFRESH_MAX_PAGES = 10
 STATUS_REFRESH_LAG_MINUTES = 3
+
+ORDER_SYNC_OVERLAP_MINUTES = 15
+ORDER_SYNC_LAG_MINUTES = 3
 
 AMAZON_ORDER_STATUSES = (
 	"PendingAvailability",
@@ -56,8 +60,6 @@ def parse_amazon_utc(utc_time_str):
 
 
 def format_local_as_amazon_utc(local_datetime):
-	# Frappe datetimes are naive system-local; convert to real UTC so the offset
-	# is not silently sent to Amazon as if it were already UTC.
 	system_datetime = get_datetime(local_datetime).replace(tzinfo=ZoneInfo(get_system_timezone()))
 	return system_datetime.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -65,6 +67,7 @@ def format_local_as_amazon_utc(local_datetime):
 class AmazonRepository:
 	def __init__(self):
 		self.refresh_truncated = False
+		self.sync_truncated = False
 		self.amz_setting = frappe.get_single("Amazon SP API Settings")
 		self.instance_params = {
 			"client_id": self.amz_setting.client_id,
@@ -156,8 +159,6 @@ class AmazonRepository:
 		payload = self.call_sp_api_method(sp_api_method=orders.get_order_items, order_id=order_id)
 
 		if payload is None:
-			# A throttled/failed items call must not be swallowed as "no items" — raise so the
-			# caller records a failed sync instead of silently dropping the order.
 			raise Exception(f"Could not fetch order items for {order_id} (SP-API call failed or throttled)")
 
 		raw_items = []
@@ -212,8 +213,6 @@ class AmazonRepository:
 			)
 
 			if payload is None:
-				# Throttled mid-pagination: the order is only partially read, so fail it
-				# rather than building an incomplete item list.
 				raise Exception(
 					f"Could not fetch all order items for {order_id} (SP-API call failed or throttled)"
 				)
@@ -318,8 +317,6 @@ class AmazonRepository:
 		try:
 			items = self.get_order_items(order_id)
 			if not items:
-				# Amazon can list an order before its items are queryable; record it so the
-				# retry path recovers the order instead of losing it silently.
 				self.create_failed_sync_record(order_id, "No order items returned by Amazon", order=order)
 				return None
 
@@ -386,7 +383,6 @@ class AmazonRepository:
 				item["warehouse"] = warehouse
 				sales_order.append("items", item)
 
-			# ERPNext v17 moved set_taxes() off the controller into TaxService; fall back for older versions
 			try:
 				from erpnext.accounts.services.taxes import TaxService
 
@@ -446,8 +442,8 @@ class AmazonRepository:
 			selected_date = getdate(created_after)
 			kwargs["created_after"] = format_local_as_amazon_utc(get_datetime(selected_date))
 			end_of_day = get_datetime(add_days(selected_date, 1))
-			three_minutes_ago = now_datetime() - timedelta(minutes=3)
-			created_before = min(end_of_day, three_minutes_ago)
+			indexed_up_to = now_datetime() - timedelta(minutes=ORDER_SYNC_LAG_MINUTES)
+			created_before = min(end_of_day, indexed_up_to)
 			kwargs["created_before"] = format_local_as_amazon_utc(created_before)
 
 		orders_payload = self.call_sp_api_method(sp_api_method=orders.get_orders, **kwargs)
@@ -458,15 +454,8 @@ class AmazonRepository:
 		sales_orders = []
 		order_count = 0
 
-		while True:
-			if not orders_payload:
-				break
-
+		while orders_payload:
 			orders_list = orders_payload.get("Orders", [])
-			next_token = orders_payload.get("NextToken")
-
-			if not orders_list:
-				break
 
 			existing_orders = self.get_sales_orders_by_amazon_id(
 				[order.get("AmazonOrderId") for order in orders_list]
@@ -494,6 +483,7 @@ class AmazonRepository:
 
 			frappe.db.commit()  # nosemgrep
 
+			next_token = orders_payload.get("NextToken")
 			if not next_token:
 				break
 
@@ -502,6 +492,10 @@ class AmazonRepository:
 				created_after=kwargs["created_after"],
 				next_token=next_token,
 			)
+
+			if orders_payload is None:
+				self.sync_truncated = True
+				break
 
 		return sales_orders
 
@@ -536,6 +530,16 @@ class AmazonRepository:
 			frappe.db.set_value("Sales Order", existing_so.name, "amazon_order_status", amazon_status)
 			return existing_so.name
 
+	def sync_order(self, order, existing_so):
+		if existing_so:
+			return self.update_order_status(order, existing_so)
+
+		if order.get("OrderStatus") in CLOSED_ORDER_STATUSES:
+			return None
+
+		with filelock(f"amazon_order_{order.get('AmazonOrderId')}", timeout=60):
+			return self.create_sales_order(order)
+
 	def refresh_order_statuses(self, window_start, window_end):
 		orders = self.get_orders_instance()
 		orders_payload = self.call_sp_api_method(
@@ -562,7 +566,7 @@ class AmazonRepository:
 			for order in orders_list:
 				order_id = order.get("AmazonOrderId")
 				try:
-					if self.update_order_status(order, existing_orders.get(order_id)):
+					if self.sync_order(order, existing_orders.get(order_id)):
 						updated_orders.append(order_id)
 						if order.get("OrderStatus") in CLOSED_ORDER_STATUSES:
 							closed_orders.append(order_id)
@@ -615,13 +619,20 @@ class AmazonRepository:
 		return [sales_order] if sales_order else []
 
 
+def get_order_sync_watermark(run_started_at):
+	return add_to_date(run_started_at, minutes=-(ORDER_SYNC_LAG_MINUTES + ORDER_SYNC_OVERLAP_MINUTES))
+
+
 @frappe.whitelist()
 def get_orders(created_after: str, sync_selected_date_only: int = 0):
 	repository = AmazonRepository()
+	run_started_at = now_datetime()
 	result = repository.get_orders(created_after, sync_selected_date_only)
 
-	if result is not None:
-		frappe.db.set_single_value("Amazon SP API Settings", "last_synced_at", frappe.utils.now_datetime())
+	if result is not None and not repository.sync_truncated and not cint(sync_selected_date_only):
+		frappe.db.set_single_value(
+			"Amazon SP API Settings", "last_synced_at", get_order_sync_watermark(run_started_at)
+		)
 
 	return result
 
