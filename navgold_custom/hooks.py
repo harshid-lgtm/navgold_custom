@@ -291,6 +291,7 @@ doctype_js = {
 	"Pick List": ["navgold_custom/custom_script/pick_list/pick_list.js"],
 	"Packing Slip": ["navgold_custom/custom_script/packing_slip/packing_slip.js"],
 	"Supplier": ["navgold_custom/custom_script/supplier/supplier.js"],
+	"Item": ["navgold_custom/custom_script/item/item.js"],
 }
 
 doc_events = {
@@ -316,7 +317,10 @@ doc_events = {
 		"on_submit": "navgold_custom.navgold_custom.custom_script.packing_slip.packing_slip.on_submit",
 	},
 	"Pick List": {
-		"before_save": "navgold_custom.navgold_custom.custom_script.pick_list.pick_list.sort_item_locations_by_walk_route",
+		"before_save": [
+			"navgold_custom.navgold_custom.custom_script.pick_list.pick_list.block_partial_pick",
+			"navgold_custom.navgold_custom.custom_script.pick_list.pick_list.sort_item_locations_by_walk_route",
+		],
 		"on_submit": [
 			"navgold_custom.navgold_custom.custom_script.pick_list.pick_list.on_submit",
 		],

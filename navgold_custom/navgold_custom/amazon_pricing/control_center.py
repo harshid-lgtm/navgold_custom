@@ -191,6 +191,8 @@ def compute_outbound_scope(
 		"amazon_stock_suppressed": len(suppressed) if push_status["amazon_stock_live"] else 0,
 		"amazon_price": len(price_ready) if push_status["amazon_prices_live"] else 0,
 		"repricer_price": len(price_ready) if push_status["repricer_live"] else 0,
+		"canary_active": len(stock_scope),
+		"canary_blocked": len(stock_scope) - len(price_ready),
 		"canary_total": canary_total,
 		"canary_mode": canary_mode,
 	}
@@ -368,13 +370,16 @@ def contain_now() -> dict:
 
 	doc = frappe.get_doc("Amazon Pricing Snapshot", snapshot["name"])
 	revert_result = doc.revert_prices()
-	repricer_result = doc.publish("Repricer")
-	amazon_result = doc.publish("Amazon")
 
-	frappe.db.set_single_value("Navgold Settings", "freeze_amazon_outbound", 1)
+	frappe.db.set_single_value("Navgold Settings", "freeze_amazon_outbound", 0)
 	frappe.clear_cache(doctype="Navgold Settings")
-
-	alert_freeze_toggled(1)
+	try:
+		repricer_result = doc.publish("Repricer")
+		amazon_result = doc.publish("Amazon")
+	finally:
+		frappe.db.set_single_value("Navgold Settings", "freeze_amazon_outbound", 1)
+		frappe.clear_cache(doctype="Navgold Settings")
+		alert_freeze_toggled(1)
 
 	return {
 		"snapshot": snapshot["name"],
