@@ -53,11 +53,6 @@ except ImportError:
 
 
 def get_reserved_batch_bundle_name(sre_list):
-	"""Serial and Batch Bundle name covering every reservation on one Delivery Note row.
-
-	v17 takes the whole SRE list and returns the Bundle document; v16 takes a single SRE dict and
-	returns its name. Both differences are normalised here so callers only ever see a name.
-	"""
 	if not sre_list:
 		return None
 
