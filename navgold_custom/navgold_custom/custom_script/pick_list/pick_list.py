@@ -11,6 +11,7 @@ from frappe.utils import cint, flt
 from navgold_custom.navgold_custom.erpnext_compat import (
 	create_delivery_note,
 	get_product_bundle_items,
+	get_reserved_batch_bundle_name,
 	make_delivery_note,
 )
 
@@ -964,13 +965,9 @@ def attach_reserved_batch_bundle(row, sre_list):
 	if not cint(frappe.db.get_single_value("Stock Settings", "use_serial_batch_fields")):
 		return
 
-	from erpnext.stock.doctype.stock_reservation_entry.stock_reservation_entry import (
-		get_ssb_bundle_for_voucher,
-	)
-
-	bundle = get_ssb_bundle_for_voucher(sre_list)
-	if bundle:
-		row.serial_and_batch_bundle = bundle.name
+	bundle_name = get_reserved_batch_bundle_name(sre_list)
+	if bundle_name:
+		row.serial_and_batch_bundle = bundle_name
 		row.use_serial_batch_fields = 0
 
 
