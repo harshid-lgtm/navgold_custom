@@ -11,6 +11,7 @@ from navgold_custom.navgold_custom import amazon_repository
 from navgold_custom.navgold_custom.amazon_repository import (
 	AMAZON_ORDER_STATUSES,
 	ORDER_SYNC_LAG_MINUTES,
+	ORDER_SYNC_MAX_RECOVERED_ORDERS,
 	ORDER_SYNC_OVERLAP_MINUTES,
 	STATUS_REFRESH_LAG_MINUTES,
 	STATUS_REFRESH_MAX_BACKLOG_DAYS,
@@ -90,6 +91,7 @@ class TestOrderStatusRefresh(IntegrationTestCase):
 		repository.amz_setting = self.settings
 		repository.refresh_truncated = False
 		repository.sync_truncated = False
+		repository.recovered_order_count = 0
 		return repository
 
 	def build_order(self, order_status, amount):
@@ -263,20 +265,108 @@ class TestOrderStatusRefresh(IntegrationTestCase):
 
 		self.assertIsNone(repository.update_order_status(self.build_order("Shipped", 27.46), None))
 
+	def recover(self, repository, order, rate):
+		with (
+			patch.object(repository, "get_order_items", return_value=build_items(self.item_code, rate)),
+			patch.object(repository, "create_customer", return_value=self.customer),
+			patch.object(repository, "create_address", return_value=None),
+		):
+			return repository.sync_order(order, None)
+
 	def test_the_refresh_creates_an_order_the_sync_never_landed(self):
 		repository = self.build_repository()
 
 		# The order sync lost this one to a throttled page or a watermark gap, so the status
 		# refresh is the only pass that will ever see it again.
-		with (
-			patch.object(repository, "get_order_items", return_value=build_items(self.item_code, 27.46)),
-			patch.object(repository, "create_customer", return_value=self.customer),
-			patch.object(repository, "create_address", return_value=None),
-		):
-			result = repository.sync_order(self.build_order("Unshipped", 27.46), None)
+		result = self.recover(repository, self.build_order("Unshipped", 27.46), rate=27.46)
 
 		self.assertTrue(result)
 		self.assertEqual(self.get_sales_order("docstatus").docstatus, 1)
+
+	def test_a_recovered_pending_order_is_parked_in_draft(self):
+		repository = self.build_repository()
+
+		self.recover(repository, self.build_order("Pending", 0), rate=0)
+
+		sales_order = self.get_sales_order("docstatus", "amazon_order_status")
+		self.assertEqual(
+			sales_order.docstatus,
+			0,
+			"Amazon hides the price while Pending, so the recovery path must not submit either",
+		)
+		self.assertEqual(sales_order.amazon_order_status, "Pending")
+
+	def test_a_recovered_draft_is_counted_against_free_stock(self):
+		repository = self.build_repository()
+
+		self.recover(repository, self.build_order("Pending", 0), rate=0)
+
+		self.assertEqual(
+			get_draft_amazon_order_qty_map([self.item_code]).get(self.item_code),
+			1.0,
+			"a recovered draft reserves nothing in Bin, so it must be deducted or the feed oversells",
+		)
+
+	def test_an_order_cancelled_in_erpnext_is_not_recreated(self):
+		repository = self.build_repository()
+		self.sync(repository, self.build_order("Unshipped", 27.46), rate=27.46)
+		frappe.get_doc("Sales Order", self.get_sales_order("name").name).cancel()
+
+		# get_sales_orders_by_amazon_id hides docstatus 2, so this arrives at the recovery
+		# path looking like an order that never landed.
+		result = self.recover(repository, self.build_order("Shipped", 27.46), rate=27.46)
+
+		self.assertIsNone(result, "a deliberate cancellation must not be undone by the refresh")
+		self.assertEqual(
+			frappe.db.count("Sales Order", {"amazon_order_id": ORDER_ID}),
+			1,
+			"recovery must not add a second Sales Order alongside the cancelled one",
+		)
+
+	def test_a_resolved_order_that_fails_again_is_reopened_for_triage(self):
+		repository = self.build_repository()
+		repository.create_failed_sync_record(ORDER_ID, "SP-API throttled")
+		frappe.db.set_value(
+			"Amazon Failed Sync Record",
+			frappe.db.get_value("Amazon Failed Sync Record", {"amazon_order_id": ORDER_ID}),
+			"status",
+			"Resolved",
+		)
+
+		repository.create_failed_sync_record(ORDER_ID, "SP-API throttled again")
+
+		self.assertTrue(
+			frappe.db.exists("Amazon Failed Sync Record", {"amazon_order_id": ORDER_ID, "status": "Failed"}),
+			"a repeat failure must reopen triage instead of being swallowed by the resolved record",
+		)
+
+	def test_an_order_awaiting_triage_is_not_retried(self):
+		repository = self.build_repository()
+		repository.create_failed_sync_record(ORDER_ID, "SP-API throttled")
+
+		with patch.object(repository, "get_order_items") as mock_get_order_items:
+			result = repository.sync_order(self.build_order("Unshipped", 27.46), None)
+
+		self.assertIsNone(result)
+		mock_get_order_items.assert_not_called()
+
+	def test_recovery_stops_at_the_per_run_cap(self):
+		repository = self.build_repository()
+		repository.recovered_order_count = ORDER_SYNC_MAX_RECOVERED_ORDERS
+
+		with patch.object(repository, "get_order_items") as mock_get_order_items:
+			result = repository.sync_order(self.build_order("Unshipped", 27.46), None)
+
+		self.assertIsNone(result)
+		mock_get_order_items.assert_not_called()
+		self.assertFalse(
+			frappe.db.exists("Sales Order", {"amazon_order_id": ORDER_ID}),
+			"the cap must stop the recovery before it spends any SP-API quota",
+		)
+		self.assertTrue(
+			repository.refresh_truncated,
+			"the window must hold, or the orders the cap skipped fall out of it for good",
+		)
 
 	def test_the_refresh_does_not_manufacture_an_order_amazon_already_closed(self):
 		repository = self.build_repository()
@@ -437,6 +527,7 @@ class TestStatusRefreshPagination(IntegrationTestCase):
 		repository.amz_setting = frappe.get_single("Amazon SP API Settings")
 		repository.refresh_truncated = False
 		repository.sync_truncated = False
+		repository.recovered_order_count = 0
 		return repository
 
 	def run_refresh(self, repository, pages):
@@ -529,6 +620,7 @@ class TestOrderSyncPagination(IntegrationTestCase):
 		repository.amz_setting = frappe.get_single("Amazon SP API Settings")
 		repository.refresh_truncated = False
 		repository.sync_truncated = False
+		repository.recovered_order_count = 0
 		return repository
 
 	def run_sync(self, repository, pages):
@@ -539,9 +631,12 @@ class TestOrderSyncPagination(IntegrationTestCase):
 			self.page_reads += 1
 			return next(calls, None)
 
+		# get_orders commits per page, which would escape this suite's rollback and
+		# permanently persist whatever the run has built so far.
 		with (
 			patch.object(repository, "get_orders_instance"),
 			patch.object(repository, "call_sp_api_method", side_effect=fake_call),
+			patch.object(frappe.db, "commit"),
 		):
 			return repository.get_orders(now_datetime())
 
@@ -558,11 +653,39 @@ class TestOrderSyncPagination(IntegrationTestCase):
 	def test_an_empty_page_does_not_end_the_run_early(self):
 		repository = self.build_repository()
 		# Before, the loop broke on the first empty page and dropped every page behind it.
-		pages = [{"Orders": [], "NextToken": "t1"}, {"Orders": [], "NextToken": "t2"}, {"Orders": []}]
+		order_behind_the_gap = {"AmazonOrderId": "TEST-SYNC-BEHIND-EMPTY-PAGE", "OrderStatus": "Unshipped"}
+		pages = [{"Orders": [], "NextToken": "t1"}, {"Orders": [order_behind_the_gap]}]
 
-		self.run_sync(repository, pages)
+		with patch.object(repository, "create_sales_order", return_value="SO-BEHIND-GAP") as mock_create:
+			result = self.run_sync(repository, pages)
 
-		self.assertEqual(self.page_reads, len(pages))
+		self.assertEqual(
+			[call.args[0].get("AmazonOrderId") for call in mock_create.call_args_list],
+			[order_behind_the_gap["AmazonOrderId"]],
+			"the order behind the empty page must still be read",
+		)
+		self.assertEqual(result, ["SO-BEHIND-GAP"])
+
+	def test_an_empty_payload_mid_pagination_holds_the_watermark(self):
+		repository = self.build_repository()
+
+		self.run_sync(repository, [{"Orders": [], "NextToken": "t1"}, {}])
+
+		self.assertTrue(
+			repository.sync_truncated,
+			"an empty payload leaves the pages behind it unread, exactly like a failed one",
+		)
+
+	def test_a_long_backlog_is_paged_through_rather_than_capped(self):
+		repository = self.build_repository()
+		backlog = [{"Orders": [], "NextToken": f"t{index}"} for index in range(25)] + [{"Orders": []}]
+
+		self.run_sync(repository, backlog)
+
+		# A page cap here would hold the watermark every run and re-read the same pages forever.
+		# The status refresh can afford one because its window walks forward independently.
+		self.assertEqual(self.page_reads, len(backlog), "every page of a backlog must be read")
+		self.assertFalse(repository.sync_truncated)
 
 	def test_a_first_page_failure_returns_none(self):
 		repository = self.build_repository()
@@ -595,17 +718,6 @@ class TestOrderSyncWatermark(IntegrationTestCase):
 		):
 			mock_sync.side_effect = side_effect
 			return amazon_repository.get_orders("2026-07-01", sync_selected_date_only)
-
-	def test_the_watermark_resumes_behind_the_start_of_the_run(self):
-		run_started_at = now_datetime()
-
-		watermark = get_order_sync_watermark(run_started_at)
-
-		self.assertEqual(
-			get_datetime(watermark),
-			add_to_date(run_started_at, minutes=-(ORDER_SYNC_LAG_MINUTES + ORDER_SYNC_OVERLAP_MINUTES)),
-		)
-		self.assertLess(get_datetime(watermark), run_started_at)
 
 	def test_a_clean_run_moves_the_watermark_back_from_the_run_start_not_to_its_end(self):
 		self.set_watermark(add_to_date(now_datetime(), hours=-4))

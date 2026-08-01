@@ -34,6 +34,7 @@ STATUS_REFRESH_LAG_MINUTES = 3
 
 ORDER_SYNC_OVERLAP_MINUTES = 15
 ORDER_SYNC_LAG_MINUTES = 3
+ORDER_SYNC_MAX_RECOVERED_ORDERS = 20
 
 AMAZON_ORDER_STATUSES = (
 	"PendingAvailability",
@@ -60,6 +61,8 @@ def parse_amazon_utc(utc_time_str):
 
 
 def format_local_as_amazon_utc(local_datetime):
+	# Frappe datetimes are naive system-local; convert to real UTC so the offset
+	# is not silently sent to Amazon as if it were already UTC.
 	system_datetime = get_datetime(local_datetime).replace(tzinfo=ZoneInfo(get_system_timezone()))
 	return system_datetime.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -68,6 +71,7 @@ class AmazonRepository:
 	def __init__(self):
 		self.refresh_truncated = False
 		self.sync_truncated = False
+		self.recovered_order_count = 0
 		self.amz_setting = frappe.get_single("Amazon SP API Settings")
 		self.instance_params = {
 			"client_id": self.amz_setting.client_id,
@@ -159,6 +163,8 @@ class AmazonRepository:
 		payload = self.call_sp_api_method(sp_api_method=orders.get_order_items, order_id=order_id)
 
 		if payload is None:
+			# A throttled/failed items call must not be swallowed as "no items" — raise so the
+			# caller records a failed sync instead of silently dropping the order.
 			raise Exception(f"Could not fetch order items for {order_id} (SP-API call failed or throttled)")
 
 		raw_items = []
@@ -213,6 +219,8 @@ class AmazonRepository:
 			)
 
 			if payload is None:
+				# Throttled mid-pagination: the order is only partially read, so fail it
+				# rather than building an incomplete item list.
 				raise Exception(
 					f"Could not fetch all order items for {order_id} (SP-API call failed or throttled)"
 				)
@@ -317,6 +325,8 @@ class AmazonRepository:
 		try:
 			items = self.get_order_items(order_id)
 			if not items:
+				# Amazon can list an order before its items are queryable; record it so the
+				# order surfaces for triage instead of being lost silently.
 				self.create_failed_sync_record(order_id, "No order items returned by Amazon", order=order)
 				return None
 
@@ -383,6 +393,7 @@ class AmazonRepository:
 				item["warehouse"] = warehouse
 				sales_order.append("items", item)
 
+			# ERPNext v17 moved set_taxes() off the controller into TaxService; fall back for older versions
 			try:
 				from erpnext.accounts.services.taxes import TaxService
 
@@ -409,7 +420,10 @@ class AmazonRepository:
 			return None
 
 	def create_failed_sync_record(self, order_id, remarks, order=None):
-		if frappe.db.exists("Amazon Failed Sync Record", {"amazon_order_id": order_id}):
+		# Only an open record suppresses a new one. Matching on any record let an order whose
+		# record was resolved fail again in silence, and the recovery path then retried it
+		# every pass because nothing was left open to hold it back.
+		if frappe.db.exists("Amazon Failed Sync Record", {"amazon_order_id": order_id, "status": "Failed"}):
 			return
 
 		record = frappe.new_doc("Amazon Failed Sync Record")
@@ -493,7 +507,9 @@ class AmazonRepository:
 				next_token=next_token,
 			)
 
-			if orders_payload is None:
+			# An empty payload is as unread as a None one — both must hold the watermark,
+			# or the orders on the pages behind it are skipped for good.
+			if not orders_payload:
 				self.sync_truncated = True
 				break
 
@@ -537,7 +553,29 @@ class AmazonRepository:
 		if order.get("OrderStatus") in CLOSED_ORDER_STATUSES:
 			return None
 
-		with filelock(f"amazon_order_{order.get('AmazonOrderId')}", timeout=60):
+		order_id = order.get("AmazonOrderId")
+
+		# Recovering one order costs three uncached SP-API calls (items, buyer, address) on a
+		# quota Amazon already throttles daily, so a refresh run only recovers a few. Mark the
+		# pass truncated as well, or the window closes over the orders this cap skipped.
+		if self.recovered_order_count >= ORDER_SYNC_MAX_RECOVERED_ORDERS:
+			self.refresh_truncated = True
+			return None
+
+		# An order already awaiting triage is left alone: re-fetching it burns the same quota
+		# that failed it, and safety_sweep alerts on the open records so a human picks it up.
+		# ponytail: one exists() per unrecovered order, batch it per page if the refresh
+		# ever walks more than a few hundred orders ERPNext has no Sales Order for
+		if frappe.db.exists("Amazon Failed Sync Record", {"amazon_order_id": order_id, "status": "Failed"}):
+			return None
+
+		with filelock(f"amazon_order_{order_id}", timeout=60):
+			# get_sales_orders_by_amazon_id hides docstatus 2, so an order cancelled in ERPNext
+			# arrives here looking like one that never landed. Re-check before creating it again.
+			if frappe.db.exists("Sales Order", {"amazon_order_id": order_id, "docstatus": 2}):
+				return None
+
+			self.recovered_order_count += 1
 			return self.create_sales_order(order)
 
 	def refresh_order_statuses(self, window_start, window_end):
@@ -591,7 +629,7 @@ class AmazonRepository:
 				next_token=next_token,
 			)
 
-			if orders_payload is None:
+			if not orders_payload:
 				self.refresh_truncated = True
 				break
 
