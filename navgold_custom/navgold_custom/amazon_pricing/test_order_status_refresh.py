@@ -276,8 +276,6 @@ class TestOrderStatusRefresh(IntegrationTestCase):
 	def test_the_refresh_creates_an_order_the_sync_never_landed(self):
 		repository = self.build_repository()
 
-		# The order sync lost this one to a throttled page or a watermark gap, so the status
-		# refresh is the only pass that will ever see it again.
 		result = self.recover(repository, self.build_order("Unshipped", 27.46), rate=27.46)
 
 		self.assertTrue(result)
@@ -312,8 +310,6 @@ class TestOrderStatusRefresh(IntegrationTestCase):
 		self.sync(repository, self.build_order("Unshipped", 27.46), rate=27.46)
 		frappe.get_doc("Sales Order", self.get_sales_order("name").name).cancel()
 
-		# get_sales_orders_by_amazon_id hides docstatus 2, so this arrives at the recovery
-		# path looking like an order that never landed.
 		result = self.recover(repository, self.build_order("Shipped", 27.46), rate=27.46)
 
 		self.assertIsNone(result, "a deliberate cancellation must not be undone by the refresh")
@@ -407,7 +403,6 @@ class TestOrderStatusRefresh(IntegrationTestCase):
 		repository = self.build_repository()
 		self.sync(repository, self.build_order("Unshipped", 27.46), rate=27.46)
 
-		# Before, this returned early on docstatus == 1 and the status never moved.
 		result = self.fetch_one_order(repository, self.build_order("Shipped", 27.46), rate=27.46)
 
 		self.assertTrue(result)
@@ -427,8 +422,6 @@ class TestOrderStatusRefresh(IntegrationTestCase):
 		repository = self.build_repository()
 		self.sync(repository, self.build_order("Unshipped", 27.46), rate=27.46)
 
-		# The failed-sync retry treats an empty result as "still failed", so an unchanged order
-		# must report its Sales Order rather than the no-op None from update_order_status.
 		result = self.fetch_one_order(repository, self.build_order("Unshipped", 27.46), rate=27.46)
 
 		self.assertEqual(result, [self.get_sales_order("name").name])
@@ -631,8 +624,6 @@ class TestOrderSyncPagination(IntegrationTestCase):
 			self.page_reads += 1
 			return next(calls, None)
 
-		# get_orders commits per page, which would escape this suite's rollback and
-		# permanently persist whatever the run has built so far.
 		with (
 			patch.object(repository, "get_orders_instance"),
 			patch.object(repository, "call_sp_api_method", side_effect=fake_call),
@@ -652,7 +643,6 @@ class TestOrderSyncPagination(IntegrationTestCase):
 
 	def test_an_empty_page_does_not_end_the_run_early(self):
 		repository = self.build_repository()
-		# Before, the loop broke on the first empty page and dropped every page behind it.
 		order_behind_the_gap = {"AmazonOrderId": "TEST-SYNC-BEHIND-EMPTY-PAGE", "OrderStatus": "Unshipped"}
 		pages = [{"Orders": [], "NextToken": "t1"}, {"Orders": [order_behind_the_gap]}]
 
@@ -682,8 +672,6 @@ class TestOrderSyncPagination(IntegrationTestCase):
 
 		self.run_sync(repository, backlog)
 
-		# A page cap here would hold the watermark every run and re-read the same pages forever.
-		# The status refresh can afford one because its window walks forward independently.
 		self.assertEqual(self.page_reads, len(backlog), "every page of a backlog must be read")
 		self.assertFalse(repository.sync_truncated)
 
