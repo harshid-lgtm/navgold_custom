@@ -12,7 +12,8 @@ frappe.ui.form.on('Packing Slip', {
 		toggle_fields(frm);
 		add_scan_buttons(frm);
 		add_sfp_label_button(frm);
-		add_sfp_cancel_button(frm);
+		// Cancel SFP Shipment is hidden for now.
+		// add_sfp_cancel_button(frm);
 		add_pack_remaining_button(frm);
 	},
 });
