@@ -5,6 +5,7 @@ import frappe
 from frappe.tests import IntegrationTestCase
 
 from navgold_custom.navgold_custom.amazon_pricing.test_bundle_stock import make_item
+from navgold_custom.navgold_custom.custom_script.pick_list.pick_list import get_whole_number_uoms
 
 # erpnext.stock.doctype.warehouse.test_warehouse.create_warehouse is deliberately NOT
 # reused: importing erpnext test modules triggers their test-record chain, which creates
@@ -231,3 +232,135 @@ class TestPickListOpenOrderFilter(IntegrationTestCase):
 		self.created.append(sales_order.name)
 
 		self.assertIn(sales_order.name, self.get_offered_orders())
+
+
+def make_uom(uom_name, must_be_whole_number):
+	if frappe.db.exists("UOM", uom_name):
+		return uom_name
+	uom = frappe.new_doc("UOM")
+	uom.uom_name = uom_name
+	uom.must_be_whole_number = must_be_whole_number
+	uom.insert()
+	return uom.name
+
+
+def make_packed_item(item_code, stock_uom, pack_uom, conversion_factor):
+	if frappe.db.exists("Item", item_code):
+		return item_code
+	item = frappe.new_doc("Item")
+	item.item_code = item_code
+	item.item_name = item_code
+	item.item_group = "All Item Groups"
+	item.stock_uom = stock_uom
+	item.is_stock_item = 1
+	item.append("uoms", {"uom": pack_uom, "conversion_factor": conversion_factor})
+	item.insert()
+	return item.name
+
+
+class TestPickListWholeStockUnits(IntegrationTestCase):
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.company = (
+			frappe.defaults.get_global_default("company")
+			or frappe.get_all("Company", limit=1, pluck="name")[0]
+		)
+		cls.pack_uom = make_uom("Whole Units Test Pack of 6", must_be_whole_number=0)
+		cls.whole_uom = make_uom("Whole Units Test Each", must_be_whole_number=1)
+		cls.fractional_uom = make_uom("Whole Units Test Litre", must_be_whole_number=0)
+
+		cls.whole_item = make_packed_item(
+			"WHOLE-UNIT-PACK-ITEM", cls.whole_uom, cls.pack_uom, conversion_factor=6
+		)
+		cls.fractional_item = make_packed_item(
+			"FRACTIONAL-UNIT-PACK-ITEM", cls.fractional_uom, cls.pack_uom, conversion_factor=6
+		)
+
+		cls.warehouse = frappe.get_all(
+			"Warehouse",
+			filters={"company": cls.company, "is_group": 0, "is_rejected_warehouse": 0, "disabled": 0},
+			limit=1,
+			pluck="name",
+		)[0]
+		receive_stock(cls.whole_item, 50, [cls.warehouse], cls.company)
+		receive_stock(cls.fractional_item, 50, [cls.warehouse], cls.company)
+
+		get_whole_number_uoms.clear_cache()
+
+	def make_single_row_pick_list(self, item_code, stock_uom, qty, stock_qty, picked_qty):
+		pick_list = frappe.new_doc("Pick List")
+		pick_list.company = self.company
+		pick_list.purpose = "Material Transfer"
+		pick_list.pick_manually = 1
+		pick_list.append(
+			"locations",
+			{
+				"item_code": item_code,
+				"qty": qty,
+				"stock_qty": stock_qty,
+				"picked_qty": picked_qty,
+				"warehouse": self.warehouse,
+				"uom": self.pack_uom,
+				"stock_uom": stock_uom,
+				"conversion_factor": 6,
+			},
+		)
+		pick_list.save()
+		return pick_list
+
+	def make_dusty_pick_list(self, item_code, stock_uom):
+		return self.make_single_row_pick_list(item_code, stock_uom, 0.833, 0.833 * 6, 0.833 * 6)
+
+	def test_fractional_stock_qty_is_snapped_to_whole_stock_units(self):
+		pick_list = self.make_dusty_pick_list(self.whole_item, self.whole_uom)
+
+		row = pick_list.locations[0]
+		self.assertEqual(row.stock_qty, 5)
+		self.assertEqual(row.picked_qty, 5)
+		self.assertEqual(row.qty * row.conversion_factor, row.stock_qty)
+
+	def test_a_genuine_half_unit_is_floored_never_rounded_up(self):
+		pick_list = self.make_single_row_pick_list(self.whole_item, self.whole_uom, 0.25, 1.5, 1.5)
+
+		row = pick_list.locations[0]
+		self.assertEqual(row.stock_qty, 1, "rounding 1.5 up to 2 would claim stock the shelf never held")
+		self.assertEqual(row.picked_qty, 1)
+
+	def test_a_half_unit_below_one_is_floored_to_nothing(self):
+		pick_list = self.make_single_row_pick_list(self.whole_item, self.whole_uom, 0.083, 0.5, 0.5)
+
+		row = pick_list.locations[0]
+		self.assertEqual(row.stock_qty, 0)
+		self.assertEqual(row.picked_qty, 0)
+
+	def test_dust_already_stored_is_snapped_on_submit_without_a_save(self):
+		pick_list = self.make_dusty_pick_list(self.whole_item, self.whole_uom)
+		for row in pick_list.locations:
+			frappe.db.set_value(
+				"Pick List Item",
+				row.name,
+				{"qty": 0.833, "stock_qty": 4.998, "picked_qty": 4.998},
+				update_modified=False,
+			)
+
+		stored = frappe.get_doc("Pick List", pick_list.name)
+		stored.submit()
+
+		self.assertEqual(stored.locations[0].stock_qty, 5)
+		self.assertEqual(stored.locations[0].picked_qty, 5)
+
+	def test_snapped_quantities_survive_a_reload(self):
+		pick_list = self.make_dusty_pick_list(self.whole_item, self.whole_uom)
+
+		reloaded = frappe.get_doc("Pick List", pick_list.name)
+		self.assertEqual(reloaded.locations[0].stock_qty, 5)
+		self.assertEqual(reloaded.locations[0].picked_qty, 5)
+
+	def test_fraction_tolerant_stock_uom_keeps_its_fraction(self):
+		pick_list = self.make_dusty_pick_list(self.fractional_item, self.fractional_uom)
+
+		row = pick_list.locations[0]
+		self.assertEqual(row.stock_qty, 0.833 * 6)
+		self.assertEqual(row.picked_qty, 0.833 * 6)
+		self.assertEqual(row.qty, 0.833)

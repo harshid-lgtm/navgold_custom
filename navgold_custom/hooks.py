@@ -317,6 +317,9 @@ doc_events = {
 		"on_submit": "navgold_custom.navgold_custom.custom_script.packing_slip.packing_slip.on_submit",
 	},
 	"Pick List": {
+		"validate": [
+			"navgold_custom.navgold_custom.custom_script.pick_list.pick_list.snap_locations_to_whole_stock_units",
+		],
 		"before_save": [
 			"navgold_custom.navgold_custom.custom_script.pick_list.pick_list.block_partial_pick",
 			"navgold_custom.navgold_custom.custom_script.pick_list.pick_list.sort_item_locations_by_walk_route",

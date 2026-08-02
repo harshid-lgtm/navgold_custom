@@ -7,6 +7,7 @@ from erpnext.stock.doctype.stock_reservation_entry.stock_reservation_entry impor
 )
 from frappe import _
 from frappe.utils import cint, flt
+from frappe.utils.caching import redis_cache
 
 from navgold_custom.navgold_custom.erpnext_compat import (
 	create_delivery_note,
@@ -24,6 +25,35 @@ def on_submit(doc, method):
 def block_partial_pick(doc, method=None):
 	# hook entry: runs after erpnext's before_save has allocated the locations
 	drop_sales_orders_short_of_stock(doc)
+
+
+def snap_locations_to_whole_stock_units(doc, method=None):
+	whole_number_uoms = get_whole_number_uoms()
+	if not whole_number_uoms:
+		return
+
+	qty_precision = frappe.get_precision("Pick List Item", "qty")
+	for row in doc.get("locations"):
+		if row.stock_uom not in whole_number_uoms:
+			continue
+		conversion_factor = flt(row.conversion_factor) or 1
+		rounding_dust = conversion_factor * 0.5 * 10**-qty_precision
+		row.stock_qty = snap_to_whole_units(row.stock_qty, rounding_dust)
+		row.picked_qty = snap_to_whole_units(row.picked_qty, rounding_dust)
+		row.qty = flt(row.stock_qty) / conversion_factor
+
+
+def snap_to_whole_units(value, rounding_dust):
+	value = flt(value)
+	nearest_whole = flt(value, 0)
+	if abs(value - nearest_whole) <= rounding_dust:
+		return nearest_whole
+	return cint(value)
+
+
+@redis_cache()
+def get_whole_number_uoms():
+	return set(frappe.get_all("UOM", filters={"must_be_whole_number": 1}, pluck="name"))
 
 
 def drop_sales_orders_short_of_stock(pick_list, requested_sales_orders=None):
