@@ -239,20 +239,27 @@ def get_consolidation_flow_warehouse(pick_list):
 	warehouse = get_delivery_consolidation_warehouse()
 	if not warehouse:
 		return None
-	# pure-pack picks always consolidate (a split pack UOM otherwise ships fractional qty). Bundle
-	# picks only need it when a component actually splits across warehouses: ERPNext's native
-	# pick-list→DN mapper then collapses that split into one packed row at one shelf with the full
-	# qty and crashes on submit. A single-warehouse bundle maps cleanly on the native path.
-	# Once consolidation is entered, delivery notes are routed per Sales Order (pack / bundle / mixed)
-	# by consolidate_and_create_delivery_notes, so a mixed Sales Order no longer strands either line.
-	# this entry predicate is still pick-list-wide — a non-split bundle beside a split pack on the SAME
-	# pick list stays on the native path and would ship the pack fractional; broaden it to also trigger
-	# on a split standalone pack line only if such a pick list ever appears in practice
+	if has_part_pack_standalone_locations(pick_list):
+		return warehouse
 	if not has_product_bundle_locations(pick_list):
 		return warehouse
 	if has_split_product_bundle_locations(pick_list):
 		return warehouse
 	return None
+
+
+def has_part_pack_standalone_locations(pick_list):
+	for location in pick_list.locations:
+		if location.product_bundle_item or not location.sales_order_item:
+			continue
+		picked_qty = flt(location.picked_qty)
+		conversion_factor = flt(location.conversion_factor) or 1
+		if not picked_qty or conversion_factor <= 1:
+			continue
+		packs = flt(picked_qty / conversion_factor, 6)
+		if packs != int(packs):
+			return True
+	return False
 
 
 def auto_reserve_stock(doc):

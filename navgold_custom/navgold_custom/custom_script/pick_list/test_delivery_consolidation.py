@@ -986,3 +986,68 @@ class TestReservedBatchBundleCompat(IntegrationTestCase):
 
 	def test_no_reservations_returns_nothing(self):
 		self.assertIsNone(self.compat.get_reserved_batch_bundle_name([]))
+
+
+class TestPartPackBesideBundle(IntegrationTestCase):
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.shelf_a = create_test_warehouse("Test PPB Shelf A")
+		cls.shelf_b = create_test_warehouse("Test PPB Shelf B")
+		cls.consolidation_warehouse = create_test_warehouse("Test PPB Ready to Ship")
+		frappe.db.set_value("UOM", "Nos", "must_be_whole_number", 1)
+
+	@classmethod
+	def tearDownClass(cls):
+		frappe.db.set_value("UOM", "Nos", "must_be_whole_number", 0)
+		super().tearDownClass()
+
+	def setUp(self):
+		super().setUp()
+		frappe.db.set_single_value(
+			"Navgold Settings", "delivery_consolidation_warehouse", self.consolidation_warehouse
+		)
+		frappe.db.set_single_value("Stock Settings", "enable_stock_reservation", 1)
+
+	def test_part_pack_beside_a_non_split_bundle_still_consolidates(self):
+		pack_item = create_pack_item("TEST-PPB-PACK-ITEM")
+		receive_stock(pack_item, self.shelf_a, 5)
+		receive_stock(pack_item, self.shelf_b, 20)
+		pack_sales_order = create_pack_sales_order(pack_item)
+
+		component_item = create_pack_item("TEST-PPB-BUNDLE-COMPONENT")
+		receive_stock(component_item, self.shelf_b, 20)
+		bundle_item = create_bundle_parent_item("TEST-PPB-BUNDLE-PARENT")
+		create_product_bundle(bundle_item, component_item, 2)
+		bundle_sales_order = create_bundle_sales_order(bundle_item)
+
+		from navgold_custom.navgold_custom.custom_script.pick_list.pick_list_api import (
+			map_sales_orders_to_pick_list,
+		)
+
+		pick_list = map_sales_orders_to_pick_list(
+			frappe.as_json([pack_sales_order.name, bundle_sales_order.name]),
+			frappe.as_json(frappe.new_doc("Pick List").as_dict()),
+		)
+		pick_list.save()
+		for location in pick_list.locations:
+			location.picked_qty = location.stock_qty
+		pick_list.save()
+
+		self.assertTrue(
+			any(location.product_bundle_item for location in pick_list.locations),
+			"fixture must carry a bundle line or it does not reproduce the prod pick list",
+		)
+
+		pick_list.submit()
+
+		transfer = get_consolidation_transfer(pick_list)
+		self.assertIsNotNone(transfer, "the part-pack line must force the consolidation flow")
+
+		delivery_note_items = get_delivery_note_items(pack_sales_order)
+		self.assertTrue(delivery_note_items, "the pack order got no Delivery Note")
+		for row in delivery_note_items:
+			self.assertEqual(
+				flt(row.qty) % 1, 0, "a Delivery Note must ship whole packs, never a fraction of one"
+			)
+			self.assertEqual(flt(row.qty) * flt(row.conversion_factor), 6)
