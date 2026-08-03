@@ -151,8 +151,6 @@ def get_open_sales_orders_for_delivery(
 	for so in result:
 		so["in_stock"] = fulfillment.get(so["sales_order"], False)
 
-	# in-stock orders first; the sort is stable, so the dates still order each group. Fulfillment is
-	# read in date order too, so the earliest order gets first claim on a contested item.
 	result.sort(key=lambda x: not x["in_stock"])
 
 	return result

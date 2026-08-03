@@ -214,10 +214,6 @@ def is_pickable(item_code):
 
 
 def get_stock_fulfillment(sales_orders, company, parent_warehouse=None):
-	"""Can each Sales Order be picked in full off the shelves right now? Keyed by order, in the order
-	given: a fulfillable order consumes the stock it would claim, so two orders wanting the same item
-	never both read as available. A short order consumes nothing — drop_sales_orders_short_of_stock
-	drops it whole, leaving its stock to the orders behind it."""
 	demand = get_demand_by_sales_order(sales_orders)
 	available = get_pickable_stock_qty(
 		{item_code for lines in demand.values() for item_code in lines}, company, parent_warehouse
@@ -241,7 +237,6 @@ def get_stock_fulfillment(sales_orders, company, parent_warehouse=None):
 
 
 def get_demand_by_sales_order(sales_orders):
-	"""Yet-to-be-picked stock qty per item of each order: {sales_order: {item_code: stock_qty}}."""
 	demand = {}
 	for row in get_ordered_stock_qty(sales_orders):
 		lines = demand.setdefault(row.sales_order, {})
@@ -250,8 +245,6 @@ def get_demand_by_sales_order(sales_orders):
 
 
 def get_pickable_stock_qty(item_codes, company, parent_warehouse=None):
-	"""On-shelf qty per item less what open Pick Lists already claim, over the same warehouses
-	erpnext's set_item_locations would search."""
 	if not item_codes:
 		return {}
 
@@ -281,15 +274,11 @@ def get_pickable_warehouses(company, parent_warehouse=None):
 	else:
 		warehouses = frappe.get_all("Warehouse", filters={"company": company, "is_group": 0}, pluck="name")
 
-	# consider_rejected_warehouses is off by default on Pick List, so rejected stock is not pickable
 	rejected_warehouses = set(get_rejected_warehouses())
 	return [warehouse for warehouse in warehouses if warehouse not in rejected_warehouses]
 
 
 def get_open_pick_list_claims(item_codes, warehouses):
-	"""Stock qty per item that Pick Lists still in play have already claimed off these shelves,
-	counted the way erpnext's own allocation counts it: a submitted row claims what it picked and has
-	not yet delivered, any other live row claims its whole demand."""
 	pick_list = frappe.qb.DocType("Pick List")
 	pick_list_item = frappe.qb.DocType("Pick List Item")
 	claimed_qty = (

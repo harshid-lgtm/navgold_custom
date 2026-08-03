@@ -382,8 +382,6 @@ class TestPickListStockFulfillment(IntegrationTestCase):
 			self.skipTest("No Customer on test site")
 
 		self.item_code = make_item("TEST-FULFILLMENT-ITEM", 1)
-		# order the whole shelf rather than a fixed qty, so repeated runs (which leave their receipts
-		# behind) still put exactly one order's worth of stock in play
 		self.available_qty = flt(get_pickable_stock_qty({self.item_code}, self.company).get(self.item_code))
 		if self.available_qty < 1:
 			receive_stock(self.item_code, 1, [self.warehouse], self.company)
