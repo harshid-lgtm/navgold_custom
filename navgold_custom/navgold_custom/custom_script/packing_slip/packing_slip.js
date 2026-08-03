@@ -450,6 +450,8 @@ function show_pack_qty_dialog(frm, matching_rows, item_code, options = {}) {
 		? options.description
 		: matching_rows[0].description;
 
+	let scan_next_after_hide = false;
+
 	const dialog = new frappe.ui.Dialog({
 		title: __('Update Packed Qty'),
 		fields: [
@@ -528,8 +530,6 @@ function show_pack_qty_dialog(frm, matching_rows, item_code, options = {}) {
 					]),
 					indicator: 'green',
 				});
-
-				dialog.hide();
 			};
 
 			if (options.is_bundle) {
@@ -538,14 +538,58 @@ function show_pack_qty_dialog(frm, matching_rows, item_code, options = {}) {
 				// never runs, custom_packed_qty stays 0, and the "Product Bundle" confirm loops
 				// forever — a bundle Packing Slip could never be packed/saved.
 				dialog.hide();
-				frappe.confirm(__('The Item is a Product Bundle.'), apply_packed_qty);
+
+				let bundle_confirmed = false;
+				const confirm_dialog = frappe.confirm(
+					__('The Item is a Product Bundle.'),
+					() => {
+						apply_packed_qty();
+						bundle_confirmed = true;
+					},
+				);
+				// Same modal-on-modal reason: chain the next scan off the confirm's own fade-out,
+				// because frappe.confirm hides only AFTER the Yes callback has returned.
+				confirm_dialog.on_hide = () => {
+					if (bundle_confirmed) prompt_next_item_scan(frm);
+				};
 			} else {
 				apply_packed_qty();
+				scan_next_after_hide = true;
+				dialog.hide();
 			}
+		},
+		on_hide() {
+			if (scan_next_after_hide) prompt_next_item_scan(frm);
 		},
 	});
 	dialog.show();
 	setTimeout(() => dialog.fields_dict.qty.$input.select(), 150);
+}
+
+function is_fully_packed(frm) {
+	const rows = frm.doc.items || [];
+	if (!rows.length) return false;
+
+	return rows.every(
+		(row) =>
+			flt(row.custom_packed_qty, precision('custom_packed_qty', row)) >=
+			flt(row.qty, precision('qty', row)),
+	);
+}
+
+function prompt_next_item_scan(frm) {
+	if (is_fully_packed(frm)) {
+		frappe.show_alert(
+			{
+				message: __('All items packed. Save the Packing Slip.'),
+				indicator: 'blue',
+			},
+			5,
+		);
+		return;
+	}
+
+	navgold.packing.open_scan_item_dialog(frm, process_item_scan, false);
 }
 
 function distribute_packed_qty(frm, rows, total_packed_nos) {
