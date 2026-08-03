@@ -131,7 +131,6 @@ app_include_js = ["/assets/navgold_custom/js/utils.js", "/assets/navgold_custom/
 
 fixtures = [
 	{"dt": "Stock Entry Type", "filters": [["name", "=", "FBA Transfer"]]},
-	{"dt": "Custom Field", "filters": [["name", "=", "Stock Entry-custom_fba_transfer_entry"]]},
 	{"dt": "Role", "filters": [["name", "like", "Navgold%"]]},
 	{
 		"dt": "Custom DocPerm",
