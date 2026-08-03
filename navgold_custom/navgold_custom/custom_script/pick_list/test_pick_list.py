@@ -3,9 +3,17 @@
 
 import frappe
 from frappe.tests import IntegrationTestCase
+from frappe.utils import flt
 
-from navgold_custom.navgold_custom.amazon_pricing.test_bundle_stock import make_item
-from navgold_custom.navgold_custom.custom_script.pick_list.pick_list import get_whole_number_uoms
+from navgold_custom.navgold_custom.amazon_pricing.test_bundle_stock import (
+	get_stock_warehouse,
+	make_item,
+)
+from navgold_custom.navgold_custom.custom_script.pick_list.pick_list import (
+	get_pickable_stock_qty,
+	get_stock_fulfillment,
+	get_whole_number_uoms,
+)
 
 # erpnext.stock.doctype.warehouse.test_warehouse.create_warehouse is deliberately NOT
 # reused: importing erpnext test modules triggers their test-record chain, which creates
@@ -364,3 +372,66 @@ class TestPickListWholeStockUnits(IntegrationTestCase):
 		self.assertEqual(row.stock_qty, 0.833 * 6)
 		self.assertEqual(row.picked_qty, 0.833 * 6)
 		self.assertEqual(row.qty, 0.833)
+
+
+class TestPickListStockFulfillment(IntegrationTestCase):
+	def setUp(self):
+		self.warehouse, self.company = get_stock_warehouse()
+		self.customer = frappe.db.get_value("Customer", {}, "name")
+		if not self.customer:
+			self.skipTest("No Customer on test site")
+
+		self.item_code = make_item("TEST-FULFILLMENT-ITEM", 1)
+		self.available_qty = flt(get_pickable_stock_qty({self.item_code}, self.company).get(self.item_code))
+		if self.available_qty < 1:
+			receive_stock(self.item_code, 1, [self.warehouse], self.company)
+			self.available_qty = 1
+
+		self.sales_orders = []
+
+	def tearDown(self):
+		for name in self.sales_orders:
+			sales_order = frappe.get_doc("Sales Order", name)
+			if sales_order.docstatus == 1:
+				sales_order.cancel()
+			sales_order.delete(force=True)
+
+	def make_sales_order(self, qty):
+		sales_order = frappe.new_doc("Sales Order")
+		sales_order.customer = self.customer
+		sales_order.company = self.company
+		sales_order.transaction_date = frappe.utils.nowdate()
+		sales_order.delivery_date = frappe.utils.nowdate()
+		sales_order.append(
+			"items",
+			{
+				"item_code": self.item_code,
+				"qty": qty,
+				"rate": 10,
+				"warehouse": self.warehouse,
+				"delivery_date": frappe.utils.nowdate(),
+			},
+		)
+		sales_order.flags.ignore_mandatory = True
+		sales_order.save(ignore_permissions=True)
+		sales_order.submit()
+		self.sales_orders.append(sales_order.name)
+		return sales_order.name
+
+	def test_the_shelf_is_claimed_by_the_first_order_only(self):
+		first = self.make_sales_order(self.available_qty)
+		second = self.make_sales_order(self.available_qty)
+
+		fulfillment = get_stock_fulfillment([first, second], self.company)
+
+		self.assertTrue(fulfillment[first], "the whole shelf covers this order exactly")
+		self.assertFalse(fulfillment[second], "the stock the first order takes is gone")
+
+	def test_an_order_wanting_more_than_the_shelf_holds_leaves_it_for_the_next(self):
+		short = self.make_sales_order(self.available_qty + 1)
+		coverable = self.make_sales_order(self.available_qty)
+
+		fulfillment = get_stock_fulfillment([short, coverable], self.company)
+
+		self.assertFalse(fulfillment[short])
+		self.assertTrue(fulfillment[coverable], "a dropped order consumes nothing")

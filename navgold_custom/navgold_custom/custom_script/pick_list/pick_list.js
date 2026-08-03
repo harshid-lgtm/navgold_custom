@@ -56,6 +56,7 @@ frappe.ui.form.on('Pick List', {
 				args: {
 					customer: frm.doc.customer || null,
 					company: frm.doc.company,
+					parent_warehouse: frm.doc.parent_warehouse || null,
 				},
 			});
 
@@ -149,6 +150,7 @@ frappe.ui.form.on('Pick List', {
 						<th style="width: 50px;"><input type="checkbox" id="select-all-so"></th>
 						<th>Sales Order</th>
 						<th>Customer</th>
+						<th>Fulfillment</th>
 						<th>Dispatch Date</th>
 						<th>Delivery Date</th>
 						<th>Is Prime</th>
@@ -172,6 +174,11 @@ frappe.ui.form.on('Pick List', {
                 ${so.sales_order}
             </a></td>
             <td>${so.customer}</td>
+            <td>${
+							so.in_stock
+								? '<span class="indicator-pill green">In Stock</span>'
+								: '<span class="indicator-pill red">Out of Stock</span>'
+						}</td>
             <td>${frappe.datetime.str_to_user(so.dispatch_date) || '-'}</td>
             <td>${frappe.datetime.str_to_user(so.delivery_date) || '-'}</td>
             <td>${
