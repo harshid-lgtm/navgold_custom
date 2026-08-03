@@ -97,6 +97,19 @@ navgold.packing.open_scan_item_dialog = function open_scan_item_dialog(
 	}, 150);
 };
 
+navgold.packing.download_file = function download_file(file_url, file_name) {
+	// An anchor with the download attribute instead of window.open, so the label lands in the
+	// packer's Downloads folder for the label printer rather than rendering inline in a tab.
+	// file_name only takes effect on public /files/ URLs: Frappe's private-file handler sends
+	// a Content-Disposition filename, and that outranks the download attribute.
+	const link = document.createElement('a');
+	link.href = file_url;
+	link.download = file_name || '';
+	document.body.appendChild(link);
+	link.click();
+	document.body.removeChild(link);
+};
+
 navgold.packing.prompt_select = function prompt_select({
 	title,
 	label,
