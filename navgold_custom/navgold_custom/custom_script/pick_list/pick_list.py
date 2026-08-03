@@ -2,12 +2,16 @@
 # For license information, please see license.txt
 
 import frappe
+from erpnext.stock.doctype.pick_list.pick_list import get_rejected_warehouses
 from erpnext.stock.doctype.stock_reservation_entry.stock_reservation_entry import (
 	create_stock_reservation_entries_for_so_items,
 )
 from frappe import _
+from frappe.query_builder import Case
+from frappe.query_builder.functions import Sum
 from frappe.utils import cint, flt
 from frappe.utils.caching import redis_cache
+from frappe.utils.nestedset import get_descendants_of
 
 from navgold_custom.navgold_custom.erpnext_compat import (
 	create_delivery_note,
@@ -207,6 +211,112 @@ def is_pickable(item_code):
 	return cint(frappe.get_cached_value("Item", item_code, "is_stock_item")) or bool(
 		get_product_bundle_items(item_code)
 	)
+
+
+def get_stock_fulfillment(sales_orders, company, parent_warehouse=None):
+	"""Can each Sales Order be picked in full off the shelves right now? Keyed by order, in the order
+	given: a fulfillable order consumes the stock it would claim, so two orders wanting the same item
+	never both read as available. A short order consumes nothing — drop_sales_orders_short_of_stock
+	drops it whole, leaving its stock to the orders behind it."""
+	demand = get_demand_by_sales_order(sales_orders)
+	available = get_pickable_stock_qty(
+		{item_code for lines in demand.values() for item_code in lines}, company, parent_warehouse
+	)
+
+	precision = frappe.get_precision("Pick List Item", "stock_qty")
+	fulfillment = {}
+	for sales_order in sales_orders:
+		lines = demand.get(sales_order)
+		in_stock = bool(lines) and all(
+			flt(available.get(item_code, 0) - stock_qty, precision) >= 0
+			for item_code, stock_qty in lines.items()
+		)
+		fulfillment[sales_order] = in_stock
+
+		if in_stock:
+			for item_code, stock_qty in lines.items():
+				available[item_code] -= stock_qty
+
+	return fulfillment
+
+
+def get_demand_by_sales_order(sales_orders):
+	"""Yet-to-be-picked stock qty per item of each order: {sales_order: {item_code: stock_qty}}."""
+	demand = {}
+	for row in get_ordered_stock_qty(sales_orders):
+		lines = demand.setdefault(row.sales_order, {})
+		lines[row.item_code] = lines.get(row.item_code, 0) + row.stock_qty
+	return demand
+
+
+def get_pickable_stock_qty(item_codes, company, parent_warehouse=None):
+	"""On-shelf qty per item less what open Pick Lists already claim, over the same warehouses
+	erpnext's set_item_locations would search."""
+	if not item_codes:
+		return {}
+
+	warehouses = get_pickable_warehouses(company, parent_warehouse)
+	if not warehouses:
+		return {}
+
+	item_codes = list(item_codes)
+	bin_table = frappe.qb.DocType("Bin")
+	shelf_qty = (
+		frappe.qb.from_(bin_table)
+		.select(bin_table.item_code, Sum(bin_table.actual_qty).as_("qty"))
+		.where(bin_table.item_code.isin(item_codes) & bin_table.warehouse.isin(warehouses))
+		.groupby(bin_table.item_code)
+	).run(as_dict=True)
+	available = {row.item_code: flt(row.qty) for row in shelf_qty}
+
+	for item_code, claimed_qty in get_open_pick_list_claims(item_codes, warehouses).items():
+		available[item_code] = available.get(item_code, 0) - claimed_qty
+
+	return available
+
+
+def get_pickable_warehouses(company, parent_warehouse=None):
+	if parent_warehouse:
+		warehouses = [parent_warehouse, *get_descendants_of("Warehouse", parent_warehouse)]
+	else:
+		warehouses = frappe.get_all("Warehouse", filters={"company": company, "is_group": 0}, pluck="name")
+
+	# consider_rejected_warehouses is off by default on Pick List, so rejected stock is not pickable
+	rejected_warehouses = set(get_rejected_warehouses())
+	return [warehouse for warehouse in warehouses if warehouse not in rejected_warehouses]
+
+
+def get_open_pick_list_claims(item_codes, warehouses):
+	"""Stock qty per item that Pick Lists still in play have already claimed off these shelves,
+	counted the way erpnext's own allocation counts it: a submitted row claims what it picked and has
+	not yet delivered, any other live row claims its whole demand."""
+	pick_list = frappe.qb.DocType("Pick List")
+	pick_list_item = frappe.qb.DocType("Pick List Item")
+	claimed_qty = (
+		Case()
+		.when(
+			(pick_list_item.picked_qty > 0) & (pick_list_item.docstatus == 1),
+			pick_list_item.picked_qty - pick_list_item.delivered_qty,
+		)
+		.else_(pick_list_item.stock_qty)
+	)
+
+	claims = (
+		frappe.qb.from_(pick_list)
+		.inner_join(pick_list_item)
+		.on(pick_list.name == pick_list_item.parent)
+		.select(pick_list_item.item_code, Sum(claimed_qty).as_("qty"))
+		.where(
+			pick_list_item.item_code.isin(item_codes)
+			& pick_list_item.warehouse.isin(warehouses)
+			& pick_list.status.notin(["Completed", "Cancelled"])
+			& (pick_list_item.docstatus != 2)
+			& ((pick_list_item.picked_qty > 0) | (pick_list_item.stock_qty > 0))
+		)
+		.groupby(pick_list_item.item_code)
+	).run(as_dict=True)
+
+	return {row.item_code: flt(row.qty) for row in claims}
 
 
 def sort_item_locations_by_walk_route(doc, method):

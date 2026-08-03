@@ -8,12 +8,15 @@ from frappe.utils import flt
 from navgold_custom.navgold_custom.amazon_repository import PICKABLE_ORDER_STATUSES
 from navgold_custom.navgold_custom.custom_script.pick_list.pick_list import (
 	drop_sales_orders_short_of_stock,
+	get_stock_fulfillment,
 )
 from navgold_custom.navgold_custom.erpnext_compat import create_pick_list, create_stock_entry
 
 
 @frappe.whitelist()
-def get_open_sales_orders_for_delivery(customer: str | None = None, company: str | None = None):
+def get_open_sales_orders_for_delivery(
+	customer: str | None = None, company: str | None = None, parent_warehouse: str | None = None
+):
 	if not company:
 		frappe.throw(_("Company is required"))
 
@@ -143,6 +146,14 @@ def get_open_sales_orders_for_delivery(customer: str | None = None, company: str
 			x["delivery_date"] or "9999-12-31",
 		)
 	)
+
+	fulfillment = get_stock_fulfillment([so["sales_order"] for so in result], company, parent_warehouse)
+	for so in result:
+		so["in_stock"] = fulfillment.get(so["sales_order"], False)
+
+	# in-stock orders first; the sort is stable, so the dates still order each group. Fulfillment is
+	# read in date order too, so the earliest order gets first claim on a contested item.
+	result.sort(key=lambda x: not x["in_stock"])
 
 	return result
 
