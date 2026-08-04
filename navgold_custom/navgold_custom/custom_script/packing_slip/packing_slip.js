@@ -120,8 +120,12 @@ async function get_remaining_tote_items(frm) {
 	return response.message || [];
 }
 
-function open_packing_slip_for_tote(frm) {
-	frappe.new_doc('Packing Slip', { custom_tote: frm.doc.custom_tote });
+async function open_packing_slip_for_tote(frm) {
+	await frappe.new_doc('Packing Slip', { custom_tote: frm.doc.custom_tote });
+
+	if (cur_frm?.doctype !== 'Packing Slip' || !cur_frm.is_new()) return;
+
+	navgold.packing.open_scan_item_dialog(cur_frm, process_item_scan, false);
 }
 
 function show_sfp_rate_dialog(frm, rates) {
