@@ -165,9 +165,9 @@ function show_sfp_rate_dialog(frm, rates) {
 				});
 
 				const result = response.message || {};
-				await frm.reload_doc();
 
 				if (result.file_url) {
+					navgold.packing.download_file(result.file_url, result.file_name);
 					frappe.show_alert(
 						{
 							message: __('SFP label generated successfully.'),
@@ -175,10 +175,13 @@ function show_sfp_rate_dialog(frm, rates) {
 						},
 						5,
 					);
-					navgold.packing.download_file(result.file_url, result.file_name);
 				}
-			} catch {
-				// frappe.call already shows the server error dialog
+
+				await frm.reload_doc();
+			} catch (error) {
+				// frappe.call already shows the server error dialog, but a client-side
+				// failure here would otherwise vanish silently.
+				console.error(error);
 			}
 		},
 	});
