@@ -15,6 +15,7 @@ frappe.ui.form.on('Packing Slip', {
 		// Cancel SFP Shipment is hidden for now.
 		// add_sfp_cancel_button(frm);
 		add_pack_remaining_button(frm);
+		open_pending_item_scan(frm);
 	},
 	async on_submit(frm) {
 		const remaining_items = await get_remaining_tote_items(frm);
@@ -120,12 +121,21 @@ async function get_remaining_tote_items(frm) {
 	return response.message || [];
 }
 
-async function open_packing_slip_for_tote(frm) {
-	await frappe.new_doc('Packing Slip', { custom_tote: frm.doc.custom_tote });
+function open_packing_slip_for_tote(frm) {
+	frappe.flags.scan_items_for_tote = frm.doc.custom_tote;
+	frappe.new_doc('Packing Slip', { custom_tote: frm.doc.custom_tote });
+}
 
-	if (cur_frm?.doctype !== 'Packing Slip' || !cur_frm.is_new()) return;
+function open_pending_item_scan(frm) {
+	if (
+		!frm.is_new() ||
+		!frm.doc.custom_tote ||
+		frappe.flags.scan_items_for_tote !== frm.doc.custom_tote
+	)
+		return;
 
-	navgold.packing.open_scan_item_dialog(cur_frm, process_item_scan, false);
+	frappe.flags.scan_items_for_tote = null;
+	navgold.packing.open_scan_item_dialog(frm, process_item_scan, false);
 }
 
 function show_sfp_rate_dialog(frm, rates) {
