@@ -16,6 +16,12 @@ frappe.ui.form.on('Packing Slip', {
 		// add_sfp_cancel_button(frm);
 		add_pack_remaining_button(frm);
 	},
+	async on_submit(frm) {
+		const remaining_items = await get_remaining_tote_items(frm);
+		if (!remaining_items.length) return;
+
+		open_packing_slip_for_tote(frm);
+	},
 });
 
 function toggle_fields(frm) {
@@ -94,7 +100,16 @@ function add_sfp_cancel_button(frm) {
 }
 
 async function add_pack_remaining_button(frm) {
-	if (frm.doc.docstatus !== 1 || !frm.doc.custom_tote) return;
+	const remaining_items = await get_remaining_tote_items(frm);
+	if (!remaining_items.length) return;
+
+	frm.add_custom_button(__('Pack Remaining Items'), () =>
+		open_packing_slip_for_tote(frm),
+	);
+}
+
+async function get_remaining_tote_items(frm) {
+	if (frm.doc.docstatus !== 1 || !frm.doc.custom_tote) return [];
 
 	const response = await frappe.call({
 		method:
@@ -102,12 +117,11 @@ async function add_pack_remaining_button(frm) {
 		args: { tote: frm.doc.custom_tote },
 	});
 
-	const remaining_items = response.message || [];
-	if (!remaining_items.length) return;
+	return response.message || [];
+}
 
-	frm.add_custom_button(__('Pack Remaining Items'), () => {
-		frappe.new_doc('Packing Slip', { custom_tote: frm.doc.custom_tote });
-	});
+function open_packing_slip_for_tote(frm) {
+	frappe.new_doc('Packing Slip', { custom_tote: frm.doc.custom_tote });
 }
 
 function show_sfp_rate_dialog(frm, rates) {
