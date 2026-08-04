@@ -547,8 +547,6 @@ function show_pack_qty_dialog(frm, matching_rows, item_code, options = {}) {
 						bundle_confirmed = true;
 					},
 				);
-				// Same modal-on-modal reason: chain the next scan off the confirm's own fade-out,
-				// because frappe.confirm hides only AFTER the Yes callback has returned.
 				confirm_dialog.on_hide = () => {
 					if (bundle_confirmed) prompt_next_item_scan(frm);
 				};
