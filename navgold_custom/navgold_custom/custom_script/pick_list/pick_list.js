@@ -36,6 +36,14 @@ frappe.ui.form.on('Pick List', {
 		}
 	},
 
+	custom_scan_tote(frm) {
+		navgold.packing.open_scan_tote_dialog(frm, 'custom_tote', false);
+	},
+
+	custom_scan_item(frm) {
+		navgold.packing.open_scan_item_dialog(frm, process_pick_scan, false);
+	},
+
 	async open_weight_based_selection_dialog(frm) {
 		if (!frm.doc.company) {
 			frappe.throw({
