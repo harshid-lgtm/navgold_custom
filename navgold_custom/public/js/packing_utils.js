@@ -97,6 +97,15 @@ navgold.packing.open_scan_item_dialog = function open_scan_item_dialog(
 	}, 150);
 };
 
+navgold.packing.download_file = function download_file(file_url, file_name) {
+	const link = document.createElement('a');
+	link.href = file_url;
+	link.download = file_name || '';
+	document.body.appendChild(link);
+	link.click();
+	document.body.removeChild(link);
+};
+
 navgold.packing.prompt_select = function prompt_select({
 	title,
 	label,

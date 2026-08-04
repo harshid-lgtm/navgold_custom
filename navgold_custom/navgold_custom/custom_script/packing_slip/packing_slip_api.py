@@ -258,6 +258,7 @@ def purchase_sfp_shipping_label(
 
 	return {
 		"file_url": file_url,
+		"file_name": file_doc.file_name,
 		"rate_id": rate_id,
 		"shipment_id": shipment_id,
 		"tracking_id": tracking_id,

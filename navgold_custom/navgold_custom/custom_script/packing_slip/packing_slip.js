@@ -175,7 +175,7 @@ function show_sfp_rate_dialog(frm, rates) {
 						},
 						5,
 					);
-					window.open(result.file_url, '_blank');
+					navgold.packing.download_file(result.file_url, result.file_name);
 				}
 			} catch {
 				// frappe.call already shows the server error dialog
