@@ -3,18 +3,18 @@
 
 import frappe
 from frappe.tests import IntegrationTestCase
-from frappe.utils import add_to_date, flt, get_datetime
+from frappe.utils import add_to_date, flt, get_datetime, getdate
 
+from navgold_custom.navgold_custom.amazon_pricing.test_bundle_stock import make_item
 from navgold_custom.navgold_custom.custom_script.stock_entry.stock_entry import (
-	build_afn_clearing_issue,
-	create_afn_clearing_issue,
+	create_afn_material_issue,
 )
 
 ITEM_CODE = "TEST-FBA-CLEAR-ITEM"
+BACKDATED_ITEM_CODE = "TEST-FBA-CLEAR-BACKDATED-ITEM"
 
 
 def get_test_company():
-	# local restore carries "Navgold Ltd"; the bare CI site's before_tests creates "Navgold Test"
 	for name in ("Navgold Ltd", "Navgold Test"):
 		if frappe.db.exists("Company", name):
 			return name
@@ -37,69 +37,88 @@ def create_test_warehouse(warehouse_name):
 	return warehouse.name
 
 
-def create_test_item():
-	if frappe.db.exists("Item", ITEM_CODE):
-		return ITEM_CODE
-
-	item = frappe.new_doc("Item")
-	item.item_code = ITEM_CODE
-	item.item_name = ITEM_CODE
-	item.item_group = "All Item Groups"
-	item.stock_uom = "Nos"
-	item.is_stock_item = 1
-	item.insert()
-	return item.name
-
-
 class TestFBATransferClearing(IntegrationTestCase):
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
-		cls.item = create_test_item()
+		cls.item = make_item(ITEM_CODE, is_stock_item=1)
+		cls.backdated_item = make_item(BACKDATED_ITEM_CODE, is_stock_item=1)
 		cls.source_warehouse = create_test_warehouse("Test FBA Source")
 		cls.afn_warehouse = create_test_warehouse("Test FBA AFN")
+		cls.spare_warehouse = create_test_warehouse("Test FBA Spare")
+		cls.configured_afn_warehouse = frappe.db.get_single_value("Amazon SP API Settings", "afn_warehouse")
+
+	@classmethod
+	def tearDownClass(cls):
+		frappe.db.set_single_value("Amazon SP API Settings", "afn_warehouse", cls.configured_afn_warehouse)
+		super().tearDownClass()
 
 	def setUp(self):
 		super().setUp()
 		frappe.db.set_single_value("Amazon SP API Settings", "afn_warehouse", self.afn_warehouse)
 
-	def receive_stock(self, qty):
+	def receive_stock(self, qty, item_code=None, posting_date=None):
 		receipt = frappe.new_doc("Stock Entry")
 		receipt.stock_entry_type = "Material Receipt"
 		receipt.company = COMPANY
+		if posting_date:
+			receipt.set_posting_time = 1
+			receipt.posting_date = posting_date
+			receipt.posting_time = "00:00:01"
 		receipt.append(
 			"items",
-			{"item_code": self.item, "qty": qty, "t_warehouse": self.source_warehouse, "basic_rate": 100},
+			{
+				"item_code": item_code or self.item,
+				"qty": qty,
+				"t_warehouse": self.source_warehouse,
+				"basic_rate": 100,
+			},
 		)
 		receipt.insert()
 		receipt.submit()
 		return receipt
 
-	def make_transfer(self, qty, stock_entry_type="FBA Transfer"):
+	def make_transfer(
+		self,
+		rows,
+		item_code=None,
+		stock_entry_type="FBA Transfer",
+		posting_date=None,
+		posting_time=None,
+	):
 		transfer = frappe.new_doc("Stock Entry")
 		transfer.stock_entry_type = stock_entry_type
 		transfer.company = COMPANY
-		transfer.append(
-			"items",
-			{
-				"item_code": self.item,
-				"qty": qty,
-				"s_warehouse": self.source_warehouse,
-				"t_warehouse": self.afn_warehouse,
-			},
-		)
+		if posting_date:
+			transfer.set_posting_time = 1
+			transfer.posting_date = posting_date
+			transfer.posting_time = posting_time
+
+		for qty, target_warehouse in rows:
+			transfer.append(
+				"items",
+				{
+					"item_code": item_code or self.item,
+					"qty": qty,
+					"s_warehouse": self.source_warehouse,
+					"t_warehouse": target_warehouse,
+				},
+			)
+
 		transfer.insert()
 		transfer.submit()
 		return transfer
 
-	def get_clearing_issue(self, transfer_name):
+	def get_material_issue(self, transfer_name):
 		name = frappe.db.get_value("Stock Entry", {"custom_fba_transfer_entry": transfer_name})
 		return frappe.get_doc("Stock Entry", name) if name else None
 
-	def afn_qty(self):
+	def afn_qty(self, item_code=None):
 		return flt(
 			frappe.db.get_value(
-				"Bin", {"item_code": self.item, "warehouse": self.afn_warehouse}, "actual_qty"
+				"Bin",
+				{"item_code": item_code or self.item, "warehouse": self.afn_warehouse},
+				"actual_qty",
 			)
 		)
 
@@ -107,8 +126,8 @@ class TestFBATransferClearing(IntegrationTestCase):
 		self.receive_stock(10)
 		opening_afn_qty = self.afn_qty()
 
-		transfer = self.make_transfer(10)
-		issue = self.get_clearing_issue(transfer.name)
+		transfer = self.make_transfer([(10, self.afn_warehouse)])
+		issue = self.get_material_issue(transfer.name)
 
 		self.assertIsNotNone(issue)
 		self.assertEqual(issue.docstatus, 1)
@@ -120,13 +139,12 @@ class TestFBATransferClearing(IntegrationTestCase):
 		self.assertFalse(issue.items[0].t_warehouse)
 		self.assertEqual(flt(issue.items[0].qty), 10)
 
-		# the transfer put 10 in and the issue took 10 straight back out
 		self.assertEqual(self.afn_qty(), opening_afn_qty)
 
-	def test_clearing_issue_posts_one_second_after_the_transfer(self):
+	def test_material_issue_posts_one_second_after_the_transfer(self):
 		self.receive_stock(4)
-		transfer = self.make_transfer(4)
-		issue = self.get_clearing_issue(transfer.name)
+		transfer = self.make_transfer([(4, self.afn_warehouse)])
+		issue = self.get_material_issue(transfer.name)
 
 		self.assertTrue(issue.set_posting_time)
 		self.assertEqual(
@@ -134,56 +152,67 @@ class TestFBATransferClearing(IntegrationTestCase):
 			add_to_date(get_datetime(f"{transfer.posting_date} {transfer.posting_time}"), seconds=1),
 		)
 
-	def test_clearing_issue_is_not_created_twice(self):
+	def test_material_issue_is_not_created_twice(self):
 		self.receive_stock(3)
-		transfer = self.make_transfer(3)
+		transfer = self.make_transfer([(3, self.afn_warehouse)])
 
-		create_afn_clearing_issue(transfer)
+		create_afn_material_issue(transfer, "on_submit")
 
 		self.assertEqual(frappe.db.count("Stock Entry", {"custom_fba_transfer_entry": transfer.name}), 1)
 
 	def test_plain_material_transfer_is_left_alone(self):
 		self.receive_stock(5)
-		# Bin qty is asserted as a delta throughout: stock-ledger writes commit mid-test, so the
-		# warehouse carries over whatever earlier tests in this class left behind.
 		opening_afn_qty = self.afn_qty()
 
-		transfer = self.make_transfer(5, stock_entry_type="Material Transfer")
+		transfer = self.make_transfer([(5, self.afn_warehouse)], stock_entry_type="Material Transfer")
 
-		self.assertIsNone(self.get_clearing_issue(transfer.name))
+		self.assertIsNone(self.get_material_issue(transfer.name))
 		self.assertEqual(self.afn_qty(), opening_afn_qty + 5)
 
-	def test_rows_not_landing_in_afn_are_skipped(self):
-		transfer = frappe.new_doc("Stock Entry")
-		transfer.name = "SE-UNSAVED"
-		transfer.company = COMPANY
-		transfer.posting_date = "2026-07-31"
-		transfer.posting_time = "10:00:00"
-		transfer.append(
-			"items",
-			{
-				"item_code": self.item,
-				"qty": 1,
-				"s_warehouse": self.afn_warehouse,
-				"t_warehouse": self.source_warehouse,
-			},
-		)
+	def test_only_rows_landing_in_afn_are_mirrored(self):
+		self.receive_stock(7)
+		opening_afn_qty = self.afn_qty()
 
-		self.assertIsNone(build_afn_clearing_issue(transfer, self.afn_warehouse))
+		transfer = self.make_transfer([(4, self.afn_warehouse), (3, self.spare_warehouse)])
+		issue = self.get_material_issue(transfer.name)
+
+		self.assertEqual(len(issue.items), 1)
+		self.assertEqual(flt(issue.items[0].qty), 4)
+		self.assertEqual(issue.items[0].s_warehouse, self.afn_warehouse)
+		self.assertEqual(self.afn_qty(), opening_afn_qty)
+
+	def test_material_issue_never_posts_into_the_next_day(self):
+		late_night = add_to_date(getdate(), days=-1)
+		self.receive_stock(8, item_code=self.backdated_item, posting_date=late_night)
+
+		transfer = self.make_transfer(
+			[(8, self.afn_warehouse)],
+			item_code=self.backdated_item,
+			posting_date=late_night,
+			posting_time="23:59:59.500000",
+		)
+		issue = self.get_material_issue(transfer.name)
+
+		self.assertEqual(getdate(issue.posting_date), getdate(late_night))
+		self.assertGreater(
+			get_datetime(f"{issue.posting_date} {issue.posting_time}"),
+			get_datetime(f"{transfer.posting_date} {transfer.posting_time}"),
+		)
+		self.assertEqual(self.afn_qty(item_code=self.backdated_item), 0)
 
 	def test_missing_afn_warehouse_setting_blocks_the_transfer(self):
 		frappe.db.set_single_value("Amazon SP API Settings", "afn_warehouse", None)
 		self.receive_stock(2)
 
 		with self.assertRaises(frappe.ValidationError):
-			self.make_transfer(2)
+			self.make_transfer([(2, self.afn_warehouse)])
 
-	def test_cancelling_the_transfer_also_cancels_the_clearing_issue(self):
+	def test_cancelling_the_transfer_also_cancels_the_material_issue(self):
 		self.receive_stock(6)
 		opening_afn_qty = self.afn_qty()
-		transfer = self.make_transfer(6)
+		transfer = self.make_transfer([(6, self.afn_warehouse)])
 
 		transfer.cancel()
 
-		self.assertEqual(self.get_clearing_issue(transfer.name).docstatus, 2)
+		self.assertEqual(self.get_material_issue(transfer.name).docstatus, 2)
 		self.assertEqual(self.afn_qty(), opening_afn_qty)
