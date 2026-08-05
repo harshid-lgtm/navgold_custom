@@ -16,8 +16,10 @@ def save_last_report_attachment(fieldname: str, file_name: str, content: str | b
 		},
 		pluck="name",
 	)
-	for file_name_to_remove in previous:
-		frappe.delete_doc("File", file_name_to_remove, ignore_permissions=True, delete_permanently=True)
+	if previous:
+		frappe.db.set_single_value(SETTINGS, fieldname, None)
+		for file_name_to_remove in previous:
+			frappe.delete_doc("File", file_name_to_remove, ignore_permissions=True, delete_permanently=True)
 
 	file_doc = frappe.new_doc("File")
 	file_doc.file_name = file_name
