@@ -158,8 +158,7 @@ def get_data(filters):
 	your_price_map = parse_your_price(asset.get("your_price_xlsx"))
 	prev_rate_map = parse_previous_report(asset.get("previous_report_xlsx"))
 
-	fba_sku_names = list(fba_map.keys())
-	proxy_sku_map = get_proxy_sku_map(fba_sku_names)
+	proxy_sku_map = get_proxy_sku_map()
 	if not proxy_sku_map:
 		return []
 
@@ -198,7 +197,7 @@ def get_data(filters):
 		free_stock = flt(free_qty_map.get(item_code, {}).get("free_qty", 0))
 
 		fba_stock = flt(fba.get("available", 0))
-		fnsku = fba.get("fnsku", "")
+		fnsku = fba.get("fnsku") or sku_info.get("fnsku") or ""
 		receiving = flt(fba.get("receiving", 0))
 
 		channel_sales = channel_sales_map.get(item_code, {})
