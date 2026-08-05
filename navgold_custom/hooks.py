@@ -334,7 +334,11 @@ doc_events = {
 		"on_cancel": "navgold_custom.navgold_custom.custom_script.delivery_note.delivery_note.on_cancel",
 	},
 	"Stock Entry": {
-		"on_submit": "navgold_custom.navgold_custom.custom_script.stock_entry.stock_entry.update_proxy_sku_transfer_rates",
+		"on_submit": [
+			"navgold_custom.navgold_custom.custom_script.stock_entry.stock_entry.update_proxy_sku_transfer_rates",
+			"navgold_custom.navgold_custom.custom_script.stock_entry.stock_entry.create_afn_material_issue",
+		],
+		"before_cancel": "navgold_custom.navgold_custom.custom_script.stock_entry.stock_entry.cancel_afn_material_issue",
 	},
 }
 
