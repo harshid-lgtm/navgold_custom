@@ -488,7 +488,8 @@ def get_sku_inventory_data(
 	restock_date = None
 	if stock_info.get("has_restock_date", False):
 		po_date = stock_info.get("restock_date")
-		restock_date = cstr(po_date) if po_date else cstr(add_days(today(), lead_time_days))
+		supplier_eta = add_days(today(), lead_time_days)
+		restock_date = cstr(po_date) if po_date and getdate(po_date) > getdate() else cstr(supplier_eta)
 	elif is_backorder and resolved_supplier_stock > 0:
 		restock_date = cstr(add_days(today(), lead_time_days))
 
