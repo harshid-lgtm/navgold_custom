@@ -73,6 +73,7 @@ def create_afn_material_issue(doc, method):
 				"stock_uom": row.stock_uom,
 				"conversion_factor": row.conversion_factor,
 				"s_warehouse": afn_warehouse,
+				"use_serial_batch_fields": 1 if (row.batch_no or row.serial_no) else 0,
 				"batch_no": row.batch_no,
 				"serial_no": row.serial_no,
 				"cost_center": row.cost_center,

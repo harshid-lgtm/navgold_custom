@@ -12,6 +12,13 @@ from navgold_custom.navgold_custom.custom_script.stock_entry.stock_entry import 
 
 ITEM_CODE = "TEST-FBA-CLEAR-ITEM"
 BACKDATED_ITEM_CODE = "TEST-FBA-CLEAR-BACKDATED-ITEM"
+BATCHED_ITEM_CODE = "TEST-FBA-CLEAR-BATCHED-ITEM"
+
+
+def make_batched_item(item_code):
+	item_code = make_item(item_code, is_stock_item=1)
+	frappe.db.set_value("Item", item_code, {"has_batch_no": 1, "create_new_batch": 1})
+	return item_code
 
 
 def get_test_company():
@@ -43,6 +50,7 @@ class TestFBATransferClearing(IntegrationTestCase):
 		super().setUpClass()
 		cls.item = make_item(ITEM_CODE, is_stock_item=1)
 		cls.backdated_item = make_item(BACKDATED_ITEM_CODE, is_stock_item=1)
+		cls.batched_item = make_batched_item(BATCHED_ITEM_CODE)
 		cls.source_warehouse = create_test_warehouse("Test FBA Source")
 		cls.afn_warehouse = create_test_warehouse("Test FBA AFN")
 		cls.spare_warehouse = create_test_warehouse("Test FBA Spare")
@@ -57,7 +65,7 @@ class TestFBATransferClearing(IntegrationTestCase):
 		super().setUp()
 		frappe.db.set_single_value("Amazon SP API Settings", "afn_warehouse", self.afn_warehouse)
 
-	def receive_stock(self, qty, item_code=None, posting_date=None):
+	def receive_stock(self, qty, item_code=None, posting_date=None, batch_no=None):
 		receipt = frappe.new_doc("Stock Entry")
 		receipt.stock_entry_type = "Material Receipt"
 		receipt.company = COMPANY
@@ -72,6 +80,8 @@ class TestFBATransferClearing(IntegrationTestCase):
 				"qty": qty,
 				"t_warehouse": self.source_warehouse,
 				"basic_rate": 100,
+				"use_serial_batch_fields": 1 if batch_no else 0,
+				"batch_no": batch_no,
 			},
 		)
 		receipt.insert()
@@ -94,7 +104,8 @@ class TestFBATransferClearing(IntegrationTestCase):
 			transfer.posting_date = posting_date
 			transfer.posting_time = posting_time
 
-		for qty, target_warehouse in rows:
+		for qty, target_warehouse, *batch in rows:
+			batch_no = batch[0] if batch else None
 			transfer.append(
 				"items",
 				{
@@ -102,6 +113,8 @@ class TestFBATransferClearing(IntegrationTestCase):
 					"qty": qty,
 					"s_warehouse": self.source_warehouse,
 					"t_warehouse": target_warehouse,
+					"use_serial_batch_fields": 1 if batch_no else 0,
+					"batch_no": batch_no,
 				},
 			)
 
@@ -180,6 +193,27 @@ class TestFBATransferClearing(IntegrationTestCase):
 		self.assertEqual(flt(issue.items[0].qty), 4)
 		self.assertEqual(issue.items[0].s_warehouse, self.afn_warehouse)
 		self.assertEqual(self.afn_qty(), opening_afn_qty)
+
+	def test_material_issue_mirrors_each_batch_of_the_same_item(self):
+		batches = []
+		for suffix in ("A", "B"):
+			batch = frappe.new_doc("Batch")
+			batch.item = self.batched_item
+			batch.batch_id = f"{BATCHED_ITEM_CODE}-{frappe.generate_hash(length=6)}-{suffix}"
+			batch.insert()
+			batches.append(batch.name)
+			self.receive_stock(6, item_code=self.batched_item, batch_no=batch.name)
+
+		opening_afn_qty = self.afn_qty(item_code=self.batched_item)
+		transfer = self.make_transfer(
+			[(6, self.afn_warehouse, batches[0]), (6, self.afn_warehouse, batches[1])],
+			item_code=self.batched_item,
+		)
+		issue = self.get_material_issue(transfer.name)
+
+		self.assertEqual(issue.docstatus, 1)
+		self.assertEqual([row.batch_no for row in issue.items], batches)
+		self.assertEqual(self.afn_qty(item_code=self.batched_item), opening_afn_qty)
 
 	def test_material_issue_never_posts_into_the_next_day(self):
 		late_night = add_to_date(getdate(), days=-1)
