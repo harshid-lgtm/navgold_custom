@@ -6,10 +6,13 @@ from frappe.tests import IntegrationTestCase
 from frappe.utils import add_days, getdate, today
 
 from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import get_sku_inventory_data
+from navgold_custom.navgold_custom.amazon_pricing.test_sfp_backorder_item_optout import make_supplier
 from navgold_custom.navgold_custom.custom_script.pick_list.test_delivery_consolidation import (
 	get_test_company,
 )
 from navgold_custom.navgold_custom.utils import get_restock_data_map
+
+RESTOCK_TEST_SUPPLIER = "RESTOCK-TEST-SUPPLIER"
 
 
 class TestRestockDateFromOpenLines(IntegrationTestCase):
@@ -39,12 +42,7 @@ class TestRestockDateFromOpenLines(IntegrationTestCase):
 	def setUp(self):
 		self.company = get_test_company()
 		self.warehouse = frappe.db.get_value("Warehouse", {"company": self.company, "is_group": 0}, "name")
-		self.supplier = frappe.db.get_value("Supplier", {}, "name")
-		if not self.supplier:
-			supplier = frappe.new_doc("Supplier")
-			supplier.supplier_name = "Restock Test Supplier"
-			supplier.insert(ignore_permissions=True)
-			self.supplier = supplier.name
+		self.supplier = make_supplier(RESTOCK_TEST_SUPPLIER, False).name
 
 		self.item_code = f"RESTOCK-TEST-{self._testMethodName}"[:140]
 		if not frappe.db.exists("Item", self.item_code):
