@@ -14,6 +14,7 @@ from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import (
 
 # inventory_for_backorder threads lead_time_map={"TEST-SUPPLIER": 2}, so the supplier lead time is 2 days.
 SUPPLIER_LEAD_TIME_DAYS = 2
+OPEN_PO_RESTOCK_DAYS_AHEAD = 30
 TEST_MARKETPLACE_ID = "A1F83G8C2ARO7P"
 
 
@@ -48,7 +49,9 @@ def inventory_for_backorder(supplier_sfp_eligible, row_sfp, has_restock_date, su
 		"TEST-PROXY-SKU": {
 			"mfn_stock": 0,
 			"has_restock_date": has_restock_date,
-			"restock_date": "2026-07-10" if has_restock_date else None,
+			"restock_date": (
+				cstr(add_days(today(), OPEN_PO_RESTOCK_DAYS_AHEAD)) if has_restock_date else None
+			),
 		}
 	}
 	resolved_supplier = frappe._dict(
@@ -165,8 +168,7 @@ class TestBackorderSupplierRestockDate(IntegrationTestCase):
 		inventory = inventory_for_backorder(
 			supplier_sfp_eligible=True, row_sfp=True, has_restock_date=True, supplier_stock=5
 		)
-		# has_restock_date fixture pins the PO date to 2026-07-10; the supplier-lead-time fallback must not override it.
-		self.assertEqual(inventory["restock_date"], "2026-07-10")
+		self.assertEqual(inventory["restock_date"], cstr(add_days(today(), OPEN_PO_RESTOCK_DAYS_AHEAD)))
 
 
 class TestBackorderHandlingTime(IntegrationTestCase):

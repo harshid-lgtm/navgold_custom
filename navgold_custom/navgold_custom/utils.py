@@ -70,6 +70,7 @@ def get_restock_data_map(item_codes: list[str]) -> dict[str, object]:
 		.where(
 			(purchase_order.docstatus == 1)
 			& (purchase_order.status.notin(["Closed", "Cancelled", "Completed"]))
+			& (purchase_order_item.received_qty < purchase_order_item.qty)
 			& (purchase_order_item.item_code.isin(item_codes))
 		)
 		.orderby(purchase_order_item.schedule_date, order=Order.desc)
