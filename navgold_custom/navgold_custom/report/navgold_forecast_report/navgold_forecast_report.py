@@ -13,6 +13,7 @@ from frappe.utils.csvutils import read_csv_content
 from frappe.utils.xlsxutils import read_xlsx_file_from_attached_file
 
 from navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku import get_proxy_sku_map
+from navgold_custom.navgold_custom.erpnext_compat import get_product_bundle_items
 from navgold_custom.navgold_custom.utils import get_conversion_factor, get_free_qty_map
 
 
@@ -810,17 +811,16 @@ def create_material_request_doc(selected_items, sku_info, company, target_wareho
 		if qty <= 0:
 			continue
 
-		material_request.append(
-			"items",
-			{
-				"item_code": info["item"],
-				"qty": qty,
-				"uom": info["uom"],
-				"schedule_date": frappe.utils.today(),
-				"warehouse": target_warehouse,
-			},
-		)
-		sku_order.append(sku)
+		for row in get_transfer_rows(info["item"], info["uom"], qty):
+			material_request.append(
+				"items",
+				{
+					**row,
+					"schedule_date": frappe.utils.today(),
+					"warehouse": target_warehouse,
+				},
+			)
+			sku_order.append(sku)
 
 	if not material_request.items:
 		frappe.throw(_("No valid items with positive quantity to transfer"))
@@ -828,10 +828,22 @@ def create_material_request_doc(selected_items, sku_info, company, target_wareho
 	material_request.insert(ignore_permissions=True)
 	material_request.submit()
 
-	sku_to_mr_item = {
-		sku: mr_item.name for sku, mr_item in zip(sku_order, material_request.items, strict=False)
-	}
-	return material_request, sku_to_mr_item
+	sku_to_mr_items = {}
+	for sku, mr_item in zip(sku_order, material_request.items, strict=True):
+		sku_to_mr_items.setdefault(sku, []).append(mr_item.name)
+
+	return material_request, sku_to_mr_items
+
+
+def get_transfer_rows(item_code, uom, qty):
+	"""Bundles are not stocked, so transfer their components instead of the bundle item."""
+	components = get_product_bundle_items(item_code)
+	if not components:
+		return [{"item_code": item_code, "qty": qty, "uom": uom}]
+
+	# Component qty is per one bundle in the bundle's stock UOM, so scale the selected qty to it.
+	bundle_qty = qty * get_conversion_factor(item_code, uom)
+	return [{"item_code": row.item_code, "qty": bundle_qty * flt(row.qty)} for row in components]
 
 
 def get_supplier_uom_map(selected_items, sku_info):
@@ -866,7 +878,7 @@ def get_supplier_uom_map(selected_items, sku_info):
 	return {(row["item"], row["supplier"]): row["uom"] for row in rows}
 
 
-def create_purchase_orders(selected_items, sku_info, company, warehouse, mr_item_map=None):
+def create_purchase_orders(selected_items, sku_info, company, warehouse):
 	supplier_uom_map = get_supplier_uom_map(selected_items, sku_info)
 
 	supplier_groups = {}
@@ -1013,28 +1025,23 @@ def create_purchase_orders_and_material_request_from_forecast_report(selected_it
 	if not target_warehouse:
 		frappe.throw(_("AFN Warehouse not configured in Amazon SP API Settings"))
 
-	material_request, sku_to_mr_item = create_material_request_doc(
+	material_request, sku_to_mr_items = create_material_request_doc(
 		selected_items, sku_info, company, target_warehouse
 	)
 
-	mr_item_map = {
-		sku: {
-			"material_request": material_request.name,
-			"material_request_item": mr_item_name,
-		}
-		for sku, mr_item_name in sku_to_mr_item.items()
-	}
-
 	created_purchase_orders, sku_to_purchase_order = create_purchase_orders(
-		selected_items, sku_info, company, warehouse, mr_item_map
+		selected_items, sku_info, company, warehouse
 	)
 
 	if not created_purchase_orders:
 		frappe.throw(_("No valid items with a supplier and positive quantity to transfer"))
 
-	for sku, mr_item_name in sku_to_mr_item.items():
+	for sku, mr_item_names in sku_to_mr_items.items():
 		purchase_order_name = sku_to_purchase_order.get(sku)
-		if purchase_order_name:
+		if not purchase_order_name:
+			continue
+
+		for mr_item_name in mr_item_names:
 			frappe.db.set_value(
 				"Material Request Item", mr_item_name, "custom_purchase_order", purchase_order_name
 			)
