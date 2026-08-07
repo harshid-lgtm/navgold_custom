@@ -10,6 +10,7 @@ from navgold_custom.navgold_custom.amazon_pricing.test_bundle_stock import (
 	make_item,
 )
 from navgold_custom.navgold_custom.custom_script.pick_list.pick_list import (
+	get_open_pick_list_claims,
 	get_pickable_stock_qty,
 	get_stock_fulfillment,
 	get_whole_number_uoms,
@@ -435,3 +436,58 @@ class TestPickListStockFulfillment(IntegrationTestCase):
 
 		self.assertFalse(fulfillment[short])
 		self.assertTrue(fulfillment[coverable], "a dropped order consumes nothing")
+
+
+class TestTransferPickListClaims(IntegrationTestCase):
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.warehouse, cls.company = get_stock_warehouse()
+		cls.item_code = make_item("TEST-TRANSFER-CLAIM-ITEM", 1)
+		receive_stock(cls.item_code, 60, [cls.warehouse], cls.company)
+
+	def make_transfer_pick_list(self, picked_qty, transferred_qty):
+		pick_list = frappe.new_doc("Pick List")
+		pick_list.company = self.company
+		pick_list.purpose = "Material Transfer"
+		pick_list.pick_manually = 1
+		pick_list.append(
+			"locations",
+			{
+				"item_code": self.item_code,
+				"qty": picked_qty,
+				"stock_qty": picked_qty,
+				"picked_qty": picked_qty,
+				"warehouse": self.warehouse,
+				"uom": "Nos",
+				"stock_uom": "Nos",
+				"conversion_factor": 1,
+			},
+		)
+		pick_list.save()
+		pick_list.submit()
+
+		# erpnext writes transferred_qty when the Stock Entry submits, and leaves delivered_qty at 0
+		# for every non-Delivery purpose. Holding the status at Partially Transferred is the state a
+		# pick list sits in while one of its rows is still outstanding.
+		pick_list.locations[0].db_set("transferred_qty", transferred_qty)
+		pick_list.db_set("status", "Partially Transferred")
+		self.addCleanup(pick_list.cancel)
+		return pick_list
+
+	def test_a_transferred_row_stops_claiming_the_shelf(self):
+		self.make_transfer_pick_list(picked_qty=24, transferred_qty=24)
+
+		claims = get_open_pick_list_claims([self.item_code], [self.warehouse])
+
+		self.assertFalse(
+			flt(claims.get(self.item_code)),
+			"the stock entry already moved this qty off the shelf, so claiming it charges it twice",
+		)
+
+	def test_an_untransferred_row_still_claims_the_shelf(self):
+		self.make_transfer_pick_list(picked_qty=24, transferred_qty=9)
+
+		claims = get_open_pick_list_claims([self.item_code], [self.warehouse])
+
+		self.assertEqual(flt(claims.get(self.item_code)), 15)
