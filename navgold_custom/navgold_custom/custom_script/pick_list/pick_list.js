@@ -8,7 +8,7 @@ frappe.ui.form.on('Pick List', {
 			});
 		}
 
-		add_scan_buttons(frm);
+		render_scan_actions(frm);
 		setup_delivery_note_buttons(frm);
 
 		if (
@@ -34,14 +34,6 @@ frappe.ui.form.on('Pick List', {
 				__('Create'),
 			);
 		}
-	},
-
-	custom_scan_tote(frm) {
-		navgold.packing.open_scan_tote_dialog(frm, 'custom_tote', false);
-	},
-
-	custom_scan_item(frm) {
-		navgold.packing.open_scan_item_dialog(frm, process_pick_scan, false);
 	},
 
 	async open_weight_based_selection_dialog(frm) {
@@ -292,21 +284,42 @@ function setup_delivery_note_buttons(frm) {
 	});
 }
 
-function add_scan_buttons(frm) {
-	if (frm.doc.docstatus !== 0) return;
-	if (!(frm.doc.locations || []).length) return;
+function current_scan_action(frm) {
+	if (frm.doc.docstatus !== 0) return null;
+	if (!(frm.doc.locations || []).length) return null;
 
 	if (!frm.doc.custom_tote) {
-		frm.add_custom_button(__('Scan Tote'), () =>
-			navgold.packing.open_scan_tote_dialog(frm, 'custom_tote', false),
-		);
+		return {
+			label: __('Scan Tote'),
+			run: () =>
+				navgold.packing.open_scan_tote_dialog(frm, 'custom_tote', false),
+		};
 	}
 
-	if (frm.doc.custom_tote) {
-		frm.add_custom_button(__('Scan Item'), () =>
+	return {
+		label: __('Scan Item'),
+		run: () =>
 			navgold.packing.open_scan_item_dialog(frm, process_pick_scan, false),
-		);
-	}
+	};
+}
+
+function render_scan_actions(frm) {
+	const action = current_scan_action(frm);
+	render_mobile_scan_button(frm, action);
+	if (!action) return;
+
+	frm.add_custom_button(action.label, action.run);
+}
+
+function render_mobile_scan_button(frm, action) {
+	frm.page.wrapper.find('.pick-list-scan-action').remove();
+	if (!action) return;
+
+	// btn-lg opts out of the desk's compact .btn padding, letting the stylesheet size it.
+	$('<button class="btn btn-primary btn-lg pick-list-scan-action">')
+		.text(action.label)
+		.on('click', action.run)
+		.appendTo(frm.page.wrapper);
 }
 
 async function process_pick_scan(frm, barcode, expected_item_code = null) {
