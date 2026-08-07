@@ -281,10 +281,6 @@ def get_pickable_warehouses(company, parent_warehouse=None):
 def get_open_pick_list_claims(item_codes, warehouses):
 	pick_list = frappe.qb.DocType("Pick List")
 	pick_list_item = frappe.qb.DocType("Pick List Item")
-	# A Delivery pick list reports its progress on delivered_qty, a transfer one on transferred_qty
-	# and never fills delivered_qty in. Reading delivered_qty for both makes a finished transfer look
-	# entirely outstanding, so its rows go on claiming stock the Stock Entry already moved off the
-	# shelf — the shelf is charged twice and the item reads as out of stock.
 	settled_qty = (
 		Case()
 		.when(pick_list.purpose == "Delivery", pick_list_item.delivered_qty)
