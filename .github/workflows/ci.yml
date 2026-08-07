@@ -107,3 +107,13 @@ jobs:
           bench --site test_site run-tests --app navgold_custom
         env:
           TYPE: server
+
+      - name: Run UI Tests
+        working-directory: /home/runner/frappe-bench
+        run: |
+          echo "127.0.0.1 test_site" | sudo tee -a /etc/hosts
+          bench start &> bench_start.log &
+          timeout 180 bash -c 'until curl -sf http://test_site:8000/api/method/ping > /dev/null; do sleep 2; done'
+          bench --site test_site run-ui-tests navgold_custom --headless
+        env:
+          CI: 'Yes'
