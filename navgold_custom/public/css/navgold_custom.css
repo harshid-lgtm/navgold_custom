@@ -1,0 +1,30 @@
+.pick-list-scan-action {
+	display: none;
+}
+
+@media (max-width: 991px) {
+	.pick-list-scan-action {
+		display: block;
+		position: fixed;
+		left: var(--padding-md);
+		right: var(--padding-md);
+		bottom: var(--padding-md);
+		z-index: 100;
+		padding: var(--padding-md);
+		font-size: var(--text-lg);
+		font-weight: 600;
+		box-shadow: var(--shadow-lg);
+	}
+
+	.page-container:has(> .pick-list-scan-action) {
+		padding-bottom: 5rem;
+	}
+
+	body:has(.pick-list-scan-action) .form-footer .scroll-to-top.show {
+		bottom: 5rem;
+	}
+
+	body:has(.pick-list-scan-action) .es-toast-container {
+		bottom: 5rem;
+	}
+}
