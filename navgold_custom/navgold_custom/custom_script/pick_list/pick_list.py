@@ -281,11 +281,16 @@ def get_pickable_warehouses(company, parent_warehouse=None):
 def get_open_pick_list_claims(item_codes, warehouses):
 	pick_list = frappe.qb.DocType("Pick List")
 	pick_list_item = frappe.qb.DocType("Pick List Item")
+	settled_qty = (
+		Case()
+		.when(pick_list.purpose == "Delivery", pick_list_item.delivered_qty)
+		.else_(pick_list_item.transferred_qty)
+	)
 	claimed_qty = (
 		Case()
 		.when(
 			(pick_list_item.picked_qty > 0) & (pick_list_item.docstatus == 1),
-			pick_list_item.picked_qty - pick_list_item.delivered_qty,
+			pick_list_item.picked_qty - settled_qty,
 		)
 		.else_(pick_list_item.stock_qty)
 	)
