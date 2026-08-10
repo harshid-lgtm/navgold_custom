@@ -60,6 +60,27 @@ def get_whole_number_uoms():
 	return set(frappe.get_all("UOM", filters={"must_be_whole_number": 1}, pluck="name"))
 
 
+def set_part_pack_rows_to_stock_uom(stock_entry, pick_list_doc):
+	pending_stock_qty = {
+		row.name: flt(row.picked_qty) - flt(row.transferred_qty) for row in pick_list_doc.locations
+	}
+	precision = frappe.get_precision("Stock Entry Detail", "transfer_qty")
+
+	for row in stock_entry.get("items") or []:
+		pending_qty = pending_stock_qty.get(row.get("pick_list_item"))
+		if not pending_qty:
+			continue
+
+		conversion_factor = flt(row.get("conversion_factor")) or 1
+		if flt(flt(row.get("qty")) * conversion_factor, precision) == flt(pending_qty, precision):
+			continue
+
+		row["qty"] = pending_qty
+		row["transfer_qty"] = pending_qty
+		row["uom"] = row.get("stock_uom")
+		row["conversion_factor"] = 1
+
+
 def drop_sales_orders_short_of_stock(pick_list, requested_sales_orders=None):
 	"""A Sales Order is picked whole or not at all, however many lines it has. An order the shelves
 	cannot cover is dropped so the orders that are fully in stock can still be picked, and nothing left
