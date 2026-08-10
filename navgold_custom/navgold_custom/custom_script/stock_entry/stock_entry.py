@@ -29,6 +29,30 @@ def update_proxy_sku_transfer_rates(doc, method):
 		)
 
 
+def release_transferred_shelf_claim(doc, method):
+	if not doc.pick_list:
+		return
+
+	if frappe.db.get_value("Pick List", doc.pick_list, "purpose") == "Delivery":
+		return
+
+	for row in frappe.get_all(
+		"Pick List Item",
+		filters={"parent": doc.pick_list, "parenttype": "Pick List", "docstatus": 1},
+		fields=["name", "delivered_qty", "transferred_qty"],
+	):
+		if flt(row.delivered_qty) == flt(row.transferred_qty):
+			continue
+
+		frappe.db.set_value(
+			"Pick List Item",
+			row.name,
+			"delivered_qty",
+			flt(row.transferred_qty),
+			update_modified=False,
+		)
+
+
 def get_afn_material_issue(transfer_name):
 	return frappe.db.get_value("Stock Entry", {TRANSFER_LINK_FIELD: transfer_name, "docstatus": ["<", 2]})
 

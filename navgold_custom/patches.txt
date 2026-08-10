@@ -22,4 +22,4 @@ navgold_custom.patches.v1.backfill_cost_sub_type_source
 navgold_custom.patches.v1.mark_cost_types_as_groups
 navgold_custom.patches.v1.migrate_cost_sub_types_into_cost_type
 navgold_custom.patches.v1.drop_cost_sub_type_doctype
-
+navgold_custom.patches.v1.release_transferred_shelf_claims
