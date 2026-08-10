@@ -5,12 +5,13 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import flt
 
-from navgold_custom.navgold_custom.amazon_pricing.test_bundle_stock import (
-	get_stock_warehouse,
-	make_item,
-)
+from navgold_custom.navgold_custom.amazon_pricing.test_bundle_stock import make_item
 from navgold_custom.navgold_custom.custom_script.pick_list.pick_list_api import (
 	create_fba_transfer_stock_entry,
+)
+from navgold_custom.navgold_custom.custom_script.stock_entry.test_fba_clearing import (
+	COMPANY,
+	create_test_warehouse,
 )
 
 PACK_UOM = "Test Transfer Pack of 6"
@@ -21,12 +22,20 @@ class TestTransferStockEntryPackFraction(IntegrationTestCase):
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
-		cls.warehouse, cls.company = get_stock_warehouse()
-		cls.target_warehouse = get_afn_warehouse(cls.company)
+		cls.company = COMPANY
+		cls.warehouse = create_test_warehouse("Test Pack Fraction Source")
+		cls.target_warehouse = create_test_warehouse("Test Pack Fraction AFN")
+		cls.configured_afn_warehouse = frappe.db.get_single_value("Amazon SP API Settings", "afn_warehouse")
 		make_pack_uom()
+
+	@classmethod
+	def tearDownClass(cls):
+		frappe.db.set_single_value("Amazon SP API Settings", "afn_warehouse", cls.configured_afn_warehouse)
+		super().tearDownClass()
 
 	def setUp(self):
 		super().setUp()
+		frappe.db.set_single_value("Amazon SP API Settings", "afn_warehouse", self.target_warehouse)
 		self.item_code = make_item(f"TEST-PACK-FRACTION-{self._testMethodName}", is_stock_item=1)
 		add_pack_conversion(self.item_code)
 		receive_stock(self.item_code, 500, self.warehouse, self.company)
@@ -124,16 +133,6 @@ def add_pack_conversion(item_code):
 		return
 	item.append("uoms", {"uom": PACK_UOM, "conversion_factor": PACK_SIZE})
 	item.save()
-
-
-def get_afn_warehouse(company):
-	warehouse = frappe.get_all(
-		"Warehouse",
-		filters={"company": company, "is_group": 0, "disabled": 0},
-		limit=2,
-		pluck="name",
-	)
-	return warehouse[-1]
 
 
 def receive_stock(item_code, qty, warehouse, company):
