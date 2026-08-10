@@ -82,6 +82,9 @@ class TestStockGuard(IntegrationTestCase):
 			bundle_buildable_map,
 			reserve_percentage,
 			max_publish_qty,
+			supplier_sfp_eligible_map=None,
+			# This SKU is synthetic, so the pack share is supplied instead of read from the DB pool.
+			allocation_map={"GUARD-TEST-SKU": mfn_stock},
 		)
 
 	def test_own_stock_reduced_via_inventory_data(self):

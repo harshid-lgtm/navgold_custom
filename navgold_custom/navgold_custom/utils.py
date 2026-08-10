@@ -144,6 +144,94 @@ def calculate_adjusted_qty(raw_qty: float, pool_size: int, pack_size: float) -> 
 	return max(math.floor(raw_qty / pool_size / pack_size), 0)
 
 
+def allocate_pack_stock(available_qty: float, pack_size_by_proxy_sku: dict[str, float]) -> dict[str, int]:
+	allocation = {proxy_sku: 0 for proxy_sku in pack_size_by_proxy_sku}
+
+	claimants = sorted(
+		(
+			(flt(pack_size), proxy_sku)
+			for proxy_sku, pack_size in pack_size_by_proxy_sku.items()
+			if flt(pack_size) > 0
+		),
+		key=lambda claimant: (claimant[0], claimant[1]),
+	)
+	remaining_qty = flt(available_qty)
+	if not claimants or remaining_qty <= 0:
+		return allocation
+
+	# Deal the whole rounds in one step: a pack-of-1 against a large free qty would otherwise
+	# take one loop pass per unit.
+	units_per_round = sum(pack_size for pack_size, _proxy_sku in claimants)
+	full_rounds = int(remaining_qty // units_per_round)
+	if full_rounds:
+		remaining_qty = flt(remaining_qty - full_rounds * units_per_round, 9)
+		for _pack_size, proxy_sku in claimants:
+			allocation[proxy_sku] = full_rounds
+
+	while True:
+		allocated_in_pass = False
+		for pack_size, proxy_sku in claimants:
+			if remaining_qty >= pack_size:
+				remaining_qty = flt(remaining_qty - pack_size, 9)
+				allocation[proxy_sku] += 1
+				allocated_in_pass = True
+		if not allocated_in_pass:
+			return allocation
+
+
+def get_mfn_pack_pool_map(item_codes: list[str]) -> dict[str, dict[str, float]]:
+	if not item_codes:
+		return {}
+
+	proxy_sku_dt = DocType("Proxy SKU")
+	mfn_rows = (
+		frappe.qb.from_(proxy_sku_dt)
+		.select(proxy_sku_dt.name, proxy_sku_dt.item, proxy_sku_dt.uom, proxy_sku_dt.is_active)
+		.where((proxy_sku_dt.item.isin(item_codes)) & (proxy_sku_dt.is_fba == 0))
+	).run(as_dict=True)
+
+	if not mfn_rows:
+		return {}
+
+	rows_by_item = {}
+	for row in mfn_rows:
+		rows_by_item.setdefault(row.item, []).append(row)
+
+	# An item with no active SKU keeps the historical "pool of one" behaviour rather than
+	# silently dropping every listing's stock to zero.
+	pool_rows = []
+	for item_rows in rows_by_item.values():
+		active_rows = [row for row in item_rows if row.is_active]
+		pool_rows.extend(active_rows or item_rows)
+
+	uom_conversion_dt = DocType("UOM Conversion Detail")
+	uom_rows = (
+		frappe.qb.from_(uom_conversion_dt)
+		.select(uom_conversion_dt.parent, uom_conversion_dt.uom, uom_conversion_dt.conversion_factor)
+		.where((uom_conversion_dt.parenttype == "Item") & (uom_conversion_dt.parent.isin(item_codes)))
+	).run(as_dict=True)
+	uom_factor_map = {(row.parent, row.uom): flt(row.conversion_factor) or 1.0 for row in uom_rows}
+
+	pool_map = {}
+	for row in pool_rows:
+		pool_map.setdefault(row.item, {})[row.name] = uom_factor_map.get((row.item, row.uom), 1.0)
+
+	return pool_map
+
+
+def get_pack_allocation_map(available_qty_by_item: dict[str, float]) -> dict[str, int]:
+	if not available_qty_by_item:
+		return {}
+
+	allocation_map = {}
+	for item_code, pack_size_by_proxy_sku in get_mfn_pack_pool_map(list(available_qty_by_item)).items():
+		allocation_map.update(
+			allocate_pack_stock(available_qty_by_item.get(item_code, 0), pack_size_by_proxy_sku)
+		)
+
+	return allocation_map
+
+
 @redis_cache()
 @frappe.whitelist()
 def get_conversion_factor(item_code: str, uom: str):

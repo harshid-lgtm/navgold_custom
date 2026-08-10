@@ -35,7 +35,11 @@ from navgold_custom.navgold_custom.doctype.supplier_item_price_and_stock.supplie
 	get_supplier_prices,
 )
 from navgold_custom.navgold_custom.erpnext_compat import get_product_bundle_items
-from navgold_custom.navgold_custom.utils import calculate_adjusted_qty, get_conversion_factor
+from navgold_custom.navgold_custom.utils import (
+	calculate_adjusted_qty,
+	get_conversion_factor,
+	get_pack_allocation_map,
+)
 
 SHIPPING_GROUPS = {
 	"sfp": "57d54587-7341-4c9f-b3f9-546c8d798b21",
@@ -374,6 +378,7 @@ def get_sku_inventory_data(
 	reserve_percentage: float = 0,
 	max_publish_qty: int = 0,
 	supplier_sfp_eligible_map: dict | None = None,
+	allocation_map: dict | None = None,
 ) -> dict:
 	stock_info = (
 		stock_info_map.get(pricing.proxy_sku, {})
@@ -431,7 +436,17 @@ def get_sku_inventory_data(
 		)
 
 	raw_qty = flt(stock_info.get("mfn_stock", 0))
-	warehouse_qty = calculate_adjusted_qty(raw_qty, pool_size, pack_size)
+	if bundle_buildable_map is None and item_code:
+		bundle_buildable_map = get_buildable_bundle_qty_map([item_code])
+	bundle_buildable_map = bundle_buildable_map or {}
+
+	if item_code in bundle_buildable_map:
+		# For bundles mfn_stock is already a buildable-bundle count, not base units.
+		warehouse_qty = calculate_adjusted_qty(raw_qty, pool_size, pack_size)
+	else:
+		if allocation_map is None:
+			allocation_map = get_pack_allocation_map({item_code: raw_qty}) if item_code else {}
+		warehouse_qty = cint(allocation_map.get(pricing.proxy_sku, 0))
 
 	if supplier_data_map is not None and item_code:
 		supplier_entry = supplier_data_map.get(item_code, {})
@@ -468,8 +483,6 @@ def get_sku_inventory_data(
 	resolved_supplier_qty = calculate_adjusted_qty(resolved_supplier_stock, pool_size, pack_size)
 
 	if not is_backorder and warehouse_qty > 0 and item_code:
-		if bundle_buildable_map is None:
-			bundle_buildable_map = get_buildable_bundle_qty_map([item_code])
 		buildable_bundles = bundle_buildable_map.get(item_code)
 		# Defensive cap; redundant while get_stock_info already sources bundle mfn_stock from buildable.
 		if buildable_bundles is not None and buildable_bundles < warehouse_qty * pack_size:
@@ -695,6 +708,19 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 
 	bundle_buildable_map = get_buildable_bundle_qty_map(all_item_codes) if all_item_codes else {}
 
+	# Bundles carry a buildable-bundle count in mfn_stock, so they stay out of the base-unit pool.
+	# Siblings of an item all report the same free qty; take the max so a SKU that resolved to an
+	# empty stock row can never clobber the real figure.
+	available_qty_by_item = {}
+	for proxy_sku, info in proxy_sku_info.items():
+		item_code = info.get("item")
+		if not item_code or item_code in bundle_buildable_map:
+			continue
+		mfn_stock = flt(stock_info_map.get(proxy_sku, {}).get("mfn_stock", 0))
+		available_qty_by_item[item_code] = max(available_qty_by_item.get(item_code, 0), mfn_stock)
+
+	allocation_map = get_pack_allocation_map(available_qty_by_item)
+
 	settings = frappe.get_cached_value(
 		"Navgold Settings",
 		"Navgold Settings",
@@ -718,6 +744,7 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 				reserve_percentage,
 				max_publish_qty,
 				supplier_sfp_eligible_map,
+				allocation_map,
 			)
 		except Exception as e:
 			frappe.log_error(f"Skipping inventory patches for {pricing.name}: {e!s}", "Amazon Feed Builder")
