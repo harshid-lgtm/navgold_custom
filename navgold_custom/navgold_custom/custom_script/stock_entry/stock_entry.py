@@ -30,21 +30,12 @@ def update_proxy_sku_transfer_rates(doc, method):
 
 
 def release_transferred_shelf_claim(doc, method):
-	"""ERPNext settles a Pick List row's claim on the shelf off delivered_qty alone, and a
-	transfer pick list never earns a Delivery Note — so a row whose stock has physically moved
-	keeps claiming its shelf until every other row on the same pick list is transferred too.
-	One straggler row silently freezes the stock behind every finished row beside it, and the
-	shortfall only surfaces days later as "in stock, but nothing available to pick". Mirror the
-	settled qty onto the field the claim reads so each row releases on its own."""
 	if not doc.pick_list:
 		return
 
 	if frappe.db.get_value("Pick List", doc.pick_list, "purpose") == "Delivery":
 		return
 
-	# ponytail: overloads delivered_qty on transfer pick lists — nothing else reads it there,
-	# since they never map a Delivery Note; move to a custom staged_qty field plus a
-	# get_picked_items_details override if a transfer pick list ever needs to raise one
 	for row in frappe.get_all(
 		"Pick List Item",
 		filters={"parent": doc.pick_list, "parenttype": "Pick List", "docstatus": 1},

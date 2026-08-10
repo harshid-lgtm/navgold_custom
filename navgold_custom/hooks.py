@@ -340,8 +340,6 @@ doc_events = {
 			"navgold_custom.navgold_custom.custom_script.stock_entry.stock_entry.release_transferred_shelf_claim",
 		],
 		"before_cancel": "navgold_custom.navgold_custom.custom_script.stock_entry.stock_entry.cancel_afn_material_issue",
-		# on_cancel, not before_cancel: erpnext rolls transferred_qty back inside its own
-		# on_cancel, and the claim has to follow the qty it mirrors.
 		"on_cancel": "navgold_custom.navgold_custom.custom_script.stock_entry.stock_entry.release_transferred_shelf_claim",
 	},
 }

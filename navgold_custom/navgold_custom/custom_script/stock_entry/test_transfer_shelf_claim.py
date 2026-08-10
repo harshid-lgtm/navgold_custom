@@ -24,8 +24,6 @@ class TestTransferShelfClaim(IntegrationTestCase):
 
 	def setUp(self):
 		super().setUp()
-		# the suite runs in one transaction and claims are read per item across every pick list,
-		# so each test needs an item no other test has touched
 		self.settled_item = self.make_test_item("settled")
 		self.straggler_item = self.make_test_item("straggler")
 
@@ -73,7 +71,6 @@ class TestTransferShelfClaim(IntegrationTestCase):
 		return pick_list
 
 	def transfer_row(self, pick_list, location, qty):
-		"""Move one pick list row's stock for real, the way the FBA transfer does."""
 		transfer = frappe.new_doc("Stock Entry")
 		transfer.stock_entry_type = "Material Transfer"
 		transfer.company = COMPANY
@@ -101,7 +98,6 @@ class TestTransferShelfClaim(IntegrationTestCase):
 		)
 
 	def get_claimed_qty(self, item_code):
-		"""What erpnext's allocator believes is still spoken for on the source shelf."""
 		reader = frappe.new_doc("Pick List")
 		reader.company = COMPANY
 		reader.purpose = "Delivery"
@@ -133,9 +129,7 @@ class TestTransferShelfClaim(IntegrationTestCase):
 		settled_location = next(row for row in pick_list.locations if row.item_code == self.settled_item)
 		self.transfer_row(pick_list, settled_location, 10)
 
-		# the transferred item's stock has left the shelf and owes it nothing
 		self.assertEqual(self.get_claimed_qty(self.settled_item), 0)
-		# the row that never moved is still holding its own stock, as it should
 		self.assertEqual(self.get_claimed_qty(self.straggler_item), 4)
 
 	def test_a_partial_transfer_keeps_claiming_only_what_stayed(self):
@@ -147,8 +141,6 @@ class TestTransferShelfClaim(IntegrationTestCase):
 		self.assertEqual(self.get_claimed_qty(self.settled_item), 35)
 
 	def test_cancelling_the_transfer_puts_the_claim_back(self):
-		# a straggler row keeps the pick list off Completed, which is the only state where the
-		# claim outlives the transfer — a fully transferred pick list already releases itself
 		self.receive_stock(self.settled_item, 10)
 		self.receive_stock(self.straggler_item, 4)
 		pick_list = self.make_pick_list([(self.settled_item, 10), (self.straggler_item, 4)])
@@ -169,7 +161,6 @@ class TestTransferShelfClaim(IntegrationTestCase):
 		settled_location = next(row for row in pick_list.locations if row.item_code == self.settled_item)
 		self.transfer_row(pick_list, settled_location, 10)
 
-		# rewind to how every transfer looked before the hook existed
 		frappe.db.set_value("Pick List Item", settled_location.name, "delivered_qty", 0)
 		self.assertEqual(self.get_claimed_qty(self.settled_item), 10)
 
@@ -184,7 +175,6 @@ class TestTransferShelfClaim(IntegrationTestCase):
 
 		self.transfer_row(pick_list, pick_list.locations[0], 5)
 
-		# delivered_qty means something real on a Delivery pick list — only a Delivery Note settles it
 		delivery_row = self.get_location(pick_list.name, self.settled_item)
 		self.assertEqual(flt(delivery_row.delivered_qty), 0)
 		self.assertEqual(self.get_claimed_qty(self.settled_item), 5)

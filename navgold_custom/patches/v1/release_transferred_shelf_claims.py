@@ -7,9 +7,6 @@ from frappe.utils.data import flt
 
 
 def execute():
-	"""Transfer pick lists have been holding their source shelves since the day they were picked:
-	erpnext reads a row's claim off delivered_qty, which only a Delivery Note ever settles. The
-	Stock Entry hook keeps new transfers honest; this releases the rows already stranded."""
 	stranded_rows = get_stranded_rows()
 	if not stranded_rows:
 		return
