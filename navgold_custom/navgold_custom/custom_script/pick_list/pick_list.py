@@ -60,7 +60,7 @@ def get_whole_number_uoms():
 	return set(frappe.get_all("UOM", filters={"must_be_whole_number": 1}, pluck="name"))
 
 
-def restate_lossy_pack_rows_in_stock_uom(stock_entry, pick_list_doc):
+def set_part_pack_rows_to_stock_uom(stock_entry, pick_list_doc):
 	pending_stock_qty = {
 		row.name: flt(row.picked_qty) - flt(row.transferred_qty) for row in pick_list_doc.locations
 	}

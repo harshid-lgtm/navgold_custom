@@ -9,7 +9,7 @@ from navgold_custom.navgold_custom.amazon_repository import PICKABLE_ORDER_STATU
 from navgold_custom.navgold_custom.custom_script.pick_list.pick_list import (
 	drop_sales_orders_short_of_stock,
 	get_stock_fulfillment,
-	restate_lossy_pack_rows_in_stock_uom,
+	set_part_pack_rows_to_stock_uom,
 )
 from navgold_custom.navgold_custom.erpnext_compat import create_pick_list, create_stock_entry
 
@@ -198,5 +198,5 @@ def create_fba_transfer_stock_entry(pick_list_name: str) -> dict:
 		frappe.throw(_("Could not create Stock Entry for Pick List {0}").format(pick_list_name))
 
 	stock_entry["stock_entry_type"] = "FBA Transfer"
-	restate_lossy_pack_rows_in_stock_uom(stock_entry, pick_list_doc)
+	set_part_pack_rows_to_stock_uom(stock_entry, pick_list_doc)
 	return stock_entry

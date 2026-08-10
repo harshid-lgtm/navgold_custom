@@ -18,7 +18,7 @@ PACK_UOM = "Test Transfer Pack of 6"
 PACK_SIZE = 6
 
 
-class TestTransferStockEntryPackFraction(IntegrationTestCase):
+class TestTransferStockEntryPartPack(IntegrationTestCase):
 	@classmethod
 	def setUpClass(cls):
 		super().setUpClass()
@@ -102,7 +102,7 @@ class TestTransferStockEntryPackFraction(IntegrationTestCase):
 		self.assertEqual(flt(stock_entry.items[0].qty), 22)
 		self.assertEqual(flt(stock_entry.items[0].transfer_qty), 132)
 
-	def test_only_the_lossy_row_is_restated(self):
+	def test_only_the_part_pack_row_changes_uom(self):
 		second_item = make_item(f"TEST-PACK-FRACTION-{self._testMethodName}-2", is_stock_item=1)
 		add_pack_conversion(second_item)
 		receive_stock(second_item, 500, self.warehouse, self.company)
