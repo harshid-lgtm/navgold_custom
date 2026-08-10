@@ -16,9 +16,19 @@ except ImportError:
 	from erpnext.stock.doctype.delivery_note.delivery_note import make_packing_slip, make_sales_invoice
 
 try:
-	from erpnext.stock.doctype.pick_list.mapper import create_delivery_note, create_stock_entry
+	from erpnext.stock.doctype.pick_list.mapper import (
+		create_dn_with_so,
+		create_dn_wo_so,
+		create_stock_entry,
+		validate_item_locations,
+	)
 except ImportError:
-	from erpnext.stock.doctype.pick_list.pick_list import create_delivery_note, create_stock_entry
+	from erpnext.stock.doctype.pick_list.pick_list import (
+		create_dn_with_so,
+		create_dn_wo_so,
+		create_stock_entry,
+		validate_item_locations,
+	)
 
 try:
 	from erpnext.selling.doctype.sales_order.mapper import (
@@ -74,7 +84,8 @@ def get_reserved_batch_bundle_name(sre_list):
 
 
 __all__ = [
-	"create_delivery_note",
+	"create_dn_with_so",
+	"create_dn_wo_so",
 	"create_pick_list",
 	"create_stock_entry",
 	"get_product_bundle_items",
@@ -84,4 +95,5 @@ __all__ = [
 	"make_packing_slip",
 	"make_purchase_receipt",
 	"make_sales_invoice",
+	"validate_item_locations",
 ]

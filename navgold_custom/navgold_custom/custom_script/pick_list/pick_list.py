@@ -14,10 +14,12 @@ from frappe.utils.caching import redis_cache
 from frappe.utils.nestedset import get_descendants_of
 
 from navgold_custom.navgold_custom.erpnext_compat import (
-	create_delivery_note,
+	create_dn_with_so,
+	create_dn_wo_so,
 	get_product_bundle_items,
 	get_reserved_batch_bundle_name,
 	make_delivery_note,
+	validate_item_locations,
 )
 
 
@@ -416,13 +418,34 @@ def auto_create_delivery_notes(doc):
 		consolidate_and_create_delivery_notes(doc, consolidation_warehouse)
 		return
 
-	delivery_note = create_delivery_note(doc.name)
-	if delivery_note:
+	delivery_notes = create_delivery_notes_per_sales_order(doc)
+	if delivery_notes:
 		frappe.msgprint(
-			_("Delivery Note {0} created automatically").format(delivery_note.name),
+			_("Delivery Note {0} created automatically").format(
+				", ".join(
+					frappe.utils.get_link_to_form("Delivery Note", note.name) for note in delivery_notes
+				)
+			),
 			indicator="green",
 			alert=True,
 		)
+
+
+def create_delivery_notes_per_sales_order(pick_list):
+	"""One Delivery Note per Sales Order: erpnext groups by customer and address, merging the orders."""
+	validate_item_locations(pick_list)
+
+	sales_orders = get_picked_sales_orders(pick_list)
+	delivery_notes = create_dn_with_so({name: {name} for name in sales_orders}, pick_list)
+
+	if not all(location.sales_order for location in pick_list.locations):
+		delivery_notes.append(create_dn_wo_so(pick_list))
+
+	return delivery_notes
+
+
+def get_picked_sales_orders(pick_list):
+	return sorted({location.sales_order for location in pick_list.locations if location.sales_order})
 
 
 def has_product_bundle_locations(pick_list):
@@ -460,8 +483,7 @@ def consolidate_and_create_delivery_notes(pick_list, consolidation_warehouse):
 	# anywhere on the pick list must not force the bundle-only builder onto a pure-pack Sales Order
 	# (that builder keeps only bundle rows and would strand a standalone pack). A Sales Order carrying
 	# BOTH kinds gets the mixed builder so neither line is dropped.
-	sales_orders = sorted({location.sales_order for location in pick_list.locations if location.sales_order})
-	for sales_order_name in sales_orders:
+	for sales_order_name in get_picked_sales_orders(pick_list):
 		has_bundle, has_standalone = get_sales_order_row_kinds(pick_list, sales_order_name)
 		if has_bundle and has_standalone:
 			create_consolidated_mixed_delivery_note(pick_list, sales_order_name, consolidation_warehouse)

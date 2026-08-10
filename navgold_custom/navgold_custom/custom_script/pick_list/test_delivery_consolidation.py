@@ -243,12 +243,15 @@ def submit_pick_list_for(sales_order):
 
 
 def submit_pick_list_via_app_flow(sales_order):
+	"""sales_order takes a list for a multi-order pick list."""
 	from navgold_custom.navgold_custom.custom_script.pick_list.pick_list_api import (
 		map_sales_orders_to_pick_list,
 	)
 
+	sales_orders = sales_order if isinstance(sales_order, list) else [sales_order]
 	pick_list = map_sales_orders_to_pick_list(
-		frappe.as_json([sales_order.name]), frappe.as_json(frappe.new_doc("Pick List").as_dict())
+		frappe.as_json([order.name for order in sales_orders]),
+		frappe.as_json(frappe.new_doc("Pick List").as_dict()),
 	)
 	pick_list.save()
 	for location in pick_list.locations:
@@ -443,6 +446,26 @@ class TestDeliveryConsolidation(IntegrationTestCase):
 		# pick list stays Open here; the cascade guard itself is exercised in
 		# test_legacy_pick_list_untouched_by_completion_cascade
 		self.assertEqual(frappe.db.get_value("Pick List", pick_list.name, "status"), "Open")
+
+	def test_feature_off_splits_one_delivery_note_per_sales_order(self):
+		frappe.db.set_single_value("Navgold Settings", "delivery_consolidation_warehouse", "")
+		item_code = "TEST-DC-SPLIT-ITEM"
+		create_pack_item(item_code)
+		receive_stock(item_code, self.shelf_a, 12)
+		first_order = create_pack_sales_order(item_code)
+		second_order = create_pack_sales_order(item_code)
+
+		submit_pick_list_via_app_flow([first_order, second_order])
+
+		first_note = {row.parent for row in get_delivery_note_items(first_order)}
+		second_note = {row.parent for row in get_delivery_note_items(second_order)}
+		self.assertEqual(len(first_note), 1)
+		self.assertEqual(len(second_note), 1)
+		self.assertNotEqual(
+			first_note,
+			second_note,
+			"two Sales Orders of the same customer must not share one Delivery Note",
+		)
 
 	def test_batch_item_transfer_carries_batches(self):
 		create_pack_item(BATCH_ITEM_CODE, has_batch_no=1)
