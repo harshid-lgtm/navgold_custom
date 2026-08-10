@@ -3,10 +3,15 @@
 
 import frappe
 
+from navgold_custom.navgold_custom.custom_script.material_request.material_request import (
+	retire_demand_on_delivery_note,
+)
+
 
 def on_submit(doc, method):
 	refresh_sales_order_reserved_qty(doc, method)
 	complete_pick_list_when_sales_order_delivered(doc, method)
+	retire_demand_on_delivery_note(doc, method)
 
 
 def on_cancel(doc, method):
