@@ -9,6 +9,7 @@ from navgold_custom.navgold_custom.amazon_repository import PICKABLE_ORDER_STATU
 from navgold_custom.navgold_custom.custom_script.pick_list.pick_list import (
 	drop_sales_orders_short_of_stock,
 	get_stock_fulfillment,
+	restate_lossy_pack_rows_in_stock_uom,
 )
 from navgold_custom.navgold_custom.erpnext_compat import create_pick_list, create_stock_entry
 
@@ -199,24 +200,3 @@ def create_fba_transfer_stock_entry(pick_list_name: str) -> dict:
 	stock_entry["stock_entry_type"] = "FBA Transfer"
 	restate_lossy_pack_rows_in_stock_uom(stock_entry, pick_list_doc)
 	return stock_entry
-
-
-def restate_lossy_pack_rows_in_stock_uom(stock_entry, pick_list_doc):
-	pending_stock_qty = {
-		row.name: flt(row.picked_qty) - flt(row.transferred_qty) for row in pick_list_doc.locations
-	}
-	precision = frappe.get_precision("Stock Entry Detail", "transfer_qty")
-
-	for row in stock_entry.get("items") or []:
-		pending_qty = pending_stock_qty.get(row.get("pick_list_item"))
-		if not pending_qty:
-			continue
-
-		conversion_factor = flt(row.get("conversion_factor")) or 1
-		if flt(flt(row.get("qty")) * conversion_factor, precision) == flt(pending_qty, precision):
-			continue
-
-		row["qty"] = pending_qty
-		row["transfer_qty"] = pending_qty
-		row["uom"] = row.get("stock_uom")
-		row["conversion_factor"] = 1
