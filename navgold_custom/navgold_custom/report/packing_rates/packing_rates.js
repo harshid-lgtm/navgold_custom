@@ -8,7 +8,9 @@ frappe.query_reports['Packing Rates'] = {
 			label: __('Required Days'),
 			fieldtype: 'Int',
 			default: 0,
-			description: __('0 is today, 1 is yesterday and today, 2 is the day before onwards'),
+			description: __(
+				'0 is today, 1 is yesterday and today, 2 is the day before onwards',
+			),
 		},
 	],
 };

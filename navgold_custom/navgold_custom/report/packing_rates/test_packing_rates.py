@@ -4,7 +4,6 @@
 import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import add_days, add_to_date, get_datetime, today
-from navgold_custom.navgold_custom.report.packing_rates.packing_rates import execute
 
 from navgold_custom.navgold_custom.custom_script.pick_list.test_delivery_consolidation import (
 	create_pack_item,
@@ -14,6 +13,7 @@ from navgold_custom.navgold_custom.custom_script.pick_list.test_delivery_consoli
 	receive_stock,
 	submit_pick_list_for,
 )
+from navgold_custom.navgold_custom.report.packing_rates.packing_rates import execute
 
 PACKER_A = "test-packer-a@example.com"
 PACKER_B = "test-packer-b@example.com"
