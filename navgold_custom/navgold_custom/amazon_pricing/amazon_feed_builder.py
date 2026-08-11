@@ -36,6 +36,7 @@ from navgold_custom.navgold_custom.doctype.supplier_item_price_and_stock.supplie
 )
 from navgold_custom.navgold_custom.erpnext_compat import get_product_bundle_items
 from navgold_custom.navgold_custom.utils import (
+	apply_stock_reserve,
 	calculate_adjusted_qty,
 	get_conversion_factor,
 	get_pack_allocation_map,
@@ -442,10 +443,14 @@ def get_sku_inventory_data(
 
 	if item_code in bundle_buildable_map:
 		# For bundles mfn_stock is already a buildable-bundle count, not base units.
-		warehouse_qty = calculate_adjusted_qty(raw_qty, pool_size, pack_size)
+		warehouse_qty = calculate_adjusted_qty(
+			apply_stock_reserve(raw_qty, reserve_percentage), pool_size, pack_size
+		)
 	else:
 		if allocation_map is None:
-			allocation_map = get_pack_allocation_map({item_code: raw_qty}) if item_code else {}
+			allocation_map = (
+				get_pack_allocation_map({item_code: raw_qty}, reserve_percentage) if item_code else {}
+			)
 		warehouse_qty = cint(allocation_map.get(pricing.proxy_sku, 0))
 
 	if supplier_data_map is not None and item_code:
@@ -488,12 +493,10 @@ def get_sku_inventory_data(
 		if buildable_bundles is not None and buildable_bundles < warehouse_qty * pack_size:
 			warehouse_qty = 0
 
-	# Reserve/cap applies to own warehouse stock only, never to backorder/supplier quantity.
-	quantity = (
-		resolved_supplier_qty
-		if is_backorder
-		else apply_stock_guard(warehouse_qty, reserve_percentage, max_publish_qty)
-	)
+	# Reserve/cap applies to own warehouse stock only, never to backorder/supplier quantity. The
+	# reserve is already off the units by now; only the publish cap is left to apply, and that one
+	# is a per-listing ceiling so it belongs on the pack count.
+	quantity = resolved_supplier_qty if is_backorder else apply_stock_guard(warehouse_qty, 0, max_publish_qty)
 
 	if zero_stock_proxy_skus is not None and pricing.proxy_sku in zero_stock_proxy_skus:
 		quantity = 0
@@ -719,14 +722,13 @@ def build_pricing_feed(pricing_names: list, seller_id: str, marketplace_id: str)
 		mfn_stock = flt(stock_info_map.get(proxy_sku, {}).get("mfn_stock", 0))
 		available_qty_by_item[item_code] = max(available_qty_by_item.get(item_code, 0), mfn_stock)
 
-	allocation_map = get_pack_allocation_map(available_qty_by_item)
-
 	settings = frappe.get_cached_value(
 		"Navgold Settings",
 		"Navgold Settings",
 		["send_min_price_to_amazon", "stock_reserve_pct", "max_publish_qty"],
 		as_dict=True,
 	)
+	allocation_map = get_pack_allocation_map(available_qty_by_item, flt(settings.stock_reserve_pct))
 	send_min_price = settings.send_min_price_to_amazon
 	reserve_percentage = flt(settings.stock_reserve_pct)
 	max_publish_qty = cint(settings.max_publish_qty)

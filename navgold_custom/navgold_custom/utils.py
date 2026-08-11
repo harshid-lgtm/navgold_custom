@@ -219,15 +219,25 @@ def get_mfn_pack_pool_map(item_codes: list[str]) -> dict[str, dict[str, float]]:
 	return pool_map
 
 
-def get_pack_allocation_map(available_qty_by_item: dict[str, float]) -> dict[str, int]:
+def apply_stock_reserve(available_qty: float, reserve_percentage: float) -> float:
+	"""A reserve holds back a share of the stock itself, so it is taken off the units before they are
+	dealt into packs. Taken off the pack count instead it rounds a single pack away to nothing."""
+	reserve_percentage = max(0.0, min(flt(reserve_percentage), 100.0))
+	# round the product before it is dealt: 40 at 90% lands on 3.999999999999999 in binary, and a
+	# pack of 4 would read that as nothing rather than the one whole pack the reserve leaves
+	return max(flt(flt(available_qty) * (1 - reserve_percentage / 100), 9), 0.0)
+
+
+def get_pack_allocation_map(
+	available_qty_by_item: dict[str, float], reserve_percentage: float = 0
+) -> dict[str, int]:
 	if not available_qty_by_item:
 		return {}
 
 	allocation_map = {}
 	for item_code, pack_size_by_proxy_sku in get_mfn_pack_pool_map(list(available_qty_by_item)).items():
-		allocation_map.update(
-			allocate_pack_stock(available_qty_by_item.get(item_code, 0), pack_size_by_proxy_sku)
-		)
+		sellable_qty = apply_stock_reserve(available_qty_by_item.get(item_code, 0), reserve_percentage)
+		allocation_map.update(allocate_pack_stock(sellable_qty, pack_size_by_proxy_sku))
 
 	return allocation_map
 
