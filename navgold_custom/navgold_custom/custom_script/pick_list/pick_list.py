@@ -267,11 +267,11 @@ def get_demand_by_sales_order(sales_orders):
 	return demand
 
 
-def get_pickable_stock_qty(item_codes, company, parent_warehouse=None):
+def get_pickable_stock_qty(item_codes, company, parent_warehouse=None, exclude_warehouses=None):
 	if not item_codes:
 		return {}
 
-	warehouses = get_pickable_warehouses(company, parent_warehouse)
+	warehouses = get_pickable_warehouses(company, parent_warehouse, exclude_warehouses)
 	if not warehouses:
 		return {}
 
@@ -291,14 +291,14 @@ def get_pickable_stock_qty(item_codes, company, parent_warehouse=None):
 	return available
 
 
-def get_pickable_warehouses(company, parent_warehouse=None):
+def get_pickable_warehouses(company, parent_warehouse=None, exclude_warehouses=None):
 	if parent_warehouse:
 		warehouses = [parent_warehouse, *get_descendants_of("Warehouse", parent_warehouse)]
 	else:
 		warehouses = frappe.get_all("Warehouse", filters={"company": company, "is_group": 0}, pluck="name")
 
-	rejected_warehouses = set(get_rejected_warehouses())
-	return [warehouse for warehouse in warehouses if warehouse not in rejected_warehouses]
+	skipped_warehouses = set(get_rejected_warehouses()) | set(exclude_warehouses or [])
+	return [warehouse for warehouse in warehouses if warehouse not in skipped_warehouses]
 
 
 def get_open_pick_list_claims(item_codes, warehouses):

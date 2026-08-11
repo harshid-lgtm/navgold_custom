@@ -8,10 +8,14 @@ import frappe
 from frappe import _
 from frappe.query_builder import DocType
 from frappe.query_builder.functions import Count, Sum
-from frappe.utils import add_days, ceil, cstr, flt, today
+from frappe.utils import add_days, ceil, cint, cstr, flt, today
 from frappe.utils.csvutils import read_csv_content
 from frappe.utils.xlsxutils import read_xlsx_file_from_attached_file
 
+from navgold_custom.navgold_custom.custom_script.pick_list.pick_list import (
+	get_pickable_stock_qty,
+	get_whole_number_uoms,
+)
 from navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku import get_proxy_sku_map
 from navgold_custom.navgold_custom.erpnext_compat import get_product_bundle_items
 from navgold_custom.navgold_custom.utils import get_conversion_factor, get_free_qty_map
@@ -896,6 +900,120 @@ def expand_selection(selected_items, sku_info):
 	return rows
 
 
+def get_shortfall_key(row):
+	# The dialog answers per expanded row, and a row is one item under one Proxy SKU: the same item
+	# can appear under two SKUs (two pack sizes) and must be answerable separately.
+	return f"{row['sku']}::{row['item_code']}"
+
+
+def get_transfer_item_details(item_codes):
+	if not item_codes:
+		return {}
+
+	rows = frappe.get_all(
+		"Item", filters={"name": ["in", item_codes]}, fields=["name", "item_name", "stock_uom"]
+	)
+	return {row["name"]: row for row in rows}
+
+
+def get_transferable_qty(free_stock_qty, conversion_factor, whole_units_only):
+	"""What a short row can still send, in the row's own UOM.
+
+	A pack cannot be split, so a pack row rounds down to whole packs — half a pack on the Material
+	Request is the fraction that strands the transfer at pick and Stock Entry time.
+	"""
+	qty = flt(free_stock_qty) / (conversion_factor or 1)
+	if conversion_factor > 1 or whole_units_only:
+		return float(math.floor(qty))
+	return qty
+
+
+def resolve_transfer_shortfalls(transfer_rows, company, afn_warehouse, decisions=None):
+	"""Walk the expanded rows against the stock the shelves can actually give, and return the rows
+	to act on plus the ones that fall short.
+
+	Availability is spent row by row rather than compared against an untouched total: two Proxy SKUs
+	of the same item are two rows drawing on one pile, so a per-row comparison would promise the same
+	units twice. The AFN warehouse is left out of the pile — stock already at Amazon cannot be picked
+	and sent to Amazon — and qty already claimed by open Pick Lists is netted off by
+	``get_pickable_stock_qty``.
+
+	With no ``decisions`` this only reports, so the dialog and the documents that follow are built by
+	the same walk and cannot disagree. A short row nobody answered for is kept whole, which is what
+	happened before this check existed.
+	"""
+	item_codes = list({row["item_code"] for row in transfer_rows})
+	available = get_pickable_stock_qty(item_codes, company, exclude_warehouses=[afn_warehouse])
+	item_details = get_transfer_item_details(item_codes)
+	whole_number_uoms = get_whole_number_uoms()
+
+	kept_rows = []
+	shortfalls = []
+	for row in transfer_rows:
+		item_code = row["item_code"]
+		details = item_details.get(item_code) or {}
+		conversion_factor = get_conversion_factor(item_code, row["uom"])
+		requested_stock_qty = flt(row["qty"]) * conversion_factor
+		free_stock_qty = max(flt(available.get(item_code)), 0.0)
+
+		if free_stock_qty >= requested_stock_qty:
+			available[item_code] = free_stock_qty - requested_stock_qty
+			kept_rows.append(row)
+			continue
+
+		transferable_qty = get_transferable_qty(
+			free_stock_qty, conversion_factor, details.get("stock_uom") in whole_number_uoms
+		)
+		key = get_shortfall_key(row)
+		shortfalls.append(
+			{
+				"key": key,
+				"sku": row["sku"],
+				"item_code": item_code,
+				"item_name": details.get("item_name") or item_code,
+				"uom": row["uom"] or details.get("stock_uom") or "",
+				"requested_qty": flt(row["qty"]),
+				"available_qty": free_stock_qty,
+				"transferable_qty": transferable_qty,
+			}
+		)
+
+		accepted = None if decisions is None else decisions.get(key)
+		if accepted is None:
+			available[item_code] = 0.0
+			kept_rows.append(row)
+			continue
+
+		if not accepted or transferable_qty <= 0:
+			continue
+
+		available[item_code] = free_stock_qty - transferable_qty * conversion_factor
+		kept_rows.append({**row, "qty": transferable_qty})
+
+	return kept_rows, shortfalls
+
+
+def get_shortfall_decisions(shortfall_decisions):
+	if not shortfall_decisions:
+		return None
+
+	if isinstance(shortfall_decisions, str):
+		shortfall_decisions = frappe.parse_json(shortfall_decisions)
+
+	return {key: bool(cint(value)) for key, value in shortfall_decisions.items()}
+
+
+def apply_transfer_shortfall_decisions(transfer_rows, company, afn_warehouse, shortfall_decisions):
+	transfer_rows = resolve_transfer_shortfalls(
+		transfer_rows, company, afn_warehouse, get_shortfall_decisions(shortfall_decisions)
+	)[0]
+
+	if not transfer_rows:
+		frappe.throw(_("Every short item was left out, so there is nothing to transfer"))
+
+	return transfer_rows
+
+
 def create_material_request_doc(transfer_rows, company, target_warehouse):
 	material_request = frappe.new_doc("Material Request")
 	material_request.material_request_type = "Material Transfer"
@@ -1041,7 +1159,27 @@ def create_purchase_orders_from_forecast_report(selected_items: str | list[dict]
 
 
 @frappe.whitelist()
-def create_material_requests_from_forecast_report(selected_items: str | list[dict]):
+def get_transfer_stock_shortfalls(selected_items: str | list[dict]):
+	"""The selected rows the shelves cannot cover in full, for the confirmation dialog."""
+	if isinstance(selected_items, str):
+		selected_items = frappe.parse_json(selected_items)
+
+	if not selected_items:
+		frappe.throw(_("No items selected"))
+
+	amz_setting = frappe.get_single("Amazon SP API Settings")
+	if not amz_setting.afn_warehouse:
+		frappe.throw(_("AFN Warehouse not configured in Amazon SP API Settings"))
+
+	transfer_rows = expand_selection(selected_items, build_sku_info(selected_items))
+
+	return resolve_transfer_shortfalls(transfer_rows, amz_setting.company, amz_setting.afn_warehouse)[1]
+
+
+@frappe.whitelist()
+def create_material_requests_from_forecast_report(
+	selected_items: str | list[dict], shortfall_decisions: str | dict | None = None
+):
 	if isinstance(selected_items, str):
 		selected_items = frappe.parse_json(selected_items)
 
@@ -1057,9 +1195,11 @@ def create_material_requests_from_forecast_report(selected_items: str | list[dic
 	if not target_warehouse:
 		frappe.throw(_("AFN Warehouse not configured in Amazon SP API Settings"))
 
-	material_request = create_material_request_doc(
-		expand_selection(selected_items, sku_info), company, target_warehouse
-	)[0]
+	transfer_rows = apply_transfer_shortfall_decisions(
+		expand_selection(selected_items, sku_info), company, target_warehouse, shortfall_decisions
+	)
+
+	material_request = create_material_request_doc(transfer_rows, company, target_warehouse)[0]
 
 	return {
 		"success": True,
@@ -1069,7 +1209,9 @@ def create_material_requests_from_forecast_report(selected_items: str | list[dic
 
 
 @frappe.whitelist()
-def create_purchase_orders_and_material_request_from_forecast_report(selected_items: str):
+def create_purchase_orders_and_material_request_from_forecast_report(
+	selected_items: str, shortfall_decisions: str | dict | None = None
+):
 	if isinstance(selected_items, str):
 		selected_items = frappe.parse_json(selected_items)
 
@@ -1089,7 +1231,11 @@ def create_purchase_orders_and_material_request_from_forecast_report(selected_it
 	if not warehouse:
 		frappe.throw(_("Warehouse not configured in Amazon SP API Settings"))
 
-	transfer_rows = expand_selection(selected_items, sku_info)
+	# Trimmed before the orders are planned so the Purchase Order buys what the Material Request
+	# actually moves — the two are built from one adjusted row list, as they always have been.
+	transfer_rows = apply_transfer_shortfall_decisions(
+		expand_selection(selected_items, sku_info), company, target_warehouse, shortfall_decisions
+	)
 
 	# Resolve the orders before the transfer is submitted: a selection with nothing to buy has to
 	# fail while there is still no submitted Material Request to strand.
