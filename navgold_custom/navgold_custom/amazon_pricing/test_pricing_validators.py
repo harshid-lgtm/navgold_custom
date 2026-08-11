@@ -513,6 +513,8 @@ class TestBundleZeroStock(IntegrationTestCase):
 			supplier_data_map={},
 			lead_time_map={},
 			bundle_buildable_map=bundle_buildable_map,
+			# These SKUs are synthetic, so the pack share is supplied instead of read from the DB pool.
+			allocation_map={"SKU-BUNDLE": int(mfn_stock / pack_size)},
 		)
 
 	def test_bundle_with_insufficient_component_stock_pushes_zero(self):

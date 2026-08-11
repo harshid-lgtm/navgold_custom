@@ -104,7 +104,7 @@ class TestPackAllocationStrategy(IntegrationTestCase):
 			stock_info = get_stock_info(under_test)
 
 		# mfn_stock stays raw (feed contract); only total_stock is pack-aware.
-		# 4 units / pool 5 / pack 6 floors to zero full packs.
+		# The four pack-of-1 siblings take a unit each first, so no whole pack-of-6 is left.
 		self.assertEqual(stock_info["mfn_stock"], 4)
 		self.assertEqual(stock_info["total_stock"], 0)
 
@@ -126,15 +126,15 @@ class TestPackAllocationStrategy(IntegrationTestCase):
 		pricing = frappe.get_doc("Amazon Product Pricing", {"proxy_sku": under_test})
 		pricing.active_strategy = pricing.default_strategy
 
-		# free_qty 60 / pool 5 / pack 6 -> exactly 2 full packs. The feed must publish 2,
-		# proving mfn_stock reaches the feed raw and is divided once, not twice.
+		# free_qty 60 over packs 6 + 1 + 1 + 1 + 1: one round costs 10 units, so six whole rounds
+		# fit and this SKU publishes 6 packs. Anything smaller means the feed divided twice.
 		with patch(
 			"navgold_custom.navgold_custom.amazon_pricing.strategy_selector.get_free_qty_map",
 			return_value={item_code: {"free_qty": 60, "actual_qty": 60}},
 		):
 			inventory_data = get_sku_inventory_data(pricing)
 
-		self.assertEqual(inventory_data["quantity"], 2)
+		self.assertEqual(inventory_data["quantity"], 6)
 
 	def test_select_strategy_backorders_on_zero_total_stock(self):
 		pack_uom = ensure_uom(f"NG Pack 2 {frappe.generate_hash(length=6)}")

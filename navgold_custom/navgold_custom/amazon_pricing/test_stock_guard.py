@@ -8,6 +8,7 @@ from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import (
 	apply_stock_guard,
 	get_sku_inventory_data,
 )
+from navgold_custom.navgold_custom.utils import apply_stock_reserve
 
 
 class TestStockGuard(IntegrationTestCase):
@@ -82,6 +83,11 @@ class TestStockGuard(IntegrationTestCase):
 			bundle_buildable_map,
 			reserve_percentage,
 			max_publish_qty,
+			supplier_sfp_eligible_map=None,
+			# This SKU is synthetic, so the pack share is supplied instead of read from the DB pool.
+			# The reserve now lands on the units when the share is dealt, which is what the real
+			# caller does, so the fixture applies it here. pack_size is 1, so packs == units.
+			allocation_map={"GUARD-TEST-SKU": apply_stock_reserve(mfn_stock, reserve_percentage)},
 		)
 
 	def test_own_stock_reduced_via_inventory_data(self):
