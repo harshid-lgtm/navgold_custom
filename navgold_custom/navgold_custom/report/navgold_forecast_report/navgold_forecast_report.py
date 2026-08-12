@@ -928,6 +928,28 @@ def get_transferable_qty(free_stock_qty, conversion_factor, whole_units_only):
 	return qty
 
 
+def get_transfer_availability(item_codes, company, afn_warehouse):
+	"""Stock a transfer may draw on, per item.
+
+	Two numbers already answer "what is free", and they answer it differently: the pick list nets off
+	qty claimed by open Pick Lists, while the report's own free-stock column nets off stock reserved
+	against a Sales Order and qty held by draft Amazon orders. A transfer must respect both — stock
+	promised to a customer cannot go to Amazon, and neither can stock a picker is already walking to —
+	so it gets the lower of the two. That also stops the dialog contradicting the free-stock column
+	ops is reading it next to.
+	"""
+	pickable_qty = get_pickable_stock_qty(item_codes, company, exclude_warehouses=[afn_warehouse])
+	free_qty_map = get_free_qty_map(item_codes)
+
+	return {
+		item_code: min(
+			flt(pickable_qty.get(item_code)),
+			flt((free_qty_map.get(item_code) or {}).get("free_qty")),
+		)
+		for item_code in item_codes
+	}
+
+
 def resolve_transfer_shortfalls(transfer_rows, company, afn_warehouse, decisions=None):
 	"""Walk the expanded rows against the stock the shelves can actually give, and return the rows
 	to act on plus the ones that fall short.
@@ -935,15 +957,15 @@ def resolve_transfer_shortfalls(transfer_rows, company, afn_warehouse, decisions
 	Availability is spent row by row rather than compared against an untouched total: two Proxy SKUs
 	of the same item are two rows drawing on one pile, so a per-row comparison would promise the same
 	units twice. The AFN warehouse is left out of the pile — stock already at Amazon cannot be picked
-	and sent to Amazon — and qty already claimed by open Pick Lists is netted off by
-	``get_pickable_stock_qty``.
+	and sent to Amazon.
 
-	With no ``decisions`` this only reports, so the dialog and the documents that follow are built by
-	the same walk and cannot disagree. A short row nobody answered for is kept whole, which is what
-	happened before this check existed.
+	``decisions`` of None only reports, which is what the dialog asks for. Once decisions exist every
+	short row must be named in them: a row the user never answered for is flagged unanswered so the
+	caller can refuse, because stock that ran short while the dialog was open is exactly the case this
+	check exists to catch.
 	"""
 	item_codes = list({row["item_code"] for row in transfer_rows})
-	available = get_pickable_stock_qty(item_codes, company, exclude_warehouses=[afn_warehouse])
+	available = get_transfer_availability(item_codes, company, afn_warehouse)
 	item_details = get_transfer_item_details(item_codes)
 	whole_number_uoms = get_whole_number_uoms()
 
@@ -975,16 +997,16 @@ def resolve_transfer_shortfalls(transfer_rows, company, afn_warehouse, decisions
 				"requested_qty": flt(row["qty"]),
 				"available_qty": free_stock_qty,
 				"transferable_qty": transferable_qty,
+				"answered": decisions is not None and key in decisions,
 			}
 		)
 
-		accepted = None if decisions is None else decisions.get(key)
-		if accepted is None:
+		if decisions is None or key not in decisions:
 			available[item_code] = 0.0
 			kept_rows.append(row)
 			continue
 
-		if not accepted or transferable_qty <= 0:
+		if not decisions[key] or transferable_qty <= 0:
 			continue
 
 		available[item_code] = free_stock_qty - transferable_qty * conversion_factor
@@ -994,24 +1016,36 @@ def resolve_transfer_shortfalls(transfer_rows, company, afn_warehouse, decisions
 
 
 def get_shortfall_decisions(shortfall_decisions):
-	if not shortfall_decisions:
-		return None
-
+	"""Always a dict, never None: the create path decides on every short row or refuses to build."""
 	if isinstance(shortfall_decisions, str):
 		shortfall_decisions = frappe.parse_json(shortfall_decisions)
 
-	return {key: bool(cint(value)) for key, value in shortfall_decisions.items()}
+	return {key: bool(cint(value)) for key, value in (shortfall_decisions or {}).items()}
 
 
 def apply_transfer_shortfall_decisions(transfer_rows, company, afn_warehouse, shortfall_decisions):
-	transfer_rows = resolve_transfer_shortfalls(
+	kept_rows, shortfalls = resolve_transfer_shortfalls(
 		transfer_rows, company, afn_warehouse, get_shortfall_decisions(shortfall_decisions)
-	)[0]
+	)
 
-	if not transfer_rows:
+	# Refusing beats building: a row that went short after the dialog was answered is the very case
+	# this check exists to catch, and letting it through unanswered would request stock we do not
+	# have — the transfer that never closes.
+	unanswered_skus = [row["sku"] for row in shortfalls if not row["answered"]]
+	if unanswered_skus:
+		frappe.throw(
+			_("Stock ran short for {0} since the quantities were checked, so nothing was created.").format(
+				", ".join(sorted(set(unanswered_skus)))
+			)
+			+ " "
+			+ _("Try again to see what can be sent now."),
+			title=_("Stock Changed"),
+		)
+
+	if not kept_rows:
 		frappe.throw(_("Every short item was left out, so there is nothing to transfer"))
 
-	return transfer_rows
+	return kept_rows
 
 
 def create_material_request_doc(transfer_rows, company, target_warehouse):

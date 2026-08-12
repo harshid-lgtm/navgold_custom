@@ -37,6 +37,17 @@ def make_supplier(supplier_name):
 	return supplier.name
 
 
+def make_customer(customer_name):
+	customer = frappe.new_doc("Customer")
+	customer.customer_name = customer_name
+	# The site default is a group node, which Customer rejects.
+	customer.customer_group = frappe.get_all(
+		"Customer Group", filters={"is_group": 0}, limit=1, pluck="name"
+	)[0]
+	customer.insert()
+	return customer.name
+
+
 def make_supplier_price(item_code, supplier, price, uom="Nos"):
 	supplier_price = frappe.new_doc("Supplier Item Price and Stock")
 	# Skips the site-wide rank recompute this row would otherwise kick off synchronously in tests.
@@ -89,6 +100,7 @@ class TestForecastReportActions(IntegrationTestCase):
 
 		# Stands in for the configured AFN warehouse: stock sitting there is already at Amazon.
 		cls.afn_warehouse = create_test_warehouse("NG Forecast AFN")
+		cls.customer = make_customer(f"NG Customer {suffix}")
 
 	def select(self, rows):
 		"""rows: list of (item_code, uom, qty) -> (selected_items, sku_info) as the report sends them."""
@@ -120,6 +132,27 @@ class TestForecastReportActions(IntegrationTestCase):
 		item_code = make_item(f"NG-STOCK-{frappe.generate_hash(length=6)}", is_stock_item=1)
 		receive_stock(item_code, qty, self.warehouse, self.company)
 		return item_code
+
+	def make_draft_amazon_order(self, item_code, qty):
+		"""A draft Amazon Sales Order — sold but not yet submitted, so the report nets it off free qty."""
+		sales_order = frappe.new_doc("Sales Order")
+		sales_order.customer = self.customer
+		sales_order.company = self.company
+		sales_order.transaction_date = frappe.utils.today()
+		sales_order.delivery_date = frappe.utils.today()
+		sales_order.amazon_order_id = f"TEST-{frappe.generate_hash(length=8)}"
+		sales_order.append(
+			"items",
+			{
+				"item_code": item_code,
+				"qty": qty,
+				"rate": 10,
+				"warehouse": self.warehouse,
+				"delivery_date": frappe.utils.today(),
+			},
+		)
+		sales_order.insert()
+		return sales_order.name
 
 	def make_open_pick_list(self, item_code, qty):
 		pick_list = frappe.new_doc("Pick List")
@@ -344,13 +377,78 @@ class TestForecastReportActions(IntegrationTestCase):
 		self.assertEqual(shortfalls[0]["transferable_qty"], 0.0)
 		self.assertEqual(kept_rows, [])
 
-	def test_short_row_nobody_answered_for_is_still_requested_whole(self):
+	def test_short_row_nobody_answered_for_is_refused_instead_of_requested_whole(self):
+		# Stock that ran short while the dialog was open is exactly what this check exists to catch,
+		# so an unanswered short row must stop the transfer, not sail through at the full qty.
 		item_code = self.make_stocked_item(5)
 		transfer_rows = self.expand([(item_code, "Nos", 60)])
 
-		kept_rows = resolve_transfer_shortfalls(transfer_rows, self.company, self.afn_warehouse, {})[0]
+		with self.assertRaises(frappe.ValidationError) as raised:
+			apply_transfer_shortfall_decisions(transfer_rows, self.company, self.afn_warehouse, {})
+
+		self.assertIn("NG-SKU-0", str(raised.exception))
+
+	def test_an_unanswered_short_row_does_not_starve_an_answered_one(self):
+		item_code = self.make_stocked_item(10)
+		transfer_rows = self.expand([(item_code, "Nos", 30), (item_code, "Nos", 8)])
+
+		with self.assertRaises(frappe.ValidationError) as raised:
+			apply_transfer_shortfall_decisions(
+				transfer_rows, self.company, self.afn_warehouse, {f"NG-SKU-1::{item_code}": 1}
+			)
+
+		self.assertIn("NG-SKU-0", str(raised.exception))
+
+	def test_reporting_still_leaves_an_unanswered_row_whole(self):
+		# The dialog asks what is short before anyone has decided anything; that call must not throw.
+		item_code = self.make_stocked_item(5)
+		transfer_rows = self.expand([(item_code, "Nos", 60)])
+
+		kept_rows, shortfalls = resolve_transfer_shortfalls(transfer_rows, self.company, self.afn_warehouse)
 
 		self.assertEqual(kept_rows, transfer_rows)
+		self.assertFalse(shortfalls[0]["answered"])
+
+	def test_stock_reserved_for_an_amazon_order_is_not_offered_to_amazon(self):
+		item_code = self.make_stocked_item(20)
+		self.make_draft_amazon_order(item_code, 15)
+		transfer_rows = self.expand([(item_code, "Nos", 20)])
+
+		shortfalls = resolve_transfer_shortfalls(transfer_rows, self.company, self.afn_warehouse)[1]
+
+		# 20 on the shelf, 15 already sold on a draft Amazon order — the report calls 5 of them free
+		# and the transfer must not be offered the other 15.
+		self.assertEqual(shortfalls[0]["available_qty"], 5.0)
+
+	def test_exact_fit_is_covered_and_one_unit_more_is_short(self):
+		item_code = self.make_stocked_item(12)
+
+		self.assertEqual(
+			resolve_transfer_shortfalls(
+				self.expand([(item_code, "Nos", 12)]), self.company, self.afn_warehouse
+			)[1],
+			[],
+		)
+
+		shortfalls = resolve_transfer_shortfalls(
+			self.expand([(item_code, "Nos", 13)]), self.company, self.afn_warehouse
+		)[1]
+		self.assertEqual(shortfalls[0]["transferable_qty"], 12.0)
+
+	def test_purchase_order_qty_matches_the_trimmed_material_request(self):
+		item_code = self.make_stocked_item(7)
+		make_supplier_price(item_code, self.supplier_one, 1.5)
+		transfer_rows = self.expand([(item_code, "Nos", 60)])
+
+		kept_rows = apply_transfer_shortfall_decisions(
+			transfer_rows, self.company, self.afn_warehouse, {f"NG-SKU-0::{item_code}": 1}
+		)
+		material_request = create_material_request_doc(kept_rows, self.company, self.warehouse)[0]
+		created = submit_purchase_orders(plan_purchase_orders(kept_rows), self.company, self.warehouse)[0]
+
+		purchase_order = frappe.get_doc("Purchase Order", created[0])
+		self.assertEqual(material_request.items[0].stock_qty, 7.0)
+		self.assertEqual(purchase_order.items[0].stock_qty, 7.0)
 
 	def test_leaving_out_every_row_throws_instead_of_creating_an_empty_transfer(self):
 		item_code = self.make_stocked_item(2)
