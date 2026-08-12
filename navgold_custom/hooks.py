@@ -395,6 +395,9 @@ scheduler_events = {
 		"navgold_custom.navgold_custom.amazon_pricing.daily_order_stats.sync_daily_order_stats",
 		# Morning known-good price capture the panic-restore rolls back to
 		"navgold_custom.navgold_custom.doctype.amazon_pricing_snapshot.amazon_pricing_snapshot.daily_pricing_snapshot",
+		# erpnext's Close button writes status through db_set, so no document hook sees it;
+		# this sweep is what catches a closed order's demand
+		"navgold_custom.navgold_custom.custom_script.material_request.material_request.retire_settled_demand",
 	],
 }
 
