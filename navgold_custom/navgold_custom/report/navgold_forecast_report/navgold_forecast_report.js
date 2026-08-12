@@ -245,8 +245,6 @@ frappe.query_reports['Navgold Forecast Report'] = {
 	},
 };
 
-// Resolves to the decisions to send with the documents, or null when the user backs out.
-// An empty object means nothing was short — the caller carries on untouched.
 async function confirm_stock_shortfalls(valid_items) {
 	const response = await frappe.call({
 		method:
@@ -281,7 +279,6 @@ function show_stock_shortfall_dialog(shortfalls) {
 			secondary_action: () => dialog.hide(),
 		});
 
-		// Backing out of the dialog any other way is a cancel; a resolved promise ignores this.
 		dialog.$wrapper.on('hidden.bs.modal', () => resolve(null));
 
 		dialog

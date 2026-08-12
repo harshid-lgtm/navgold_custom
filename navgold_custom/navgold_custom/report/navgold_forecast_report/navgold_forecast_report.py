@@ -901,8 +901,6 @@ def expand_selection(selected_items, sku_info):
 
 
 def get_shortfall_key(row):
-	# The dialog answers per expanded row, and a row is one item under one Proxy SKU: the same item
-	# can appear under two SKUs (two pack sizes) and must be answerable separately.
 	return f"{row['sku']}::{row['item_code']}"
 
 
@@ -917,11 +915,6 @@ def get_transfer_item_details(item_codes):
 
 
 def get_transferable_qty(free_stock_qty, conversion_factor, whole_units_only):
-	"""What a short row can still send, in the row's own UOM.
-
-	A pack cannot be split, so a pack row rounds down to whole packs — half a pack on the Material
-	Request is the fraction that strands the transfer at pick and Stock Entry time.
-	"""
 	qty = flt(free_stock_qty) / (conversion_factor or 1)
 	if conversion_factor > 1 or whole_units_only:
 		return float(math.floor(qty))
@@ -929,15 +922,6 @@ def get_transferable_qty(free_stock_qty, conversion_factor, whole_units_only):
 
 
 def get_transfer_availability(item_codes, company, afn_warehouse):
-	"""Stock a transfer may draw on, per item.
-
-	Two numbers already answer "what is free", and they answer it differently: the pick list nets off
-	qty claimed by open Pick Lists, while the report's own free-stock column nets off stock reserved
-	against a Sales Order and qty held by draft Amazon orders. A transfer must respect both — stock
-	promised to a customer cannot go to Amazon, and neither can stock a picker is already walking to —
-	so it gets the lower of the two. That also stops the dialog contradicting the free-stock column
-	ops is reading it next to.
-	"""
 	pickable_qty = get_pickable_stock_qty(item_codes, company, exclude_warehouses=[afn_warehouse])
 	free_qty_map = get_free_qty_map(item_codes)
 
@@ -951,19 +935,6 @@ def get_transfer_availability(item_codes, company, afn_warehouse):
 
 
 def resolve_transfer_shortfalls(transfer_rows, company, afn_warehouse, decisions=None):
-	"""Walk the expanded rows against the stock the shelves can actually give, and return the rows
-	to act on plus the ones that fall short.
-
-	Availability is spent row by row rather than compared against an untouched total: two Proxy SKUs
-	of the same item are two rows drawing on one pile, so a per-row comparison would promise the same
-	units twice. The AFN warehouse is left out of the pile — stock already at Amazon cannot be picked
-	and sent to Amazon.
-
-	``decisions`` of None only reports, which is what the dialog asks for. Once decisions exist every
-	short row must be named in them: a row the user never answered for is flagged unanswered so the
-	caller can refuse, because stock that ran short while the dialog was open is exactly the case this
-	check exists to catch.
-	"""
 	item_codes = list({row["item_code"] for row in transfer_rows})
 	available = get_transfer_availability(item_codes, company, afn_warehouse)
 	item_details = get_transfer_item_details(item_codes)
@@ -1016,7 +987,6 @@ def resolve_transfer_shortfalls(transfer_rows, company, afn_warehouse, decisions
 
 
 def get_shortfall_decisions(shortfall_decisions):
-	"""Always a dict, never None: the create path decides on every short row or refuses to build."""
 	if isinstance(shortfall_decisions, str):
 		shortfall_decisions = frappe.parse_json(shortfall_decisions)
 
@@ -1028,9 +998,6 @@ def apply_transfer_shortfall_decisions(transfer_rows, company, afn_warehouse, sh
 		transfer_rows, company, afn_warehouse, get_shortfall_decisions(shortfall_decisions)
 	)
 
-	# Refusing beats building: a row that went short after the dialog was answered is the very case
-	# this check exists to catch, and letting it through unanswered would request stock we do not
-	# have — the transfer that never closes.
 	unanswered_skus = [row["sku"] for row in shortfalls if not row["answered"]]
 	if unanswered_skus:
 		frappe.throw(
@@ -1194,7 +1161,6 @@ def create_purchase_orders_from_forecast_report(selected_items: str | list[dict]
 
 @frappe.whitelist()
 def get_transfer_stock_shortfalls(selected_items: str | list[dict]):
-	"""The selected rows the shelves cannot cover in full, for the confirmation dialog."""
 	if isinstance(selected_items, str):
 		selected_items = frappe.parse_json(selected_items)
 
@@ -1265,8 +1231,6 @@ def create_purchase_orders_and_material_request_from_forecast_report(
 	if not warehouse:
 		frappe.throw(_("Warehouse not configured in Amazon SP API Settings"))
 
-	# Trimmed before the orders are planned so the Purchase Order buys what the Material Request
-	# actually moves — the two are built from one adjusted row list, as they always have been.
 	transfer_rows = apply_transfer_shortfall_decisions(
 		expand_selection(selected_items, sku_info), company, target_warehouse, shortfall_decisions
 	)
