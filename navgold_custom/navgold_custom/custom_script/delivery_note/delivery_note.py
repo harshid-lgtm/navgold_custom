@@ -82,10 +82,18 @@ def align_consolidated_bundle_packed_warehouse(doc, method):
 
 
 def complete_pick_list_when_sales_order_delivered(doc, method):
-	"""Consolidation-flow pick lists deliver from the consolidation warehouse, so ERPNext's
-	native per-row delivery tracking never sees their Delivery Notes and would leave them
-	Open forever. Complete them (or reopen on cancel) from the Sales Order's delivery_status,
-	which the native status updater has already refreshed before doc_events run."""
+	"""Drive a Delivery pick list's status from its Sales Orders rather than its own rows.
+
+	ERPNext credits Pick List Item.delivered_qty by joining a Delivery Note Item to one
+	pick_list_item. A Product Bundle ships as a single parent Delivery Note row, so only the one
+	component row it happens to link to is ever credited and every sibling component stays at zero
+	— the pick list can never reach Completed however much shipped. Consolidation-flow pick lists
+	are invisible to that tracking for a different reason (they deliver from the consolidation
+	warehouse), and both end the same way: a pick list stuck Open or Partly Delivered forever,
+	holding its tote, so the next pick list packed in that tote inherits its stale draft lines.
+
+	The Sales Order's delivery_status is the truth in both cases, and the native status updater has
+	already refreshed it before doc_events run."""
 	if doc.is_return:
 		return
 
@@ -104,20 +112,15 @@ def complete_pick_list_when_sales_order_delivered(doc, method):
 	if not candidate_pick_lists:
 		return
 
-	consolidation_pick_lists = frappe.get_all(
-		"Stock Entry",
-		filters={"pick_list": ["in", candidate_pick_lists], "docstatus": 1},
-		distinct=True,
-		pluck="pick_list",
-	)
-	if not consolidation_pick_lists:
+	candidate_pick_lists = get_untracked_pick_lists(candidate_pick_lists)
+	if not candidate_pick_lists:
 		return
 
 	sales_orders_by_pick_list = {}
 	for row in frappe.get_all(
 		"Pick List Item",
 		filters={
-			"parent": ["in", consolidation_pick_lists],
+			"parent": ["in", candidate_pick_lists],
 			"docstatus": 1,
 			"sales_order": ["is", "set"],
 		},
@@ -160,8 +163,49 @@ def complete_pick_list_when_sales_order_delivered(doc, method):
 					{"status": "Completed", "per_delivered": 100, "delivery_status": "Fully Delivered"},
 				)
 		elif current_status == "Completed" and not fully_delivered:
+			# reset rather than recompute from the rows: ERPNext rolls its own delivered_qty back
+			# inside on_cancel, so at doc_event time the rows still read as delivered
 			frappe.db.set_value(
 				"Pick List",
 				pick_list_name,
 				{"status": "Open", "per_delivered": 0, "delivery_status": "Not Delivered"},
 			)
+
+
+def get_untracked_pick_lists(pick_list_names):
+	"""Of these pick lists, the ones ERPNext's per-row delivery tracking cannot settle on its own.
+
+	Two kinds, and only these two — an ordinary pick list is left to ERPNext, which tracks it row by
+	row and is right about it:
+
+	- **bundle rows**: a Product Bundle ships as a single parent Delivery Note row, so only the one
+	  component row it links to is credited and its siblings stay at zero for good;
+	- **consolidation rows**: these deliver from the consolidation warehouse, which the native
+	  tracking never sees.
+	"""
+	bundle_pick_lists = frappe.get_all(
+		"Pick List Item",
+		filters={
+			"parent": ["in", pick_list_names],
+			"docstatus": 1,
+			"product_bundle_item": ["is", "set"],
+		},
+		distinct=True,
+		pluck="parent",
+	)
+	consolidation_pick_lists = frappe.get_all(
+		"Stock Entry",
+		filters={"pick_list": ["in", pick_list_names], "docstatus": 1},
+		distinct=True,
+		pluck="pick_list",
+	)
+
+	untracked = set(bundle_pick_lists) | set(consolidation_pick_lists)
+	if not untracked:
+		return []
+
+	return frappe.get_all(
+		"Pick List",
+		filters={"name": ["in", list(untracked)], "purpose": "Delivery", "docstatus": 1},
+		pluck="name",
+	)
