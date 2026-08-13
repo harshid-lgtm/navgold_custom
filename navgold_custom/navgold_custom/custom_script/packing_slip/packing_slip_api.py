@@ -315,21 +315,40 @@ def extract_label_from_purchase(purchase_payload: dict) -> tuple:
 	return None, None, None
 
 
+def get_mandatory_document_types(spec: dict) -> list:
+	print_options = (spec.get("printOptions") or [{}])[0]
+	return sorted(
+		detail.get("name")
+		for detail in (print_options.get("supportedDocumentDetails") or [])
+		if detail.get("isMandatory")
+	)
+
+
+def select_document_spec(specs: list) -> dict:
+	"""Pick the spec that yields the label on its own. Evri and DPD mark both LABEL and PACKSLIP
+	mandatory on their PDF spec and offer file joining as [True] only, so a PDF from them is always
+	the label glued to a packing slip — their label-only specs are PNG and ZPL. Amazon Shipping
+	offers a label-only PDF. Fall back to the old PDF-first pick for a carrier that offers no
+	label-only spec at all."""
+	label_only_specs = [spec for spec in specs if get_mandatory_document_types(spec) == ["LABEL"]]
+	candidates = label_only_specs or specs
+
+	for preferred_format in ("PDF", "PNG", "ZPL"):
+		for spec in candidates:
+			if spec.get("format") == preferred_format:
+				return spec
+
+	return candidates[0]
+
+
 def build_document_spec_from_rate(rate: dict) -> dict:
 	specs = rate.get("supportedDocumentSpecifications") or []
-	pdf_spec = None
-	for spec in specs:
-		if spec.get("format") == "PDF":
-			pdf_spec = spec
-			break
-
-	if not pdf_spec:
-		pdf_spec = specs[0] if specs else {}
-
-	if not pdf_spec:
+	if not specs:
 		frappe.throw(_("No document specifications returned by Amazon for this rate."))
 
-	print_options = (pdf_spec.get("printOptions") or [{}])[0]
+	selected_spec = select_document_spec(specs)
+
+	print_options = (selected_spec.get("printOptions") or [{}])[0]
 	dpis = print_options.get("supportedDPIs") or []
 	page_layouts = print_options.get("supportedPageLayouts") or []
 	joining_options = print_options.get("supportedFileJoiningOptions") or [False]
@@ -342,8 +361,8 @@ def build_document_spec_from_rate(rate: dict) -> dict:
 	need_file_joining = False if False in joining_options else bool(joining_options[0])
 
 	result = {
-		"format": pdf_spec.get("format", "PDF"),
-		"size": pdf_spec.get("size", {"length": 6.0, "unit": "INCH", "width": 4.0}),
+		"format": selected_spec.get("format", "PDF"),
+		"size": selected_spec.get("size", {"length": 6.0, "unit": "INCH", "width": 4.0}),
 		"needFileJoining": need_file_joining,
 		"requestedDocumentTypes": document_types or ["LABEL"],
 	}
