@@ -332,17 +332,19 @@ def build_document_spec_from_rate(rate: dict) -> dict:
 	print_options = (pdf_spec.get("printOptions") or [{}])[0]
 	dpis = print_options.get("supportedDPIs") or []
 	page_layouts = print_options.get("supportedPageLayouts") or []
-	file_joining = print_options.get("supportedFileJoiningOptions") or [False]
+	joining_options = print_options.get("supportedFileJoiningOptions") or [False]
 	document_types = [
 		detail.get("name")
 		for detail in (print_options.get("supportedDocumentDetails") or [])
 		if detail.get("isMandatory")
 	]
 
+	need_file_joining = False if False in joining_options else bool(joining_options[0])
+
 	result = {
 		"format": pdf_spec.get("format", "PDF"),
 		"size": pdf_spec.get("size", {"length": 6.0, "unit": "INCH", "width": 4.0}),
-		"needFileJoining": file_joining[0] if file_joining else False,
+		"needFileJoining": need_file_joining,
 		"requestedDocumentTypes": document_types or ["LABEL"],
 	}
 	if dpis:
