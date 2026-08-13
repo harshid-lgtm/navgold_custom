@@ -2,7 +2,7 @@ import math
 
 import frappe
 from frappe.query_builder import DocType, Order
-from frappe.query_builder.functions import Sum
+from frappe.query_builder.functions import Coalesce, Sum
 from frappe.utils import flt
 from frappe.utils.caching import redis_cache
 
@@ -179,22 +179,36 @@ def allocate_pack_stock(available_qty: float, pack_size_by_proxy_sku: dict[str, 
 			return allocation
 
 
-def get_mfn_pack_pool_map(item_codes: list[str]) -> dict[str, dict[str, float]]:
+def get_warehouse_pack_pool_map(item_codes: list[str]) -> dict[str, dict[str, float]]:
 	if not item_codes:
 		return {}
 
-	proxy_sku_dt = DocType("Proxy SKU")
-	mfn_rows = (
-		frappe.qb.from_(proxy_sku_dt)
-		.select(proxy_sku_dt.name, proxy_sku_dt.item, proxy_sku_dt.uom, proxy_sku_dt.is_active)
-		.where((proxy_sku_dt.item.isin(item_codes)) & (proxy_sku_dt.is_fba == 0))
-	).run(as_dict=True)
+	# An FBA SKU is held out of the pool only while Amazon actually holds stock for it: it sells
+	# that stock from Amazon's warehouse and must not dilute ours. Once Amazon runs dry it falls
+	# back to shipping off our shelves, so it claims packs alongside the MFN SKUs.
+	# afn_stock is only refreshed while the sync is on; off means it is stale, so treat FBA as out
+	# of stock — the same stance select_strategy takes.
+	sync_on = frappe.get_cached_doc("Navgold Settings").enable_afn_stock_sync
 
-	if not mfn_rows:
+	proxy_sku_dt = DocType("Proxy SKU")
+	query = frappe.qb.from_(proxy_sku_dt).select(
+		proxy_sku_dt.name, proxy_sku_dt.item, proxy_sku_dt.uom, proxy_sku_dt.is_active
+	)
+	if sync_on:
+		query = query.where(
+			(proxy_sku_dt.item.isin(item_codes))
+			& ((proxy_sku_dt.is_fba == 0) | (Coalesce(proxy_sku_dt.afn_stock, 0) <= 0))
+		)
+	else:
+		query = query.where(proxy_sku_dt.item.isin(item_codes))
+
+	claimant_rows = query.run(as_dict=True)
+
+	if not claimant_rows:
 		return {}
 
 	rows_by_item = {}
-	for row in mfn_rows:
+	for row in claimant_rows:
 		rows_by_item.setdefault(row.item, []).append(row)
 
 	# An item with no active SKU keeps the historical "pool of one" behaviour rather than
@@ -235,7 +249,7 @@ def get_pack_allocation_map(
 		return {}
 
 	allocation_map = {}
-	for item_code, pack_size_by_proxy_sku in get_mfn_pack_pool_map(list(available_qty_by_item)).items():
+	for item_code, pack_size_by_proxy_sku in get_warehouse_pack_pool_map(list(available_qty_by_item)).items():
 		sellable_qty = apply_stock_reserve(available_qty_by_item.get(item_code, 0), reserve_percentage)
 		allocation_map.update(allocate_pack_stock(sellable_qty, pack_size_by_proxy_sku))
 
