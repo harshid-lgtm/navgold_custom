@@ -97,8 +97,8 @@ def get_stock_info(proxy_sku: str) -> dict:
 	else:
 		# mfn_stock stays the raw base-unit free qty: the feed builder publishes the pack count itself.
 		mfn_stock = get_free_qty_map([proxy.item]).get(proxy.item, {}).get("free_qty", 0)
-		# Only active MFN SKUs draw from the physical warehouse stock; FBA SKUs sell from Amazon's
-		# own inventory, so they are not dealt whole packs out of the warehouse pool.
+		# An FBA SKU is dealt warehouse packs only once Amazon has run dry on it, so a SKU Amazon
+		# still stocks cannot take packs away from the SKUs that ship off our own shelves.
 		sellable_mfn_stock = get_pack_allocation_map({proxy.item: mfn_stock}).get(proxy_sku, 0)
 
 	restock_info = check_pending_restock(proxy.item)

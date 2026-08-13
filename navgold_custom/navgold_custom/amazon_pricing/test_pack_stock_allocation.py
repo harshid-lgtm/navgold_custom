@@ -4,9 +4,12 @@
 from unittest.mock import patch
 
 import frappe
-from frappe.tests import IntegrationTestCase
+from frappe.tests import IntegrationTestCase, change_settings
 
-from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import get_sku_inventory_data
+from navgold_custom.navgold_custom.amazon_pricing.amazon_feed_builder import (
+	build_proxy_sku_info_map,
+	get_sku_inventory_data,
+)
 from navgold_custom.navgold_custom.amazon_pricing.strategy_selector import (
 	get_stock_info,
 	get_stock_info_batch,
@@ -51,6 +54,13 @@ def create_pack_pool(pack_sizes, template_name):
 		proxy_sku_by_pack_size[pack_size] = proxy_sku.name
 
 	return item.name, proxy_sku_by_pack_size
+
+
+def make_fba(proxy_sku_name, afn_stock):
+	frappe.db.set_value(
+		"Proxy SKU", proxy_sku_name, {"is_fba": 1, "afn_stock": afn_stock}, update_modified=False
+	)
+	frappe.clear_document_cache("Proxy SKU", proxy_sku_name)
 
 
 class TestAllocatePackStock(IntegrationTestCase):
@@ -213,21 +223,91 @@ class TestPackStockShare(IntegrationTestCase):
 
 		self.assertEqual(total_stock_by_pack_size, {2: 1, 3: 1})
 
-	def test_fba_siblings_do_not_take_warehouse_packs(self):
+	@change_settings("Navgold Settings", {"enable_afn_stock_sync": 1})
+	def test_fba_sibling_holding_amazon_stock_takes_no_warehouse_packs(self):
+		# Ticket shape: one item listed twice, a pack of 2 on FBA and a pack of 3 on MFN.
 		item_code, proxy_sku_by_pack_size = create_pack_pool([2, 3], self.template_name)
+		make_fba(proxy_sku_by_pack_size[2], afn_stock=5)
 
-		fba_proxy_sku = frappe.new_doc("Proxy SKU")
-		fba_proxy_sku.item = item_code
-		fba_proxy_sku.uom = "Nos"
-		fba_proxy_sku.is_fba = 1
-		fba_proxy_sku.insert()
-
-		with patch(FREE_QTY_TARGET, return_value={item_code: {"free_qty": 5, "actual_qty": 5}}):
-			total_stock_by_pack_size = {
-				pack_size: get_stock_info(proxy_sku)["total_stock"]
+		with patch(FREE_QTY_TARGET, return_value={item_code: {"free_qty": 21, "actual_qty": 21}}):
+			stock_info_by_pack_size = {
+				pack_size: get_stock_info(proxy_sku)
 				for pack_size, proxy_sku in proxy_sku_by_pack_size.items()
 			}
-			fba_stock_info = get_stock_info(fba_proxy_sku.name)
 
-		self.assertEqual(total_stock_by_pack_size, {2: 1, 3: 1})
-		self.assertEqual(fba_stock_info["total_stock"], 0)
+		# Amazon still holds stock for the pack of 2, so it sells from there and leaves all 21
+		# warehouse units to the pack of 3 — seven whole packs.
+		self.assertEqual(stock_info_by_pack_size[3]["total_stock"], 7)
+		self.assertEqual(stock_info_by_pack_size[2]["total_stock"], 5)
+
+		pricing = frappe.get_doc("Amazon Product Pricing", {"proxy_sku": proxy_sku_by_pack_size[2]})
+		self.assertEqual(
+			select_strategy(pricing, stock_info=stock_info_by_pack_size[2]), pricing.fba_strategy
+		)
+
+	@change_settings("Navgold Settings", {"enable_afn_stock_sync": 1})
+	def test_fba_sibling_out_of_amazon_stock_falls_back_to_warehouse_packs(self):
+		item_code, proxy_sku_by_pack_size = create_pack_pool([2, 3], self.template_name)
+		make_fba(proxy_sku_by_pack_size[2], afn_stock=0)
+
+		with patch(FREE_QTY_TARGET, return_value={item_code: {"free_qty": 21, "actual_qty": 21}}):
+			stock_info_by_pack_size = {
+				pack_size: get_stock_info(proxy_sku)
+				for pack_size, proxy_sku in proxy_sku_by_pack_size.items()
+			}
+
+		# Amazon has run dry, so the pack of 2 ships off our shelves and shares the 21 units:
+		# four rounds of 2 + 3 costs 20, and the odd unit buys nothing.
+		self.assertEqual(stock_info_by_pack_size[2]["total_stock"], 4)
+		self.assertEqual(stock_info_by_pack_size[3]["total_stock"], 4)
+
+		# Warehouse stock beats the supplier, so it prices from Prime-from-warehouse, not backorder.
+		pricing = frappe.get_doc("Amazon Product Pricing", {"proxy_sku": proxy_sku_by_pack_size[2]})
+		self.assertEqual(
+			select_strategy(pricing, stock_info=stock_info_by_pack_size[2]), pricing.sfp_strategy
+		)
+
+	@change_settings("Navgold Settings", {"enable_afn_stock_sync": 1})
+	def test_feed_ships_the_fallback_off_our_own_channel(self):
+		item_code, proxy_sku_by_pack_size = create_pack_pool([2, 3], self.template_name)
+		make_fba(proxy_sku_by_pack_size[2], afn_stock=0)
+
+		pricing = frappe.get_doc("Amazon Product Pricing", {"proxy_sku": proxy_sku_by_pack_size[2]})
+		pricing.active_strategy = pricing.sfp_strategy
+		with patch(FREE_QTY_TARGET, return_value={item_code: {"free_qty": 21, "actual_qty": 21}}):
+			inventory_data = get_sku_inventory_data(pricing)
+
+		# The listing has to move to merchant-fulfilled for the warehouse packs to be sellable.
+		self.assertEqual(inventory_data["fulfillment_channel"], "DEFAULT")
+		self.assertFalse(inventory_data["is_fba"])
+		self.assertEqual(inventory_data["quantity"], 4)
+
+	@change_settings("Navgold Settings", {"enable_afn_stock_sync": 0})
+	def test_sync_off_lets_the_fba_sibling_claim_packs(self):
+		item_code, proxy_sku_by_pack_size = create_pack_pool([2, 3], self.template_name)
+		# With the sync off afn_stock is never refreshed, so a stale non-zero value must not park
+		# the SKU out of the pool forever — it is treated as out of FBA stock, as select_strategy does.
+		make_fba(proxy_sku_by_pack_size[2], afn_stock=5)
+
+		with patch(FREE_QTY_TARGET, return_value={item_code: {"free_qty": 21, "actual_qty": 21}}):
+			stock_info_by_pack_size = {
+				pack_size: get_stock_info(proxy_sku)
+				for pack_size, proxy_sku in proxy_sku_by_pack_size.items()
+			}
+
+		self.assertEqual(stock_info_by_pack_size[2]["total_stock"], 4)
+		self.assertEqual(stock_info_by_pack_size[3]["total_stock"], 4)
+
+	@change_settings("Navgold Settings", {"enable_afn_stock_sync": 1})
+	def test_pool_size_counts_the_fallen_back_fba_sibling(self):
+		_item_code, proxy_sku_by_pack_size = create_pack_pool([2, 3], self.template_name)
+		make_fba(proxy_sku_by_pack_size[2], afn_stock=0)
+
+		# pool_size divides bundle and supplier quantities; it has to see the same claimants the
+		# pack allocation does, or the two disagree about who is sharing the stock.
+		info_map = build_proxy_sku_info_map(list(proxy_sku_by_pack_size.values()))
+		self.assertEqual(info_map[proxy_sku_by_pack_size[2]]["pool_size"], 2)
+
+		make_fba(proxy_sku_by_pack_size[2], afn_stock=5)
+		info_map = build_proxy_sku_info_map(list(proxy_sku_by_pack_size.values()))
+		self.assertEqual(info_map[proxy_sku_by_pack_size[3]]["pool_size"], 1)

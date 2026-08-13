@@ -7,7 +7,6 @@ from functools import partial
 
 import frappe
 from frappe.query_builder import DocType
-from frappe.query_builder.functions import Count
 from frappe.utils import add_days, fmt_money, getdate, now_datetime, today
 from frappe.utils.caching import redis_cache
 from frappe.utils.data import cint, cstr, flt, orjson_dumps
@@ -40,6 +39,7 @@ from navgold_custom.navgold_custom.utils import (
 	calculate_adjusted_qty,
 	get_conversion_factor,
 	get_pack_allocation_map,
+	get_warehouse_pack_pool_map,
 )
 
 SHIPPING_GROUPS = {
@@ -318,18 +318,11 @@ def build_proxy_sku_info_map(proxy_sku_names: list) -> dict:
 	proxy_sku_map = {row.name: row for row in proxy_sku_rows}
 
 	item_codes = list({row.item for row in proxy_sku_rows if row.item})
-	proxy_sku_dt = DocType("Proxy SKU")
-	# Only active MFN SKUs share the physical warehouse stock; FBA SKUs sell from Amazon's own
-	# inventory and must not dilute the pool.
-	pool_counts = (
-		frappe.qb.from_(proxy_sku_dt)
-		.select(proxy_sku_dt.item, Count("*").as_("pool_size"))
-		.where(
-			(proxy_sku_dt.item.isin(item_codes)) & (proxy_sku_dt.is_active == 1) & (proxy_sku_dt.is_fba == 0)
-		)
-		.groupby(proxy_sku_dt.item)
-	).run(as_dict=True)
-	pool_size_map = {row.item: row.pool_size for row in pool_counts}
+	# Same claimant rule the pack allocation runs on, so the divisor here can never disagree with
+	# the packs actually dealt out.
+	pool_size_map = {
+		item_code: len(claimants) for item_code, claimants in get_warehouse_pack_pool_map(item_codes).items()
+	}
 
 	# UOM conversion factors: one batch query
 	uom_conversion_dt = DocType("UOM Conversion Detail")
@@ -421,10 +414,7 @@ def get_sku_inventory_data(
 		item_code = proxy_sku_row.get("item")
 		proxy_uom = proxy_sku_row.get("uom")
 		sku_shipping_group_choice = proxy_sku_row.get("merchant_shipping_group")
-		# FBA SKUs sell from Amazon's own inventory, so only active MFN SKUs share the warehouse pool.
-		pool_size = (
-			frappe.db.count("Proxy SKU", filters={"item": item_code, "is_active": 1, "is_fba": 0}) or 1
-		)
+		pool_size = len(get_warehouse_pack_pool_map([item_code]).get(item_code, {})) or 1
 		pack_size = (
 			flt(
 				frappe.db.get_value(
