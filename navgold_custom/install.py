@@ -61,4 +61,11 @@ def before_tests():
 		if frappe.db.exists("Price List", "Standard Buying"):
 			frappe.db.set_single_value("Navgold Settings", "buying_price_list", "Standard Buying")
 
+		# the order-sync tests build Sales Orders off these two, and skip themselves when they are
+		# blank — which on a bare CI site is every run
+		warehouse = frappe.db.get_value("Warehouse", {"company": "Navgold Test", "is_group": 0})
+		if warehouse:
+			frappe.db.set_single_value("Amazon SP API Settings", "company", "Navgold Test")
+			frappe.db.set_single_value("Amazon SP API Settings", "warehouse", warehouse)
+
 	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- persist seed data before the test run begins
