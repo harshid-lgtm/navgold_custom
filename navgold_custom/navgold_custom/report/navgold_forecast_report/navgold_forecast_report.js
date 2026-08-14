@@ -155,14 +155,11 @@ frappe.query_reports['Navgold Forecast Report'] = {
 				);
 				if (!confirmed) return;
 
-				const shortfall_decisions = await confirm_stock_shortfalls(valid_items);
-				if (!shortfall_decisions) return;
-
 				try {
 					const response = await frappe.call({
 						method:
 							'navgold_custom.navgold_custom.report.navgold_forecast_report.navgold_forecast_report.create_purchase_orders_and_material_request_from_forecast_report',
-						args: { selected_items: valid_items, shortfall_decisions },
+						args: { selected_items: valid_items },
 						freeze: true,
 						freeze_message: __('Creating PO + Material Request...'),
 					});

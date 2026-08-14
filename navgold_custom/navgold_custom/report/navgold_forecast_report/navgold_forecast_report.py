@@ -1209,9 +1209,7 @@ def create_material_requests_from_forecast_report(
 
 
 @frappe.whitelist()
-def create_purchase_orders_and_material_request_from_forecast_report(
-	selected_items: str, shortfall_decisions: str | dict | None = None
-):
+def create_purchase_orders_and_material_request_from_forecast_report(selected_items: str):
 	if isinstance(selected_items, str):
 		selected_items = frappe.parse_json(selected_items)
 
@@ -1231,9 +1229,8 @@ def create_purchase_orders_and_material_request_from_forecast_report(
 	if not warehouse:
 		frappe.throw(_("Warehouse not configured in Amazon SP API Settings"))
 
-	transfer_rows = apply_transfer_shortfall_decisions(
-		expand_selection(selected_items, sku_info), company, target_warehouse, shortfall_decisions
-	)
+	# Not trimmed to the shelves: this is the buy path, so the stock is not here yet.
+	transfer_rows = expand_selection(selected_items, sku_info)
 
 	# Resolve the orders before the transfer is submitted: a selection with nothing to buy has to
 	# fail while there is still no submitted Material Request to strand.

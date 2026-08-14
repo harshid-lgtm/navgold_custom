@@ -1,6 +1,8 @@
 # Copyright (c) 2026, developers@buildwithhussain.com and Contributors
 # See license.txt
 
+from unittest.mock import patch
+
 import frappe
 from frappe.tests import IntegrationTestCase
 
@@ -16,6 +18,7 @@ from navgold_custom.navgold_custom.custom_script.stock_entry.test_fba_clearing i
 from navgold_custom.navgold_custom.report.navgold_forecast_report.navgold_forecast_report import (
 	apply_transfer_shortfall_decisions,
 	create_material_request_doc,
+	create_purchase_orders_and_material_request_from_forecast_report,
 	expand_selection,
 	plan_purchase_orders,
 	resolve_transfer_shortfalls,
@@ -126,6 +129,22 @@ class TestForecastReportActions(IntegrationTestCase):
 		parent = make_item(f"NG-OWN-B-{suffix}", is_stock_item=0)
 		make_bundle(parent, list(zip(components, component_quantities, strict=True)))
 		return parent, components
+
+	def point_amazon_settings_at_test_warehouses(self):
+		# change_settings cannot drive this single: its controller overrides save() without the
+		# ignore_permissions the helper passes.
+		settings = {
+			"company": self.company,
+			"warehouse": self.warehouse,
+			"afn_warehouse": self.afn_warehouse,
+		}
+		for fieldname, value in settings.items():
+			previous = frappe.db.get_single_value("Amazon SP API Settings", fieldname)
+			self.addCleanup(frappe.db.set_single_value, "Amazon SP API Settings", fieldname, previous)
+			frappe.db.set_single_value("Amazon SP API Settings", fieldname, value)
+
+		self.addCleanup(frappe.clear_document_cache, "Amazon SP API Settings")
+		frappe.clear_document_cache("Amazon SP API Settings")
 
 	def make_stocked_item(self, qty):
 		"""An item nobody else in the class has stocked, so availability is exactly ``qty``."""
@@ -435,20 +454,29 @@ class TestForecastReportActions(IntegrationTestCase):
 		)[1]
 		self.assertEqual(shortfalls[0]["transferable_qty"], 12.0)
 
-	def test_purchase_order_qty_matches_the_trimmed_material_request(self):
+	def test_buy_path_orders_the_full_qty_the_shelves_cannot_cover(self):
+		# Through the endpoint, not the helpers: the shelf trim this guards against lived there.
 		item_code = self.make_stocked_item(7)
 		make_supplier_price(item_code, self.supplier_one, 1.5)
-		transfer_rows = self.expand([(item_code, "Nos", 60)])
+		selected_items, sku_info = self.select([(item_code, "Nos", 60)])
 
-		kept_rows = apply_transfer_shortfall_decisions(
-			transfer_rows, self.company, self.afn_warehouse, {f"NG-SKU-0::{item_code}": 1}
-		)
-		material_request = create_material_request_doc(kept_rows, self.company, self.warehouse)[0]
-		created = submit_purchase_orders(plan_purchase_orders(kept_rows), self.company, self.warehouse)[0]
+		self.point_amazon_settings_at_test_warehouses()
 
-		purchase_order = frappe.get_doc("Purchase Order", created[0])
-		self.assertEqual(material_request.items[0].stock_qty, 7.0)
-		self.assertEqual(purchase_order.items[0].stock_qty, 7.0)
+		with (
+			patch(
+				"navgold_custom.navgold_custom.report.navgold_forecast_report."
+				"navgold_forecast_report.build_sku_info",
+				return_value=sku_info,
+			),
+		):
+			response = create_purchase_orders_and_material_request_from_forecast_report(
+				frappe.as_json(selected_items)
+			)
+
+		material_request = frappe.get_doc("Material Request", response["material_request"])
+		purchase_order = frappe.get_doc("Purchase Order", response["purchase_orders"][0])
+		self.assertEqual(material_request.items[0].stock_qty, 60.0)
+		self.assertEqual(purchase_order.items[0].stock_qty, 60.0)
 
 	def test_leaving_out_every_row_throws_instead_of_creating_an_empty_transfer(self):
 		item_code = self.make_stocked_item(2)
