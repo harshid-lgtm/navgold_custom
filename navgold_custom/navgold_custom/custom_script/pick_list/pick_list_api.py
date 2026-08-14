@@ -187,7 +187,7 @@ def map_sales_orders_to_pick_list(sales_order_names: str, target_pr_doc_json: st
 
 @frappe.whitelist()
 def create_fba_transfer_stock_entry(pick_list_name: str) -> dict:
-	existing = frappe.db.exists("Stock Entry", {"pick_list": pick_list_name})
+	existing = frappe.db.exists("Stock Entry", {"pick_list": pick_list_name, "docstatus": ["<", 2]})
 	if existing:
 		return frappe.get_cached_doc("Stock Entry", existing).as_dict()
 
