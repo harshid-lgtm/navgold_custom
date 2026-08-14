@@ -306,6 +306,12 @@ class AmazonRepository:
 		order_id = order.get("AmazonOrderId")
 		amazon_order_amount = order.get("OrderTotal", {}).get("Amount", 0)
 
+		# a cancelled order is not demand: "Canceled" is absent from UNAUTHORISED_ORDER_STATUSES, so
+		# without this the order sync submits it, reserving stock and raising a purchase request
+		# nothing will ever settle
+		if order.get("OrderStatus") in CLOSED_ORDER_STATUSES:
+			return None
+
 		existing_so = frappe.db.get_value(
 			"Sales Order",
 			{"amazon_order_id": order_id, "docstatus": ["!=", 2]},
@@ -509,14 +515,19 @@ class AmazonRepository:
 		rows = frappe.get_all(
 			"Sales Order",
 			filters={"amazon_order_id": ["in", order_ids], "docstatus": ["!=", 2]},
-			fields=["name", "docstatus", "amazon_order_status", "amazon_order_id"],
+			fields=["name", "docstatus", "status", "amazon_order_status", "amazon_order_id"],
 		)
 		return {row.amazon_order_id: row for row in rows}
 
 	def update_order_status(self, order, existing_so):
 		amazon_status = order.get("OrderStatus")
 
-		if not existing_so or existing_so.amazon_order_status == amazon_status:
+		if not existing_so:
+			return None
+
+		if existing_so.amazon_order_status == amazon_status and not self.is_closed_but_open(
+			existing_so, amazon_status
+		):
 			return None
 
 		with filelock(f"amazon_order_{order.get('AmazonOrderId')}", timeout=60):
@@ -531,6 +542,16 @@ class AmazonRepository:
 
 			frappe.db.set_value("Sales Order", existing_so.name, "amazon_order_status", amazon_status)
 			return existing_so.name
+
+	@staticmethod
+	def is_closed_but_open(existing_so, amazon_status):
+		# the status field is written before the order is closed, so a failed close would otherwise
+		# short-circuit on the next refresh and strand the order open forever
+		return (
+			amazon_status in CLOSED_ORDER_STATUSES
+			and existing_so.docstatus == 1
+			and existing_so.status != "Closed"
+		)
 
 	def sync_order(self, order, existing_so):
 		if existing_so:

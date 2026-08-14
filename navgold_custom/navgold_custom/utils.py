@@ -118,6 +118,10 @@ def get_draft_amazon_order_qty_map(item_codes: list[str]) -> dict[str, float]:
 	if not item_codes:
 		return {}
 
+	# imported inside the function: amazon_repository pulls in the SP-API client and the alert
+	# stack at module level, and every caller of utils would carry that weight
+	from navgold_custom.navgold_custom.amazon_repository import CLOSED_ORDER_STATUSES
+
 	sales_order = DocType("Sales Order")
 	sales_order_item = DocType("Sales Order Item")
 
@@ -131,6 +135,9 @@ def get_draft_amazon_order_qty_map(item_codes: list[str]) -> dict[str, float]:
 			& (sales_order.docstatus == 0)
 			& (sales_order.amazon_order_id.notnull())
 			& (sales_order.amazon_order_id != "")
+			# a draft stays a draft once Amazon cancels it — nothing submits or deletes it, so
+			# without this it eats free qty forever
+			& Coalesce(sales_order.amazon_order_status, "").notin(list(CLOSED_ORDER_STATUSES))
 		)
 		.groupby(sales_order_item.item_code)
 	).run(as_dict=True)
