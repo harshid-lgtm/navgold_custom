@@ -102,92 +102,96 @@ frappe.query_reports['Navgold Forecast Report'] = {
 			return valid_items;
 		};
 
-		report.page.add_inner_button(__('Create Material Request'), () => {
+		report.page.add_inner_button(__('Create Material Request'), async () => {
 			const valid_items = get_valid_items();
 			if (!valid_items) return;
 
-			frappe.confirm(
+			const confirmed = await navgold.confirm_dialog(
 				__('Create Material Request for {0} items?', [valid_items.length]),
-				async () => {
-					try {
-						const response = await frappe.call({
-							method:
-								'navgold_custom.navgold_custom.report.navgold_forecast_report.navgold_forecast_report.create_material_requests_from_forecast_report',
-							args: { selected_items: valid_items },
-							freeze: true,
-							freeze_message: __('Creating Material Request...'),
-						});
-
-						if (response.message?.success) {
-							const mr_name = response.message.material_request;
-							frappe.msgprint({
-								title: __('Created Successfully'),
-								message: `MR: <a href="/app/material-request/${mr_name}" target="_blank">${mr_name}</a>`,
-								indicator: 'green',
-							});
-							forecast_report_state.edited_quantities = {};
-							report.refresh();
-						}
-					} catch (error) {
-						frappe.msgprint({
-							title: __('Error'),
-							message: __(
-								'Failed to create Material Request. Check error log.',
-							),
-							indicator: 'red',
-						});
-					}
-				},
 			);
+			if (!confirmed) return;
+
+			const shortfall_decisions = await confirm_stock_shortfalls(valid_items);
+			if (!shortfall_decisions) return;
+
+			try {
+				const response = await frappe.call({
+					method:
+						'navgold_custom.navgold_custom.report.navgold_forecast_report.navgold_forecast_report.create_material_requests_from_forecast_report',
+					args: { selected_items: valid_items, shortfall_decisions },
+					freeze: true,
+					freeze_message: __('Creating Material Request...'),
+				});
+
+				if (response.message?.success) {
+					const mr_name = response.message.material_request;
+					frappe.msgprint({
+						title: __('Created Successfully'),
+						message: `MR: <a href="/app/material-request/${mr_name}" target="_blank">${mr_name}</a>`,
+						indicator: 'green',
+					});
+					forecast_report_state.edited_quantities = {};
+					report.refresh();
+				}
+			} catch (error) {
+				frappe.msgprint({
+					title: __('Error'),
+					message: __('Failed to create Material Request. Check error log.'),
+					indicator: 'red',
+				});
+			}
 		});
 
-		report.page.add_inner_button(__('Create PO + Material Request'), () => {
-			const valid_items = get_valid_items();
-			if (!valid_items) return;
+		report.page.add_inner_button(
+			__('Create PO + Material Request'),
+			async () => {
+				const valid_items = get_valid_items();
+				if (!valid_items) return;
 
-			frappe.confirm(
-				__('Create Purchase Order(s) and Material Request for {0} items?', [
-					valid_items.length,
-				]),
-				async () => {
-					try {
-						const response = await frappe.call({
-							method:
-								'navgold_custom.navgold_custom.report.navgold_forecast_report.navgold_forecast_report.create_purchase_orders_and_material_request_from_forecast_report',
-							args: { selected_items: valid_items },
-							freeze: true,
-							freeze_message: __('Creating PO + Material Request...'),
-						});
+				const confirmed = await navgold.confirm_dialog(
+					__('Create Purchase Order(s) and Material Request for {0} items?', [
+						valid_items.length,
+					]),
+				);
+				if (!confirmed) return;
 
-						if (response.message?.success) {
-							const mr_name = response.message.material_request;
-							const po_names = response.message.purchase_orders;
-							const po_links = po_names
-								.map(
-									(name) =>
-										`<a href="/app/purchase-order/${name}" target="_blank">${name}</a>`,
-								)
-								.join(', ');
-							frappe.msgprint({
-								title: __('Created Successfully'),
-								message: `MR: <a href="/app/material-request/${mr_name}" target="_blank">${mr_name}</a><br>PO(s): ${po_links}`,
-								indicator: 'green',
-							});
-							forecast_report_state.edited_quantities = {};
-							report.refresh();
-						}
-					} catch (error) {
+				try {
+					const response = await frappe.call({
+						method:
+							'navgold_custom.navgold_custom.report.navgold_forecast_report.navgold_forecast_report.create_purchase_orders_and_material_request_from_forecast_report',
+						args: { selected_items: valid_items },
+						freeze: true,
+						freeze_message: __('Creating PO + Material Request...'),
+					});
+
+					if (response.message?.success) {
+						const mr_name = response.message.material_request;
+						const po_names = response.message.purchase_orders;
+						const po_links = po_names
+							.map(
+								(name) =>
+									`<a href="/app/purchase-order/${name}" target="_blank">${name}</a>`,
+							)
+							.join(', ');
 						frappe.msgprint({
-							title: __('Error'),
-							message: __(
-								'Failed to create PO + Material Request. Check error log.',
-							),
-							indicator: 'red',
+							title: __('Created Successfully'),
+							message: `MR: <a href="/app/material-request/${mr_name}" target="_blank">${mr_name}</a><br>PO(s): ${po_links}`,
+							indicator: 'green',
 						});
+						forecast_report_state.edited_quantities = {};
+						report.refresh();
 					}
-				},
-			);
-		});
+				} catch (error) {
+					frappe.msgprint({
+						title: __('Error'),
+						message: __(
+							'Failed to create PO + Material Request. Check error log.',
+						),
+						indicator: 'red',
+					});
+				}
+			},
+		);
 	},
 
 	after_refresh: (report) => {
@@ -237,6 +241,115 @@ frappe.query_reports['Navgold Forecast Report'] = {
 		return default_value;
 	},
 };
+
+async function confirm_stock_shortfalls(valid_items) {
+	const response = await frappe.call({
+		method:
+			'navgold_custom.navgold_custom.report.navgold_forecast_report.navgold_forecast_report.get_transfer_stock_shortfalls',
+		args: { selected_items: valid_items },
+		freeze: true,
+		freeze_message: __('Checking stock availability...'),
+	});
+
+	const shortfalls = response.message || [];
+	if (!shortfalls.length) return {};
+
+	return show_stock_shortfall_dialog(shortfalls);
+}
+
+function show_stock_shortfall_dialog(shortfalls) {
+	return new Promise((resolve) => {
+		const dialog = new frappe.ui.Dialog({
+			title: __('Not Enough Stock for {0} Item(s)', [shortfalls.length]),
+			size: 'extra-large',
+			fields: [{ fieldtype: 'HTML', fieldname: 'shortfalls' }],
+			primary_action_label: __('Continue'),
+			primary_action: () => {
+				const decisions = {};
+				dialog.$wrapper.find('input.shortfall-accept').each((_index, input) => {
+					decisions[input.dataset.key] = input.checked ? 1 : 0;
+				});
+				dialog.hide();
+				resolve(decisions);
+			},
+			secondary_action_label: __('Cancel'),
+			secondary_action: () => dialog.hide(),
+		});
+
+		dialog.$wrapper.on('hidden.bs.modal', () => resolve(null));
+
+		dialog
+			.get_field('shortfalls')
+			.$wrapper.html(format_shortfall_table(shortfalls));
+
+		dialog.$wrapper.on('change', '.shortfall-accept-all', (event) => {
+			dialog.$wrapper
+				.find('input.shortfall-accept:not(:disabled)')
+				.prop('checked', event.target.checked);
+		});
+
+		dialog.show();
+	});
+}
+
+function format_shortfall_table(shortfalls) {
+	const rows = shortfalls
+		.map((row) => {
+			const nothing_to_send = flt(row.transferable_qty) <= 0;
+			const checkbox = `<input type="checkbox" class="shortfall-accept" data-key="${frappe.utils.escape_html(
+				row.key,
+			)}" ${nothing_to_send ? 'disabled' : 'checked'}>`;
+			const will_transfer = nothing_to_send
+				? `<span class="text-danger">${__('Nothing to send')}</span>`
+				: `${format_qty(row.transferable_qty)} ${frappe.utils.escape_html(
+						row.uom,
+				  )}`;
+
+			return `
+				<tr>
+					<td class="text-center">${checkbox}</td>
+					<td>${frappe.utils.escape_html(row.sku)}</td>
+					<td>${frappe.utils.escape_html(row.item_name)}<br>
+						<span class="text-muted small">${frappe.utils.escape_html(
+							row.item_code,
+						)}</span></td>
+					<td class="text-right">${format_qty(
+						row.requested_qty,
+					)} ${frappe.utils.escape_html(row.uom)}</td>
+					<td class="text-right">${format_qty(row.available_qty)}</td>
+					<td class="text-right">${will_transfer}</td>
+				</tr>
+			`;
+		})
+		.join('');
+
+	return `
+		<p>${__(
+			'These items have less stock on the shelves than you asked to transfer. Ticked items go on the Material Request at the quantity we can actually send; unticked items are left off it entirely.',
+		)}</p>
+		<div class="table-responsive">
+			<table class="table table-bordered">
+				<thead>
+					<tr>
+						<th class="text-center" style="width: 40px">
+							<input type="checkbox" class="shortfall-accept-all" checked>
+						</th>
+						<th>${__('SKU')}</th>
+						<th>${__('Item')}</th>
+						<th class="text-right">${__('Requested')}</th>
+						<th class="text-right">${__('Available Now (Singles)')}</th>
+						<th class="text-right">${__('Will Transfer')}</th>
+					</tr>
+				</thead>
+				<tbody>${rows}</tbody>
+			</table>
+		</div>
+	`;
+}
+
+function format_qty(value) {
+	return cstr(flt(value, 2));
+}
 
 function create_forecast_info_bar(report) {
 	const info_bar = $('<div></div>')

@@ -1,6 +1,8 @@
 # Copyright (c) 2026, developers@buildwithhussain.com and Contributors
 # See license.txt
 
+from unittest.mock import patch
+
 import frappe
 from frappe.tests import IntegrationTestCase
 
@@ -8,11 +10,18 @@ from navgold_custom.navgold_custom.amazon_pricing.test_bundle_stock import (
 	get_stock_warehouse,
 	make_bundle,
 	make_item,
+	receive_stock,
+)
+from navgold_custom.navgold_custom.custom_script.stock_entry.test_fba_clearing import (
+	create_test_warehouse,
 )
 from navgold_custom.navgold_custom.report.navgold_forecast_report.navgold_forecast_report import (
+	apply_transfer_shortfall_decisions,
 	create_material_request_doc,
+	create_purchase_orders_and_material_request_from_forecast_report,
 	expand_selection,
 	plan_purchase_orders,
+	resolve_transfer_shortfalls,
 	submit_purchase_orders,
 )
 
@@ -29,6 +38,17 @@ def make_supplier(supplier_name):
 	)
 	supplier.insert()
 	return supplier.name
+
+
+def make_customer(customer_name):
+	customer = frappe.new_doc("Customer")
+	customer.customer_name = customer_name
+	# The site default is a group node, which Customer rejects.
+	customer.customer_group = frappe.get_all(
+		"Customer Group", filters={"is_group": 0}, limit=1, pluck="name"
+	)[0]
+	customer.insert()
+	return customer.name
 
 
 def make_supplier_price(item_code, supplier, price, uom="Nos"):
@@ -81,6 +101,10 @@ class TestForecastReportActions(IntegrationTestCase):
 		cls.supplier_one = make_supplier(f"NG Supplier One {suffix}")
 		cls.supplier_two = make_supplier(f"NG Supplier Two {suffix}")
 
+		# Stands in for the configured AFN warehouse: stock sitting there is already at Amazon.
+		cls.afn_warehouse = create_test_warehouse("NG Forecast AFN")
+		cls.customer = make_customer(f"NG Customer {suffix}")
+
 	def select(self, rows):
 		"""rows: list of (item_code, uom, qty) -> (selected_items, sku_info) as the report sends them."""
 		selected_items = []
@@ -105,6 +129,69 @@ class TestForecastReportActions(IntegrationTestCase):
 		parent = make_item(f"NG-OWN-B-{suffix}", is_stock_item=0)
 		make_bundle(parent, list(zip(components, component_quantities, strict=True)))
 		return parent, components
+
+	def point_amazon_settings_at_test_warehouses(self):
+		# change_settings cannot drive this single: its controller overrides save() without the
+		# ignore_permissions the helper passes.
+		settings = {
+			"company": self.company,
+			"warehouse": self.warehouse,
+			"afn_warehouse": self.afn_warehouse,
+		}
+		for fieldname, value in settings.items():
+			previous = frappe.db.get_single_value("Amazon SP API Settings", fieldname)
+			self.addCleanup(frappe.db.set_single_value, "Amazon SP API Settings", fieldname, previous)
+			frappe.db.set_single_value("Amazon SP API Settings", fieldname, value)
+
+		self.addCleanup(frappe.clear_document_cache, "Amazon SP API Settings")
+		frappe.clear_document_cache("Amazon SP API Settings")
+
+	def make_stocked_item(self, qty):
+		"""An item nobody else in the class has stocked, so availability is exactly ``qty``."""
+		item_code = make_item(f"NG-STOCK-{frappe.generate_hash(length=6)}", is_stock_item=1)
+		receive_stock(item_code, qty, self.warehouse, self.company)
+		return item_code
+
+	def make_draft_amazon_order(self, item_code, qty):
+		"""A draft Amazon Sales Order — sold but not yet submitted, so the report nets it off free qty."""
+		sales_order = frappe.new_doc("Sales Order")
+		sales_order.customer = self.customer
+		sales_order.company = self.company
+		sales_order.transaction_date = frappe.utils.today()
+		sales_order.delivery_date = frappe.utils.today()
+		sales_order.amazon_order_id = f"TEST-{frappe.generate_hash(length=8)}"
+		sales_order.append(
+			"items",
+			{
+				"item_code": item_code,
+				"qty": qty,
+				"rate": 10,
+				"warehouse": self.warehouse,
+				"delivery_date": frappe.utils.today(),
+			},
+		)
+		sales_order.insert()
+		return sales_order.name
+
+	def make_open_pick_list(self, item_code, qty):
+		pick_list = frappe.new_doc("Pick List")
+		pick_list.company = self.company
+		pick_list.purpose = "Material Transfer"
+		pick_list.pick_manually = 1
+		pick_list.append(
+			"locations",
+			{
+				"item_code": item_code,
+				"warehouse": self.warehouse,
+				"qty": qty,
+				"stock_qty": qty,
+				"uom": "Nos",
+				"stock_uom": "Nos",
+				"conversion_factor": 1,
+			},
+		)
+		pick_list.insert()
+		return pick_list.name
 
 	def test_plain_sku_expands_to_a_single_row(self):
 		rows = self.expand([(self.plain_item, "Nos", 5)])
@@ -213,6 +300,205 @@ class TestForecastReportActions(IntegrationTestCase):
 		with self.assertRaises(frappe.ValidationError) as raised:
 			plan_purchase_orders(self.expand([(bundle, "Nos", 10)]))
 		self.assertIn(component_one, str(raised.exception))
+
+	def test_shortfalls_are_empty_when_the_shelves_cover_the_selection(self):
+		item_code = self.make_stocked_item(10)
+		transfer_rows = self.expand([(item_code, "Nos", 10)])
+
+		kept_rows, shortfalls = resolve_transfer_shortfalls(transfer_rows, self.company, self.afn_warehouse)
+
+		self.assertEqual(shortfalls, [])
+		self.assertEqual(kept_rows, transfer_rows)
+
+	def test_short_row_reports_what_the_shelves_can_actually_give(self):
+		item_code = self.make_stocked_item(39)
+		transfer_rows = self.expand([(item_code, "Nos", 60)])
+
+		shortfalls = resolve_transfer_shortfalls(transfer_rows, self.company, self.afn_warehouse)[1]
+
+		self.assertEqual(len(shortfalls), 1)
+		self.assertEqual(shortfalls[0]["item_code"], item_code)
+		self.assertEqual(shortfalls[0]["requested_qty"], 60.0)
+		self.assertEqual(shortfalls[0]["available_qty"], 39.0)
+		self.assertEqual(shortfalls[0]["transferable_qty"], 39.0)
+
+	def test_short_pack_row_rounds_down_to_whole_packs(self):
+		# 39 singles against a pack of 6 is 6 whole packs — 6.5 packs is the fraction that strands
+		# the transfer at pick and Stock Entry time.
+		item_code = self.make_stocked_item(39)
+		add_uom_conversion(item_code, "NG Pack of 6", 6)
+		transfer_rows = self.expand([(item_code, "NG Pack of 6", 10)])
+
+		shortfalls = resolve_transfer_shortfalls(transfer_rows, self.company, self.afn_warehouse)[1]
+
+		self.assertEqual(shortfalls[0]["available_qty"], 39.0)
+		self.assertEqual(shortfalls[0]["transferable_qty"], 6.0)
+		self.assertEqual(shortfalls[0]["uom"], "NG Pack of 6")
+
+	def test_stock_already_at_amazon_is_not_available_to_send_to_amazon(self):
+		item_code = self.make_stocked_item(4)
+		receive_stock(item_code, 50, self.afn_warehouse, self.company)
+		transfer_rows = self.expand([(item_code, "Nos", 20)])
+
+		shortfalls = resolve_transfer_shortfalls(transfer_rows, self.company, self.afn_warehouse)[1]
+
+		self.assertEqual(shortfalls[0]["available_qty"], 4.0)
+
+	def test_stock_claimed_by_an_open_pick_list_is_not_available(self):
+		item_code = self.make_stocked_item(30)
+		self.make_open_pick_list(item_code, 25)
+		transfer_rows = self.expand([(item_code, "Nos", 30)])
+
+		shortfalls = resolve_transfer_shortfalls(transfer_rows, self.company, self.afn_warehouse)[1]
+
+		self.assertEqual(shortfalls[0]["available_qty"], 5.0)
+
+	def test_two_skus_of_one_item_cannot_both_claim_the_same_stock(self):
+		item_code = self.make_stocked_item(10)
+		transfer_rows = self.expand([(item_code, "Nos", 8), (item_code, "Nos", 8)])
+
+		shortfalls = resolve_transfer_shortfalls(transfer_rows, self.company, self.afn_warehouse)[1]
+
+		# The first row takes 8 of the 10, so the second is short — not two rows of 8 out of one pile.
+		self.assertEqual([row["sku"] for row in shortfalls], ["NG-SKU-1"])
+		self.assertEqual(shortfalls[0]["available_qty"], 2.0)
+
+	def test_accepted_row_is_trimmed_to_what_we_have(self):
+		item_code = self.make_stocked_item(39)
+		transfer_rows = self.expand([(item_code, "Nos", 60)])
+
+		kept_rows = apply_transfer_shortfall_decisions(
+			transfer_rows, self.company, self.afn_warehouse, {f"NG-SKU-0::{item_code}": 1}
+		)
+
+		self.assertEqual(kept_rows, [{"sku": "NG-SKU-0", "item_code": item_code, "qty": 39.0, "uom": "Nos"}])
+
+	def test_rejected_row_is_left_off_entirely(self):
+		short_item = self.make_stocked_item(2)
+		stocked_item = self.make_stocked_item(50)
+		transfer_rows = self.expand([(short_item, "Nos", 60), (stocked_item, "Nos", 10)])
+
+		kept_rows = apply_transfer_shortfall_decisions(
+			transfer_rows, self.company, self.afn_warehouse, {f"NG-SKU-0::{short_item}": 0}
+		)
+
+		self.assertEqual([row["item_code"] for row in kept_rows], [stocked_item])
+
+	def test_accepted_row_without_a_whole_pack_is_left_off(self):
+		item_code = self.make_stocked_item(4)
+		add_uom_conversion(item_code, "NG Pack of 6", 6)
+		transfer_rows = self.expand([(item_code, "NG Pack of 6", 10)])
+
+		kept_rows, shortfalls = resolve_transfer_shortfalls(
+			transfer_rows, self.company, self.afn_warehouse, {f"NG-SKU-0::{item_code}": True}
+		)
+
+		self.assertEqual(shortfalls[0]["transferable_qty"], 0.0)
+		self.assertEqual(kept_rows, [])
+
+	def test_short_row_nobody_answered_for_is_refused_instead_of_requested_whole(self):
+		# Stock that ran short while the dialog was open is exactly what this check exists to catch,
+		# so an unanswered short row must stop the transfer, not sail through at the full qty.
+		item_code = self.make_stocked_item(5)
+		transfer_rows = self.expand([(item_code, "Nos", 60)])
+
+		with self.assertRaises(frappe.ValidationError) as raised:
+			apply_transfer_shortfall_decisions(transfer_rows, self.company, self.afn_warehouse, {})
+
+		self.assertIn("NG-SKU-0", str(raised.exception))
+
+	def test_an_unanswered_short_row_does_not_starve_an_answered_one(self):
+		item_code = self.make_stocked_item(10)
+		transfer_rows = self.expand([(item_code, "Nos", 30), (item_code, "Nos", 8)])
+
+		with self.assertRaises(frappe.ValidationError) as raised:
+			apply_transfer_shortfall_decisions(
+				transfer_rows, self.company, self.afn_warehouse, {f"NG-SKU-1::{item_code}": 1}
+			)
+
+		self.assertIn("NG-SKU-0", str(raised.exception))
+
+	def test_reporting_still_leaves_an_unanswered_row_whole(self):
+		# The dialog asks what is short before anyone has decided anything; that call must not throw.
+		item_code = self.make_stocked_item(5)
+		transfer_rows = self.expand([(item_code, "Nos", 60)])
+
+		kept_rows, shortfalls = resolve_transfer_shortfalls(transfer_rows, self.company, self.afn_warehouse)
+
+		self.assertEqual(kept_rows, transfer_rows)
+		self.assertFalse(shortfalls[0]["answered"])
+
+	def test_stock_reserved_for_an_amazon_order_is_not_offered_to_amazon(self):
+		item_code = self.make_stocked_item(20)
+		self.make_draft_amazon_order(item_code, 15)
+		transfer_rows = self.expand([(item_code, "Nos", 20)])
+
+		shortfalls = resolve_transfer_shortfalls(transfer_rows, self.company, self.afn_warehouse)[1]
+
+		# 20 on the shelf, 15 already sold on a draft Amazon order — the report calls 5 of them free
+		# and the transfer must not be offered the other 15.
+		self.assertEqual(shortfalls[0]["available_qty"], 5.0)
+
+	def test_exact_fit_is_covered_and_one_unit_more_is_short(self):
+		item_code = self.make_stocked_item(12)
+
+		self.assertEqual(
+			resolve_transfer_shortfalls(
+				self.expand([(item_code, "Nos", 12)]), self.company, self.afn_warehouse
+			)[1],
+			[],
+		)
+
+		shortfalls = resolve_transfer_shortfalls(
+			self.expand([(item_code, "Nos", 13)]), self.company, self.afn_warehouse
+		)[1]
+		self.assertEqual(shortfalls[0]["transferable_qty"], 12.0)
+
+	def test_buy_path_orders_the_full_qty_the_shelves_cannot_cover(self):
+		# Through the endpoint, not the helpers: the shelf trim this guards against lived there.
+		item_code = self.make_stocked_item(7)
+		make_supplier_price(item_code, self.supplier_one, 1.5)
+		selected_items, sku_info = self.select([(item_code, "Nos", 60)])
+
+		self.point_amazon_settings_at_test_warehouses()
+
+		with (
+			patch(
+				"navgold_custom.navgold_custom.report.navgold_forecast_report."
+				"navgold_forecast_report.build_sku_info",
+				return_value=sku_info,
+			),
+		):
+			response = create_purchase_orders_and_material_request_from_forecast_report(
+				frappe.as_json(selected_items)
+			)
+
+		material_request = frappe.get_doc("Material Request", response["material_request"])
+		purchase_order = frappe.get_doc("Purchase Order", response["purchase_orders"][0])
+		self.assertEqual(material_request.items[0].stock_qty, 60.0)
+		self.assertEqual(purchase_order.items[0].stock_qty, 60.0)
+
+	def test_leaving_out_every_row_throws_instead_of_creating_an_empty_transfer(self):
+		item_code = self.make_stocked_item(2)
+		transfer_rows = self.expand([(item_code, "Nos", 60)])
+
+		with self.assertRaises(frappe.ValidationError) as raised:
+			apply_transfer_shortfall_decisions(
+				transfer_rows, self.company, self.afn_warehouse, {f"NG-SKU-0::{item_code}": 0}
+			)
+		self.assertIn("nothing to transfer", str(raised.exception))
+
+	def test_bundle_component_shortfall_is_reported_against_the_component(self):
+		bundle, (component_one, component_two) = self.make_own_bundle([2, 3])
+		receive_stock(component_one, 100, self.warehouse, self.company)
+		receive_stock(component_two, 9, self.warehouse, self.company)
+
+		transfer_rows = self.expand([(bundle, "Nos", 10)])
+		shortfalls = resolve_transfer_shortfalls(transfer_rows, self.company, self.afn_warehouse)[1]
+
+		self.assertEqual([row["item_code"] for row in shortfalls], [component_two])
+		self.assertEqual(shortfalls[0]["requested_qty"], 30.0)
+		self.assertEqual(shortfalls[0]["available_qty"], 9.0)
 
 	def test_material_request_rows_link_to_their_component_purchase_order(self):
 		bundle, (component_one, component_two) = self.make_own_bundle([2, 3])
