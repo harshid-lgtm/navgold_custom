@@ -219,6 +219,44 @@ class TestOrderStatusRefresh(IntegrationTestCase):
 		self.assertEqual(sales_order.docstatus, 0)
 		self.assertEqual(sales_order.amazon_order_status, "Canceled")
 
+	def test_a_cancelled_draft_stops_eating_free_stock(self):
+		repository = self.build_repository()
+		self.sync(repository, self.build_order("Pending", 0), rate=0)
+		self.assertEqual(get_draft_amazon_order_qty_map([self.item_code]).get(self.item_code), 1.0)
+
+		self.refresh(repository, self.build_order("Canceled", 0), rate=0)
+
+		self.assertEqual(
+			get_draft_amazon_order_qty_map([self.item_code]),
+			{},
+			"a cancelled draft is not demand, and nothing ever submits or deletes it",
+		)
+
+	def test_the_sync_never_creates_an_order_amazon_has_already_cancelled(self):
+		repository = self.build_repository()
+
+		self.assertIsNone(self.sync(repository, self.build_order("Canceled", 27.46), rate=27.46))
+		self.assertFalse(
+			frappe.db.exists("Sales Order", {"amazon_order_id": ORDER_ID}),
+			"'Canceled' is not an unauthorised status, so an unguarded create would submit it",
+		)
+
+	def test_a_cancelled_order_left_open_is_closed_on_the_next_refresh(self):
+		repository = self.build_repository()
+		self.sync(repository, self.build_order("Unshipped", 27.46), rate=27.46)
+		# the status field is written before the close, so this is what a half-applied cancel leaves
+		frappe.db.set_value(
+			"Sales Order", self.get_sales_order("name").name, "amazon_order_status", "Canceled"
+		)
+
+		self.refresh(repository, self.build_order("Canceled", 27.46), rate=27.46)
+
+		self.assertEqual(
+			self.get_sales_order("status").status,
+			"Closed",
+			"a matching status field must not short-circuit an order that is still open",
+		)
+
 	def test_failed_promotion_leaves_the_draft_and_records_the_failure(self):
 		repository = self.build_repository()
 		self.sync(repository, self.build_order("Pending", 0), rate=0)
