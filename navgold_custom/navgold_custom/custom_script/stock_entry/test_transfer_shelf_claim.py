@@ -8,7 +8,9 @@ from frappe.utils import flt
 from navgold_custom.navgold_custom.amazon_pricing.test_bundle_stock import make_item
 from navgold_custom.navgold_custom.custom_script.stock_entry.test_fba_clearing import (
 	COMPANY,
+	cancel_auto_transfer,
 	create_test_warehouse,
+	use_afn_warehouse,
 )
 from navgold_custom.patches.v1.release_transferred_shelf_claims import (
 	execute as release_transferred_shelf_claims,
@@ -21,6 +23,7 @@ class TestTransferShelfClaim(IntegrationTestCase):
 		super().setUpClass()
 		cls.source_warehouse = create_test_warehouse("Test Shelf Claim Source")
 		cls.target_warehouse = create_test_warehouse("Test Shelf Claim Target")
+		use_afn_warehouse(cls, cls.target_warehouse)
 
 	def setUp(self):
 		super().setUp()
@@ -68,6 +71,7 @@ class TestTransferShelfClaim(IntegrationTestCase):
 			)
 		pick_list.insert()
 		pick_list.submit()
+		cancel_auto_transfer(pick_list)
 		return pick_list
 
 	def transfer_row(self, pick_list, location, qty):

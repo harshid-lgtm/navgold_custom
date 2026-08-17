@@ -6,9 +6,7 @@ from frappe.tests import IntegrationTestCase
 from frappe.utils import flt
 
 from navgold_custom.navgold_custom.amazon_pricing.test_bundle_stock import make_item
-from navgold_custom.navgold_custom.custom_script.pick_list.pick_list_api import (
-	create_fba_transfer_stock_entry,
-)
+from navgold_custom.navgold_custom.custom_script.stock_entry.stock_entry import get_afn_material_issue
 from navgold_custom.navgold_custom.custom_script.stock_entry.test_fba_clearing import (
 	COMPANY,
 	create_test_warehouse,
@@ -63,40 +61,53 @@ class TestTransferStockEntryPartPack(IntegrationTestCase):
 		pick_list.submit()
 		return pick_list
 
-	def build_stock_entry(self, pick_list):
-		stock_entry = frappe.get_doc(create_fba_transfer_stock_entry(pick_list.name))
-		for row in stock_entry.items:
-			row.t_warehouse = self.target_warehouse
-		return stock_entry
+	def get_transfer_stock_entry(self, pick_list):
+		return frappe.get_last_doc("Stock Entry", filters={"pick_list": pick_list.name})
 
 	def test_a_part_pack_transfer_moves_exactly_what_was_picked(self):
 		pick_list = self.make_transfer_pick_list([(self.item_code, 136)])
 
-		stock_entry = self.build_stock_entry(pick_list)
-		stock_entry.save()
+		stock_entry = self.get_transfer_stock_entry(pick_list)
 
 		self.assertEqual(len(stock_entry.items), 1)
 		self.assertEqual(flt(stock_entry.items[0].transfer_qty), 136)
 		self.assertEqual(stock_entry.items[0].uom, "Nos")
 		self.assertEqual(flt(stock_entry.items[0].qty), 136)
 
-	def test_a_part_pack_transfer_submits(self):
+	def test_the_transfer_stock_entry_is_submitted_into_the_afn_warehouse(self):
 		pick_list = self.make_transfer_pick_list([(self.item_code, 136)])
 
-		stock_entry = self.build_stock_entry(pick_list)
-		stock_entry.save()
-		stock_entry.submit()
+		stock_entry = self.get_transfer_stock_entry(pick_list)
 
+		self.assertEqual(stock_entry.docstatus, 1)
+		self.assertEqual(stock_entry.stock_entry_type, "FBA Transfer")
+		self.assertEqual(stock_entry.items[0].t_warehouse, self.target_warehouse)
 		self.assertEqual(
 			flt(frappe.db.get_value("Pick List Item", pick_list.locations[0].name, "transferred_qty")),
 			136,
 		)
 
+	def test_an_unset_afn_warehouse_blocks_the_submit(self):
+		frappe.db.set_single_value("Amazon SP API Settings", "afn_warehouse", None)
+
+		with self.assertRaises(frappe.ValidationError):
+			self.make_transfer_pick_list([(self.item_code, 12)])
+
+	def test_the_transferred_stock_is_issued_back_out_of_fba(self):
+		pick_list = self.make_transfer_pick_list([(self.item_code, 136)])
+
+		stock_entry = self.get_transfer_stock_entry(pick_list)
+		material_issue = frappe.get_doc("Stock Entry", get_afn_material_issue(stock_entry.name))
+
+		self.assertEqual(material_issue.stock_entry_type, "Material Issue")
+		self.assertEqual(material_issue.docstatus, 1)
+		self.assertEqual(material_issue.items[0].s_warehouse, self.target_warehouse)
+		self.assertEqual(flt(material_issue.items[0].transfer_qty), 136)
+
 	def test_a_whole_pack_transfer_keeps_its_pack_uom(self):
 		pick_list = self.make_transfer_pick_list([(self.item_code, 132)])
 
-		stock_entry = self.build_stock_entry(pick_list)
-		stock_entry.save()
+		stock_entry = self.get_transfer_stock_entry(pick_list)
 
 		self.assertEqual(stock_entry.items[0].uom, PACK_UOM)
 		self.assertEqual(flt(stock_entry.items[0].qty), 22)
@@ -108,8 +119,7 @@ class TestTransferStockEntryPartPack(IntegrationTestCase):
 		receive_stock(second_item, 500, self.warehouse, self.company)
 		pick_list = self.make_transfer_pick_list([(self.item_code, 132), (second_item, 136)])
 
-		stock_entry = self.build_stock_entry(pick_list)
-		stock_entry.save()
+		stock_entry = self.get_transfer_stock_entry(pick_list)
 
 		rows = {row.item_code: row for row in stock_entry.items}
 		self.assertEqual(rows[self.item_code].uom, PACK_UOM)

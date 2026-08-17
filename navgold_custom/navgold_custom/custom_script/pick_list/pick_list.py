@@ -24,6 +24,7 @@ from navgold_custom.navgold_custom.erpnext_compat import (
 
 
 def on_submit(doc, method):
+	auto_transfer_to_fba(doc)
 	auto_reserve_stock(doc)
 	auto_create_delivery_notes(doc)
 
@@ -387,6 +388,26 @@ def has_part_pack_standalone_locations(pick_list):
 		if packs != int(packs):
 			return True
 	return False
+
+
+def auto_transfer_to_fba(pick_list):
+	if pick_list.purpose != "Material Transfer":
+		return
+
+	from navgold_custom.navgold_custom.custom_script.pick_list.pick_list_api import (
+		create_fba_transfer_stock_entry,
+	)
+
+	afn_warehouse = frappe.db.get_single_value("Amazon SP API Settings", "afn_warehouse")
+	if not afn_warehouse:
+		frappe.throw(_("Set AFN Warehouse in Amazon SP API Settings before submitting a transfer Pick List."))
+
+	stock_entry = frappe.get_doc(create_fba_transfer_stock_entry(pick_list.name))
+	for row in stock_entry.items:
+		row.t_warehouse = afn_warehouse
+
+	stock_entry.insert()
+	stock_entry.submit()
 
 
 def auto_reserve_stock(doc):

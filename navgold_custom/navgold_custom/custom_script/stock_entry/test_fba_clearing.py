@@ -31,17 +31,35 @@ def get_test_company():
 COMPANY = get_test_company()
 
 
-def create_test_warehouse(warehouse_name):
-	company_abbreviation = frappe.get_cached_value("Company", COMPANY, "abbr")
+def create_test_warehouse(warehouse_name, company=COMPANY):
+	company_abbreviation = frappe.get_cached_value("Company", company, "abbr")
 	full_name = f"{warehouse_name} - {company_abbreviation}"
 	if frappe.db.exists("Warehouse", full_name):
 		return full_name
 
 	warehouse = frappe.new_doc("Warehouse")
 	warehouse.warehouse_name = warehouse_name
-	warehouse.company = COMPANY
+	warehouse.company = company
 	warehouse.insert()
 	return warehouse.name
+
+
+def use_afn_warehouse(test_class, warehouse):
+	"""Point Amazon SP API Settings at a test warehouse for the class, restoring it afterwards.
+	Submitting a transfer Pick List auto-creates an FBA Transfer into whatever this names."""
+	configured_warehouse = frappe.db.get_single_value("Amazon SP API Settings", "afn_warehouse")
+	frappe.db.set_single_value("Amazon SP API Settings", "afn_warehouse", warehouse)
+	test_class.addClassCleanup(
+		frappe.db.set_single_value, "Amazon SP API Settings", "afn_warehouse", configured_warehouse
+	)
+
+
+def cancel_auto_transfer(pick_list):
+	"""Submitting a transfer Pick List auto-transfers every row into FBA. Tests about the rows that
+	stay behind roll that transfer back to leave them outstanding."""
+	auto_transfer = frappe.db.get_value("Stock Entry", {"pick_list": pick_list.name, "docstatus": 1})
+	if auto_transfer:
+		frappe.get_doc("Stock Entry", auto_transfer).cancel()
 
 
 class TestFBATransferClearing(IntegrationTestCase):

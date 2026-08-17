@@ -15,6 +15,11 @@ from navgold_custom.navgold_custom.custom_script.pick_list.pick_list import (
 	get_stock_fulfillment,
 	get_whole_number_uoms,
 )
+from navgold_custom.navgold_custom.custom_script.stock_entry.test_fba_clearing import (
+	cancel_auto_transfer,
+	create_test_warehouse,
+	use_afn_warehouse,
+)
 
 # erpnext.stock.doctype.warehouse.test_warehouse.create_warehouse is deliberately NOT
 # reused: importing erpnext test modules triggers their test-record chain, which creates
@@ -294,6 +299,7 @@ class TestPickListWholeStockUnits(IntegrationTestCase):
 		)[0]
 		receive_stock(cls.whole_item, 50, [cls.warehouse], cls.company)
 		receive_stock(cls.fractional_item, 50, [cls.warehouse], cls.company)
+		use_afn_warehouse(cls, create_test_warehouse("Test Whole Stock Units AFN", cls.company))
 
 		get_whole_number_uoms.clear_cache()
 
@@ -445,6 +451,7 @@ class TestTransferPickListClaims(IntegrationTestCase):
 		cls.warehouse, cls.company = get_stock_warehouse()
 		cls.item_code = make_item("TEST-TRANSFER-CLAIM-ITEM", 1)
 		receive_stock(cls.item_code, 60, [cls.warehouse], cls.company)
+		use_afn_warehouse(cls, create_test_warehouse("Test Transfer Claim AFN", cls.company))
 
 	def make_transfer_pick_list(self, picked_qty, transferred_qty):
 		pick_list = frappe.new_doc("Pick List")
@@ -466,6 +473,7 @@ class TestTransferPickListClaims(IntegrationTestCase):
 		)
 		pick_list.save()
 		pick_list.submit()
+		cancel_auto_transfer(pick_list)
 
 		# erpnext writes transferred_qty when the Stock Entry submits, and leaves delivered_qty at 0
 		# for every non-Delivery purpose. Holding the status at Partially Transferred is the state a
