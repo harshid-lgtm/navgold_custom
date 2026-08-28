@@ -1,12 +1,15 @@
 import click
 
 from navgold_custom.setup import after_install as setup
+from navgold_custom.setup import set_over_order_allowance_for_pack_rounding
 
 
 def after_install():
 	try:
 		print("Setting up Navgold Custom...")
 		setup()
+		# A fresh site never runs patches, so the pack-rounding allowance has to be seeded here too.
+		set_over_order_allowance_for_pack_rounding()
 
 		click.secho("Thank you for installing Navgold Custom!", fg="green")
 
@@ -67,5 +70,7 @@ def before_tests():
 		if warehouse:
 			frappe.db.set_single_value("Amazon SP API Settings", "company", "Navgold Test")
 			frappe.db.set_single_value("Amazon SP API Settings", "warehouse", warehouse)
+
+	set_over_order_allowance_for_pack_rounding()
 
 	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- persist seed data before the test run begins

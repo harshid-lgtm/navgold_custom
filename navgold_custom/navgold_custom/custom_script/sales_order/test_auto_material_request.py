@@ -13,6 +13,9 @@ from navgold_custom.navgold_custom.custom_script.stock_entry.test_fba_clearing i
 	COMPANY,
 	create_test_warehouse,
 )
+from navgold_custom.navgold_custom.report.navgold_forecast_report.test_navgold_forecast_report import (
+	add_uom_conversion,
+)
 
 
 class TestAutoMaterialRequest(IntegrationTestCase):
@@ -54,11 +57,6 @@ class TestAutoMaterialRequest(IntegrationTestCase):
 		shortage larger than the next order's own line — the state every failed request left behind."""
 		return self.make_sales_order([(qty, "Nos")], fulfillment_channel="")
 
-	def add_pack_uom(self, uom, conversion_factor):
-		item = frappe.get_doc("Item", self.item_code)
-		item.append("uoms", {"uom": uom, "conversion_factor": conversion_factor})
-		item.save()
-
 	def request_for(self, sales_order):
 		names = frappe.get_all(
 			"Material Request Item",
@@ -90,7 +88,7 @@ class TestAutoMaterialRequest(IntegrationTestCase):
 		)
 
 	def test_a_pack_line_is_requested_in_loose_units(self):
-		self.add_pack_uom("Pack of 6", 6)
+		add_uom_conversion(self.item_code, "Pack of 6", 6)
 
 		sales_order = self.make_sales_order([(2, "Pack of 6")])
 		self.assertEqual(flt(sales_order.items[0].stock_qty), 12)
