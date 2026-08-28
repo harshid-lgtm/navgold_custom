@@ -89,6 +89,10 @@ class TestAutoMaterialRequest(IntegrationTestCase):
 
 	def test_a_pack_line_is_requested_in_loose_units(self):
 		add_uom_conversion(self.item_code, "Pack of 6", 6)
+		# Stand the shortage up before this order rather than leaning on its own reservation, which
+		# lands at a different point in on_submit across ERPNext versions. The subject here is the
+		# pack conversion, not when the Bin catches up.
+		self.strand_demand(12)
 
 		sales_order = self.make_sales_order([(2, "Pack of 6")])
 		self.assertEqual(flt(sales_order.items[0].stock_qty), 12)
