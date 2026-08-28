@@ -15,6 +15,7 @@ from frappe.query_builder import DocType
 from frappe.query_builder.functions import Sum
 from frappe.utils import cint, flt, getdate, nowdate
 
+from navgold_custom.navgold_custom.amazon_pricing.alerts import alert_material_request_failed
 from navgold_custom.navgold_custom.erpnext_compat import make_material_request
 
 
@@ -199,10 +200,14 @@ def create_material_request(doc):
 
 		return mr
 
-	except Exception as e:
+	except Exception as error:
+		# Swallowed on purpose: the order sync must not lose an Amazon order because its request
+		# failed. But the msgprint lands nowhere in a background job and the Error Log is purged
+		# after 14 days, so the shortage would go missing in silence — alert instead of trusting it.
 		frappe.log_error(message=frappe.get_traceback(), title=f"Auto MR Creation Failed - SO {doc.name}")
+		alert_material_request_failed(doc.name, str(error))
 		frappe.msgprint(
-			_("Could not create Material Request automatically: {0}").format(str(e)),
+			_("Could not create Material Request automatically: {0}").format(str(error)),
 			alert=True,
 			indicator="red",
 		)

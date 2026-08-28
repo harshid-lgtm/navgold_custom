@@ -1,6 +1,8 @@
 # Copyright (c) 2026, developers@buildwithhussain.com and Contributors
 # See license.txt
 
+from unittest.mock import patch
+
 import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import add_days, flt, nowdate
@@ -139,3 +141,22 @@ class TestAutoMaterialRequest(IntegrationTestCase):
 		stock_entry.insert()
 		stock_entry.submit()
 		return stock_entry
+
+	def test_a_failed_request_alerts_instead_of_going_quiet(self):
+		self.strand_demand(20)
+
+		with (
+			patch(
+				"navgold_custom.navgold_custom.custom_script.sales_order.sales_order.make_material_request",
+				side_effect=frappe.ValidationError("upstream said no"),
+			),
+			patch(
+				"navgold_custom.navgold_custom.custom_script.sales_order.sales_order.alert_material_request_failed"
+			) as alert,
+		):
+			sales_order = self.make_sales_order([(5, "Nos")])
+
+		self.assertIsNone(self.request_for(sales_order), "the request was meant to fail")
+		self.assertEqual(sales_order.docstatus, 1, "the order must survive its request failing")
+		alert.assert_called_once()
+		self.assertEqual(alert.call_args.args[0], sales_order.name)
