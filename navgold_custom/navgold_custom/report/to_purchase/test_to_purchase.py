@@ -79,11 +79,11 @@ class TestToPurchasePurchaseOrders(IntegrationTestCase):
 		material_request.submit()
 		return material_request
 
-	def report_row(self, allocated_qty):
+	def report_row(self, allocated_qty, supplier_uom=PACK_UOM):
 		return {
 			"item_code": self.item_code,
 			"supplier": self.supplier,
-			"supplier_uom": PACK_UOM,
+			"supplier_uom": supplier_uom,
 			"available_stock": 100,
 			"allocated_qty": allocated_qty,
 			"unit_price": 1,
@@ -115,3 +115,20 @@ class TestToPurchasePurchaseOrders(IntegrationTestCase):
 		purchase_order = frappe.get_doc("Purchase Order", created["purchase_orders"][0])
 		self.assertEqual(flt(purchase_order.items[0].qty), 15)
 		self.assertEqual(flt(purchase_order.items[0].stock_qty), 90)
+
+	def test_one_unit_of_demand_still_buys_a_whole_pack(self):
+		# The worst the rounding gets: a single loose unit reaches for a full pack of twelve, which
+		# reads as 1100% over the request. No percentage tuned to a "realistic" overshoot survives it.
+		large_pack = "Pack of 12"
+		add_uom_conversion(self.item_code, large_pack, 12)
+		make_supplier_price(self.item_code, self.supplier, price=1, uom=large_pack)
+		material_request = self.make_material_request(1)
+
+		created = create_purchase_orders_from_report([self.report_row(1, supplier_uom=large_pack)])
+
+		purchase_order = frappe.get_doc("Purchase Order", created["purchase_orders"][0])
+		self.assertEqual(flt(purchase_order.items[0].qty), 1)
+		self.assertEqual(flt(purchase_order.items[0].stock_qty), 12)
+
+		material_request.reload()
+		self.assertEqual(flt(material_request.items[0].ordered_qty), 12)
