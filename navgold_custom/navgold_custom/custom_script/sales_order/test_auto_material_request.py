@@ -66,13 +66,24 @@ class TestAutoMaterialRequest(IntegrationTestCase):
 		)
 		return frappe.get_doc("Material Request", names[0]) if names else None
 
+	def swallowed_failure(self, sales_order):
+		"""create_material_request catches everything and only logs, so a missing request looks
+		identical to no shortage. Surface the traceback it hid or the assertion says nothing."""
+		rows = frappe.get_all(
+			"Error Log",
+			filters={"method": f"Auto MR Creation Failed - SO {sales_order.name}"},
+			fields=["error"],
+			limit=1,
+		)
+		return rows[0].error[-2000:] if rows else "no Error Log entry — there was simply no shortage"
+
 	def test_request_is_capped_at_its_own_sales_order_line(self):
 		self.strand_demand(20)
 
 		sales_order = self.make_sales_order([(5, "Nos")])
 
 		material_request = self.request_for(sales_order)
-		self.assertIsNotNone(material_request, "no request raised — the item-wide shortage was rejected")
+		self.assertIsNotNone(material_request, self.swallowed_failure(sales_order))
 		self.assertEqual(flt(material_request.items[0].stock_qty), 5)
 
 	def test_two_lines_of_one_item_split_the_shortage(self):
@@ -81,7 +92,7 @@ class TestAutoMaterialRequest(IntegrationTestCase):
 		sales_order = self.make_sales_order([(4, "Nos"), (3, "Nos")])
 
 		material_request = self.request_for(sales_order)
-		self.assertIsNotNone(material_request)
+		self.assertIsNotNone(material_request, self.swallowed_failure(sales_order))
 		self.assertEqual(
 			sorted(flt(row.stock_qty) for row in material_request.items),
 			[3.0, 4.0],
@@ -98,7 +109,7 @@ class TestAutoMaterialRequest(IntegrationTestCase):
 		self.assertEqual(flt(sales_order.items[0].stock_qty), 12)
 
 		material_request = self.request_for(sales_order)
-		self.assertIsNotNone(material_request)
+		self.assertIsNotNone(material_request, self.swallowed_failure(sales_order))
 		self.assertEqual(flt(material_request.items[0].conversion_factor), 1)
 		self.assertEqual(flt(material_request.items[0].stock_qty), 12)
 
