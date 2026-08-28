@@ -15,6 +15,7 @@ from frappe.query_builder import DocType
 from frappe.query_builder.functions import Sum
 from frappe.utils import cint, flt, getdate, nowdate
 
+from navgold_custom.navgold_custom.amazon_pricing.alerts import alert_material_request_failed
 from navgold_custom.navgold_custom.erpnext_compat import make_material_request
 
 
@@ -116,22 +117,43 @@ def get_projected_qty_map(item_codes: list) -> dict:
 	return {row.item_code: flt(row.projected_qty) for row in rows}
 
 
+def get_shortage_by_sales_order_item(doc, projected_qty_map):
+	shortage_by_item = {
+		item_code: abs(projected_qty)
+		for item_code, projected_qty in projected_qty_map.items()
+		if projected_qty < 0
+	}
+
+	today = getdate(nowdate())
+	items_needing_stock = {}
+
+	for item in doc.items:
+		remaining_shortage = shortage_by_item.get(item.item_code, 0)
+		if remaining_shortage <= 0:
+			continue
+
+		# The shortage is item-wide, but the Material Request line hangs off this one Sales Order
+		# line and ERPNext validates it against that line's stock_qty. Asking for the whole
+		# item-wide figure throws OverAllowanceError and loses the entire request, so each line
+		# takes only its own share and the rest stays with the orders that caused it.
+		required_qty = min(remaining_shortage, flt(item.stock_qty) - flt(item.requested_qty))
+		if required_qty <= 0:
+			continue
+
+		shortage_by_item[item.item_code] = remaining_shortage - required_qty
+
+		delivery_date = getdate(item.delivery_date) if item.delivery_date else getdate(doc.delivery_date)
+		items_needing_stock[item.name] = {
+			"required_qty": required_qty,
+			"schedule_date": delivery_date if delivery_date > today else today,
+		}
+
+	return items_needing_stock
+
+
 def create_material_request(doc):
 	item_codes = [item.item_code for item in doc.items]
-	projected_qty_map = get_projected_qty_map(item_codes)
-
-	items_needing_stock = {}
-	for item in doc.items:
-		total_projected_qty = projected_qty_map.get(item.item_code, 0)
-		delivery_date = getdate(item.delivery_date) if item.delivery_date else getdate(doc.delivery_date)
-		today = getdate(nowdate())
-
-		schedule_date = delivery_date if delivery_date > today else today
-		if total_projected_qty < 0:
-			items_needing_stock[item.name] = {
-				"required_qty": abs(total_projected_qty),
-				"schedule_date": schedule_date,
-			}
+	items_needing_stock = get_shortage_by_sales_order_item(doc, get_projected_qty_map(item_codes))
 
 	if not items_needing_stock:
 		return
@@ -144,9 +166,13 @@ def create_material_request(doc):
 			if mr_item.sales_order_item in items_needing_stock:
 				item_data = items_needing_stock[mr_item.sales_order_item]
 
-				mr_item.qty = item_data["required_qty"]
-				mr_item.stock_qty = flt(mr_item.qty)
-				mr_item.uom = "Nos"
+				# Keep the Sales Order line's UOM. ERPNext compares item_code, uom and
+				# conversion_factor against that line, so rewriting the row to "Nos" throws and
+				# loses the whole request. required_qty is in stock units, so divide it back into
+				# the line's own UOM and let stock_qty carry the real figure downstream.
+				conversion_factor = flt(mr_item.conversion_factor) or 1
+				mr_item.qty = item_data["required_qty"] / conversion_factor
+				mr_item.stock_qty = item_data["required_qty"]
 				mr_item.schedule_date = item_data["schedule_date"]
 
 				updated_items.append(mr_item)
@@ -174,10 +200,14 @@ def create_material_request(doc):
 
 		return mr
 
-	except Exception as e:
+	except Exception as error:
+		# Swallowed on purpose: the order sync must not lose an Amazon order because its request
+		# failed. But the msgprint lands nowhere in a background job and the Error Log is purged
+		# after 14 days, so the shortage would go missing in silence — alert instead of trusting it.
 		frappe.log_error(message=frappe.get_traceback(), title=f"Auto MR Creation Failed - SO {doc.name}")
+		alert_material_request_failed(doc.name, str(error))
 		frappe.msgprint(
-			_("Could not create Material Request automatically: {0}").format(str(e)),
+			_("Could not create Material Request automatically: {0}").format(str(error)),
 			alert=True,
 			indicator="red",
 		)

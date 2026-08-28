@@ -222,6 +222,28 @@ def alert_status_refresh_gap(skipped_hours: float, resuming_from) -> None:
 	)
 
 
+def alert_material_request_failed(sales_order: str, error: str) -> None:
+	# Called from inside an exception handler on Sales Order submit, where anything raised would
+	# abort the order the sync has just written — the alert must never become the bigger failure.
+	missing_line = (
+		f"Sales Order {cstr(sales_order)} was submitted without a Material Request, so its shortage "
+		"never reaches To Purchase and nobody buys the stock."
+	)
+	reason_line = f"<code>{frappe.utils.escape_html(cstr(error)[:300])}</code>"
+	suppression_line = "Further failures within the hour are suppressed — check the Error Log for the rest."
+
+	try:
+		notify(
+			"Auto Material Request failed",
+			[missing_line, reason_line, suppression_line],
+			severity="critical",
+			dedupe_key="auto_material_request_failed",
+			dedupe_seconds=3600,
+		)
+	except Exception as exception:
+		frappe.log_error(f"Material Request alert failed: {exception!s}", "Navgold Telegram Alert")
+
+
 def alert_stale_draft_orders(draft_count: int, oldest_hours: float) -> None:
 	notify(
 		"Amazon orders stuck in draft",

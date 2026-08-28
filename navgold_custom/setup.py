@@ -10,6 +10,14 @@ import frappe
 from frappe import _
 from frappe.custom.doctype.custom_field.custom_field import create_custom_fields
 from frappe.permissions import add_permission
+from frappe.utils import flt
+
+# A supplier ships whole packs, so a Purchase Order raised from To Purchase always rounds the
+# Material Request's loose-unit demand up to the next pack. That rounding reads as an over-order,
+# and with no allowance ERPNext rejects the whole batch. The overshoot is always under one pack but
+# unbounded as a percentage — a single unit against a Pack of 12 supplier is already 1100% — so the
+# allowance has to be large enough never to bind rather than tuned to a realistic overshoot.
+OVER_ORDER_ALLOWANCE_PERCENT = 10000
 
 
 def after_install():
@@ -20,6 +28,16 @@ def after_install():
 	create_custom_fields(get_purchase_receipt_custom_fields(), ignore_validate=True)
 	create_custom_fields(get_stock_entry_custom_fields(), ignore_validate=True)
 	setup_navgold_role_permissions()
+
+
+def set_over_order_allowance_for_pack_rounding():
+	"""Returns the value it replaced, or None when the allowance was already high enough."""
+	previous = flt(frappe.db.get_single_value("Buying Settings", "over_order_allowance"))
+	if previous >= OVER_ORDER_ALLOWANCE_PERCENT:
+		return None
+
+	frappe.db.set_single_value("Buying Settings", "over_order_allowance", OVER_ORDER_ALLOWANCE_PERCENT)
+	return previous
 
 
 def setup_navgold_role_permissions():
