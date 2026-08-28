@@ -98,7 +98,7 @@ class TestAutoMaterialRequest(IntegrationTestCase):
 			[3.0, 4.0],
 		)
 
-	def test_a_pack_line_is_requested_in_loose_units(self):
+	def test_a_pack_line_is_requested_in_its_own_uom(self):
 		add_uom_conversion(self.item_code, "Pack of 6", 6)
 		# Stand the shortage up before this order rather than leaning on its own reservation, which
 		# lands at a different point in on_submit across ERPNext versions. The subject here is the
@@ -110,8 +110,11 @@ class TestAutoMaterialRequest(IntegrationTestCase):
 
 		material_request = self.request_for(sales_order)
 		self.assertIsNotNone(material_request, self.swallowed_failure(sales_order))
-		self.assertEqual(flt(material_request.items[0].conversion_factor), 1)
-		self.assertEqual(flt(material_request.items[0].stock_qty), 12)
+		requested = material_request.items[0]
+		self.assertEqual(requested.uom, "Pack of 6")
+		self.assertEqual(flt(requested.conversion_factor), 6)
+		self.assertEqual(flt(requested.qty), 2)
+		self.assertEqual(flt(requested.stock_qty), 12)
 
 	def test_no_request_when_stock_covers_the_order(self):
 		self.receive_stock(10)

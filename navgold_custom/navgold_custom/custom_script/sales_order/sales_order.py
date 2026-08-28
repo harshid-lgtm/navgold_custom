@@ -165,12 +165,13 @@ def create_material_request(doc):
 			if mr_item.sales_order_item in items_needing_stock:
 				item_data = items_needing_stock[mr_item.sales_order_item]
 
-				mr_item.qty = item_data["required_qty"]
-				mr_item.uom = "Nos"
-				# mapped from a pack-UOM Sales Order line, so the pack factor rides along and would
-				# multiply the request back up against a "Nos" qty
-				mr_item.conversion_factor = 1
-				mr_item.stock_qty = flt(mr_item.qty)
+				# Keep the Sales Order line's UOM. ERPNext compares item_code, uom and
+				# conversion_factor against that line, so rewriting the row to "Nos" throws and
+				# loses the whole request. required_qty is in stock units, so divide it back into
+				# the line's own UOM and let stock_qty carry the real figure downstream.
+				conversion_factor = flt(mr_item.conversion_factor) or 1
+				mr_item.qty = item_data["required_qty"] / conversion_factor
+				mr_item.stock_qty = item_data["required_qty"]
 				mr_item.schedule_date = item_data["schedule_date"]
 
 				updated_items.append(mr_item)
