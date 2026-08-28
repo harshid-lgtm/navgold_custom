@@ -116,22 +116,43 @@ def get_projected_qty_map(item_codes: list) -> dict:
 	return {row.item_code: flt(row.projected_qty) for row in rows}
 
 
+def get_shortage_by_sales_order_item(doc, projected_qty_map):
+	shortage_by_item = {
+		item_code: abs(projected_qty)
+		for item_code, projected_qty in projected_qty_map.items()
+		if projected_qty < 0
+	}
+
+	today = getdate(nowdate())
+	items_needing_stock = {}
+
+	for item in doc.items:
+		remaining_shortage = shortage_by_item.get(item.item_code, 0)
+		if remaining_shortage <= 0:
+			continue
+
+		# The shortage is item-wide, but the Material Request line hangs off this one Sales Order
+		# line and ERPNext validates it against that line's stock_qty. Asking for the whole
+		# item-wide figure throws OverAllowanceError and loses the entire request, so each line
+		# takes only its own share and the rest stays with the orders that caused it.
+		required_qty = min(remaining_shortage, flt(item.stock_qty) - flt(item.requested_qty))
+		if required_qty <= 0:
+			continue
+
+		shortage_by_item[item.item_code] = remaining_shortage - required_qty
+
+		delivery_date = getdate(item.delivery_date) if item.delivery_date else getdate(doc.delivery_date)
+		items_needing_stock[item.name] = {
+			"required_qty": required_qty,
+			"schedule_date": delivery_date if delivery_date > today else today,
+		}
+
+	return items_needing_stock
+
+
 def create_material_request(doc):
 	item_codes = [item.item_code for item in doc.items]
-	projected_qty_map = get_projected_qty_map(item_codes)
-
-	items_needing_stock = {}
-	for item in doc.items:
-		total_projected_qty = projected_qty_map.get(item.item_code, 0)
-		delivery_date = getdate(item.delivery_date) if item.delivery_date else getdate(doc.delivery_date)
-		today = getdate(nowdate())
-
-		schedule_date = delivery_date if delivery_date > today else today
-		if total_projected_qty < 0:
-			items_needing_stock[item.name] = {
-				"required_qty": abs(total_projected_qty),
-				"schedule_date": schedule_date,
-			}
+	items_needing_stock = get_shortage_by_sales_order_item(doc, get_projected_qty_map(item_codes))
 
 	if not items_needing_stock:
 		return
@@ -145,8 +166,11 @@ def create_material_request(doc):
 				item_data = items_needing_stock[mr_item.sales_order_item]
 
 				mr_item.qty = item_data["required_qty"]
-				mr_item.stock_qty = flt(mr_item.qty)
 				mr_item.uom = "Nos"
+				# mapped from a pack-UOM Sales Order line, so the pack factor rides along and would
+				# multiply the request back up against a "Nos" qty
+				mr_item.conversion_factor = 1
+				mr_item.stock_qty = flt(mr_item.qty)
 				mr_item.schedule_date = item_data["schedule_date"]
 
 				updated_items.append(mr_item)
