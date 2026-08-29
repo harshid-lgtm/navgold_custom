@@ -34,8 +34,10 @@ def export_po_items_summary(purchase_order: str):
 		if item.item_code not in summary:
 			row = item.as_dict()
 			row["qty"] = 0
+			row["stock_qty"] = 0
 			summary[item.item_code] = row
 		summary[item.item_code]["qty"] += item.qty
+		summary[item.item_code]["stock_qty"] += item.stock_qty
 
 	template_name = frappe.db.get_value("Supplier", doc.supplier, "custom_csv_export_template")
 	if template_name:
@@ -51,8 +53,16 @@ def export_po_items_summary(purchase_order: str):
 
 
 def build_default_data(summary):
-	headers = ["Item Code", "Description", "Quantity", "UOM", "Supplier Part Number", "Rate (GBP)"]
-	fields = ["item_code", "item_name", "qty", "uom", "supplier_part_no", "rate"]
+	headers = [
+		"Item Code",
+		"Description",
+		"Quantity in Nos",
+		"UOM",
+		"Supplier Part Number",
+		"Rate (GBP)",
+		"Quantity",
+	]
+	fields = ["item_code", "item_name", "stock_qty", "uom", "supplier_part_no", "rate", "qty"]
 	rows = [[row.get(f) for f in fields] for row in summary.values()]
 	return [headers, *rows]
 
