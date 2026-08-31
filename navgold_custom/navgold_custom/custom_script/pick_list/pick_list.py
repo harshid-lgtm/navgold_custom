@@ -84,6 +84,12 @@ def set_part_pack_rows_to_stock_uom(stock_entry, pick_list_doc):
 		row["conversion_factor"] = 1
 
 
+def keep_picked_batches_on_transfer_rows(stock_entry):
+	"""The Stock Entry mapper drops use_serial_batch_fields, so the row bundles a FIFO batch, not the picked."""
+	for row in stock_entry.get("items") or []:
+		row["use_serial_batch_fields"] = 1 if (row.get("batch_no") or row.get("serial_no")) else 0
+
+
 def drop_sales_orders_short_of_stock(pick_list, requested_sales_orders=None):
 	"""A Sales Order is picked whole or not at all, however many lines it has. An order the shelves
 	cannot cover is dropped so the orders that are fully in stock can still be picked, and nothing left
