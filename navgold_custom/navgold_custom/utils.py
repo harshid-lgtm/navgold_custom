@@ -83,7 +83,13 @@ def get_restock_data_map(item_codes: list[str]) -> dict[str, object]:
 	return restock_map
 
 
-def get_free_qty_map(item_codes: list[str]) -> dict[str, dict[str, float]]:
+def get_free_qty_map(item_codes: list[str], deduct_draft_orders: bool = False) -> dict[str, dict[str, float]]:
+	"""Physically sellable qty per item: what is on the shelf less what submitted orders reserve.
+
+	``deduct_draft_orders`` additionally nets off open MFN draft Amazon orders. Only purchasing
+	wants that: a draft is real committed demand, but it reserves nothing in Bin, so counting it
+	as gone would tell the ladder to backorder stock that is sitting on the shelf.
+	"""
 	if not item_codes:
 		return {}
 
@@ -103,7 +109,7 @@ def get_free_qty_map(item_codes: list[str]) -> dict[str, dict[str, float]]:
 		.groupby(bin_dt.item_code)
 	).run(as_dict=True)
 
-	draft_qty_map = get_draft_amazon_order_qty_map(item_codes)
+	draft_qty_map = get_draft_amazon_order_qty_map(item_codes) if deduct_draft_orders else {}
 
 	return {
 		r["item_code"]: {

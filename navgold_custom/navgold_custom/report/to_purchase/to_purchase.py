@@ -164,7 +164,8 @@ def get_data(filters):
 	offers_by_parent = get_offers_by_supplier(supplier_list)
 	last_purchase_rate_map = get_last_purchase_rate_map(supplier_list)
 	reference_suppliers = get_reference_supplier_offers(item_codes)
-	free_qty_map = get_free_qty_map(item_codes)
+	# purchasing must see committed demand: a draft order is stock we no longer get to sell
+	free_qty_map = get_free_qty_map(item_codes, deduct_draft_orders=True)
 
 	results = []
 	max_supplier_offers = 0

@@ -13,6 +13,10 @@ from navgold_custom.navgold_custom.amazon_pricing.strategy_selector import (
 	select_strategy,
 )
 from navgold_custom.navgold_custom.amazon_pricing.template_applicator import apply_template_to_proxy_sku
+from navgold_custom.navgold_custom.amazon_pricing.test_bundle_stock import (
+	get_stock_warehouse,
+	receive_stock,
+)
 from navgold_custom.navgold_custom.amazon_pricing.test_template_applicator import create_strategy_template
 from navgold_custom.navgold_custom.utils import (
 	ITEM_AFN_FIELD,
@@ -255,3 +259,90 @@ class TestFBAStockPerProxySKU(IntegrationTestCase):
 		selected_strategy = select_strategy(mfn_pricing)
 		self.assertNotEqual(selected_strategy, mfn_pricing.fba_strategy)
 		self.assertEqual(selected_strategy, mfn_pricing.backorder_strategy)
+
+
+class TestStrategyLadderIgnoresDraftOrders(IntegrationTestCase):
+	"""The ladder is a question about physical supply: Amazon's shelf, then ours, then the supplier.
+	A draft Sales Order reserves nothing in Bin and is not stock, so it must not move a SKU down a
+	rung — that only publishes a backorder price for stock sitting in the warehouse."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.template_name = create_strategy_template()
+		cls.warehouse, cls.company = get_stock_warehouse()
+
+	def build_sku(self, warehouse_qty=0, fba_qty=0):
+		item_code = create_test_item()
+		if warehouse_qty:
+			receive_stock(item_code, warehouse_qty, self.warehouse, self.company)
+
+		proxy_sku = frappe.new_doc("Proxy SKU")
+		proxy_sku.item = item_code
+		proxy_sku.uom = "Nos"
+		proxy_sku.is_active = 1
+		proxy_sku.afn_stock = fba_qty
+		proxy_sku.insert()
+		apply_template_to_proxy_sku(self.template_name, proxy_sku.name)
+		return item_code, proxy_sku.name
+
+	def sell_on_a_draft_order(self, item_code, qty):
+		sales_order = frappe.new_doc("Sales Order")
+		sales_order.customer = frappe.db.get_value("Customer", {}, "name")
+		sales_order.company = self.company
+		sales_order.transaction_date = frappe.utils.today()
+		sales_order.delivery_date = frappe.utils.today()
+		sales_order.amazon_order_id = f"TEST-LADDER-{frappe.generate_hash(length=8)}"
+		sales_order.fulfillment_channel = "MFN"
+		sales_order.amazon_order_status = "Pending"
+		sales_order.append(
+			"items",
+			{
+				"item_code": item_code,
+				"qty": qty,
+				"rate": 10,
+				"warehouse": self.warehouse,
+				"delivery_date": frappe.utils.today(),
+			},
+		)
+		sales_order.insert()
+		return sales_order.name
+
+	def strategy_for(self, proxy_sku):
+		pricing = frappe.get_doc("Amazon Product Pricing", {"proxy_sku": proxy_sku})
+		return pricing, select_strategy(pricing, stock_info=get_stock_info(proxy_sku))
+
+	@change_settings("Navgold Settings", {"enable_afn_stock_sync": 1})
+	def test_fba_stock_wins_the_ladder(self):
+		item_code, proxy_sku = self.build_sku(warehouse_qty=5, fba_qty=7)
+		self.sell_on_a_draft_order(item_code, 7)
+
+		pricing, strategy = self.strategy_for(proxy_sku)
+		self.assertEqual(strategy, pricing.fba_strategy, "Amazon holds 7, so the SKU ships FBA")
+
+	def test_warehouse_stock_takes_sfp_even_with_a_draft_order_against_it(self):
+		item_code, proxy_sku = self.build_sku(warehouse_qty=10)
+		self.sell_on_a_draft_order(item_code, 10)
+
+		pricing, strategy = self.strategy_for(proxy_sku)
+		self.assertEqual(
+			strategy,
+			pricing.sfp_strategy,
+			"10 units are on the shelf; a draft order is not a reservation and must not backorder them",
+		)
+
+	def test_no_stock_anywhere_falls_to_backorder(self):
+		item_code, proxy_sku = self.build_sku()
+
+		pricing, strategy = self.strategy_for(proxy_sku)
+		self.assertEqual(strategy, pricing.backorder_strategy, "nothing on either shelf")
+
+	def test_the_feed_publishes_shelf_stock_not_shelf_minus_drafts(self):
+		item_code, proxy_sku = self.build_sku(warehouse_qty=10)
+		self.sell_on_a_draft_order(item_code, 4)
+
+		self.assertEqual(
+			get_stock_info(proxy_sku)["mfn_stock"],
+			10,
+			"the feed publishes what is physically sellable off the shelf",
+		)

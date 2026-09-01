@@ -429,28 +429,17 @@ class TestForecastReportActions(IntegrationTestCase):
 		self.assertEqual(kept_rows, transfer_rows)
 		self.assertFalse(shortfalls[0]["answered"])
 
-	def test_stock_reserved_for_an_amazon_order_is_not_offered_to_amazon(self):
+	def test_a_draft_amazon_order_does_not_hold_back_a_transfer(self):
 		item_code = self.make_stocked_item(20)
 		self.make_draft_amazon_order(item_code, 15)
 		transfer_rows = self.expand([(item_code, "Nos", 20)])
 
 		shortfalls = resolve_transfer_shortfalls(transfer_rows, self.company, self.afn_warehouse)[1]
 
-		# 20 on the shelf, 15 already sold on a draft Amazon order — the report calls 5 of them free
-		# and the transfer must not be offered the other 15.
-		self.assertEqual(shortfalls[0]["available_qty"], 5.0)
-
-	def test_an_afn_order_does_not_take_stock_off_the_merchant_shelf(self):
-		item_code = self.make_stocked_item(20)
-		self.make_draft_amazon_order(item_code, 15, fulfillment_channel="AFN")
-		transfer_rows = self.expand([(item_code, "Nos", 20)])
-
-		shortfalls = resolve_transfer_shortfalls(transfer_rows, self.company, self.afn_warehouse)[1]
-
-		# The draft deduction stands in for a reservation erpnext only takes on submit, but an AFN
-		# order ships from Amazon's own warehouse and never draws on this shelf. Deducting it hid
-		# real merchant stock from the forecast, the To Purchase report and the strategy selector.
-		self.assertEqual(shortfalls, [], "all 20 are still on the shelf, so nothing is short")
+		# All 20 are physically on the shelf. A draft order reserves nothing in Bin, and on submit
+		# it either reserves the stock or raises its own request, so netting it off here only hid
+		# sellable stock from the transfer.
+		self.assertEqual(shortfalls, [])
 
 	def test_exact_fit_is_covered_and_one_unit_more_is_short(self):
 		item_code = self.make_stocked_item(12)
