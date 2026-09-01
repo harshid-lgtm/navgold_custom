@@ -94,11 +94,11 @@ class TestOrderStatusRefresh(IntegrationTestCase):
 		repository.recovered_order_count = 0
 		return repository
 
-	def build_order(self, order_status, amount):
+	def build_order(self, order_status, amount, fulfillment_channel="MFN"):
 		return {
 			"AmazonOrderId": ORDER_ID,
 			"OrderStatus": order_status,
-			"FulfillmentChannel": "MFN",
+			"FulfillmentChannel": fulfillment_channel,
 			"MarketplaceId": "A1F83G8C2ARO7P",
 			"PurchaseDate": "2026-07-20T10:00:00Z",
 			"OrderTotal": {"Amount": amount},
@@ -176,6 +176,17 @@ class TestOrderStatusRefresh(IntegrationTestCase):
 			get_draft_amazon_order_qty_map([self.item_code]).get(self.item_code),
 			1.0,
 			"a draft reserves nothing in Bin, so it must be deducted or the feed oversells",
+		)
+
+	def test_an_afn_draft_does_not_eat_merchant_stock(self):
+		repository = self.build_repository()
+		self.sync(repository, self.build_order("Pending", 0, fulfillment_channel="AFN"), rate=0)
+
+		self.assertEqual(self.get_sales_order("docstatus", "fulfillment_channel").fulfillment_channel, "AFN")
+		self.assertEqual(
+			get_draft_amazon_order_qty_map([self.item_code]),
+			{},
+			"an AFN order ships from Amazon's warehouse, so deducting it hides merchant stock",
 		)
 
 	def test_a_submitted_order_is_not_double_counted_against_free_stock(self):

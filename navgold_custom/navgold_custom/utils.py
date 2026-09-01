@@ -138,6 +138,10 @@ def get_draft_amazon_order_qty_map(item_codes: list[str]) -> dict[str, float]:
 			# a draft stays a draft once Amazon cancels it — nothing submits or deletes it, so
 			# without this it eats free qty forever
 			& Coalesce(sales_order.amazon_order_status, "").notin(list(CLOSED_ORDER_STATUSES))
+			# this deduction stands in for the reservation a draft never takes, and only a
+			# merchant-fulfilled order will ever draw on our shelf: an AFN order ships from
+			# Amazon's own warehouse and is closed on submit, so deducting it hid real stock
+			& (sales_order.fulfillment_channel == "MFN")
 		)
 		.groupby(sales_order_item.item_code)
 	).run(as_dict=True)

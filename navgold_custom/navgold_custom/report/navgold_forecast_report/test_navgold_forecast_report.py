@@ -152,7 +152,7 @@ class TestForecastReportActions(IntegrationTestCase):
 		receive_stock(item_code, qty, self.warehouse, self.company)
 		return item_code
 
-	def make_draft_amazon_order(self, item_code, qty):
+	def make_draft_amazon_order(self, item_code, qty, fulfillment_channel="MFN"):
 		"""A draft Amazon Sales Order — sold but not yet submitted, so the report nets it off free qty."""
 		sales_order = frappe.new_doc("Sales Order")
 		sales_order.customer = self.customer
@@ -160,6 +160,7 @@ class TestForecastReportActions(IntegrationTestCase):
 		sales_order.transaction_date = frappe.utils.today()
 		sales_order.delivery_date = frappe.utils.today()
 		sales_order.amazon_order_id = f"TEST-{frappe.generate_hash(length=8)}"
+		sales_order.fulfillment_channel = fulfillment_channel
 		sales_order.append(
 			"items",
 			{
@@ -438,6 +439,18 @@ class TestForecastReportActions(IntegrationTestCase):
 		# 20 on the shelf, 15 already sold on a draft Amazon order — the report calls 5 of them free
 		# and the transfer must not be offered the other 15.
 		self.assertEqual(shortfalls[0]["available_qty"], 5.0)
+
+	def test_an_afn_order_does_not_take_stock_off_the_merchant_shelf(self):
+		item_code = self.make_stocked_item(20)
+		self.make_draft_amazon_order(item_code, 15, fulfillment_channel="AFN")
+		transfer_rows = self.expand([(item_code, "Nos", 20)])
+
+		shortfalls = resolve_transfer_shortfalls(transfer_rows, self.company, self.afn_warehouse)[1]
+
+		# The draft deduction stands in for a reservation erpnext only takes on submit, but an AFN
+		# order ships from Amazon's own warehouse and never draws on this shelf. Deducting it hid
+		# real merchant stock from the forecast, the To Purchase report and the strategy selector.
+		self.assertEqual(shortfalls, [], "all 20 are still on the shelf, so nothing is short")
 
 	def test_exact_fit_is_covered_and_one_unit_more_is_short(self):
 		item_code = self.make_stocked_item(12)
