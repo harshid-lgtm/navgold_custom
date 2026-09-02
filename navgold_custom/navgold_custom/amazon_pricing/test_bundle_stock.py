@@ -14,6 +14,17 @@ from navgold_custom.navgold_custom.amazon_pricing.template_applicator import app
 from navgold_custom.navgold_custom.amazon_pricing.test_template_applicator import create_strategy_template
 
 
+def make_customer(customer_name):
+	customer = frappe.new_doc("Customer")
+	customer.customer_name = customer_name
+	# The site default is a group node, which Customer rejects.
+	customer.customer_group = frappe.get_all(
+		"Customer Group", filters={"is_group": 0}, limit=1, pluck="name"
+	)[0]
+	customer.insert()
+	return customer.name
+
+
 def make_item(item_code, is_stock_item):
 	if frappe.db.exists("Item", item_code):
 		return item_code
@@ -89,9 +100,9 @@ def make_proxy_sku(item_code, template_name):
 	return proxy_sku.name
 
 
-def sell_component_on_a_draft_order(item_code, qty, warehouse, company, fulfillment_channel="MFN"):
+def sell_component_on_a_draft_order(item_code, qty, warehouse, company, customer, fulfillment_channel="MFN"):
 	sales_order = frappe.new_doc("Sales Order")
-	sales_order.customer = frappe.db.get_value("Customer", {}, "name")
+	sales_order.customer = customer
 	sales_order.company = company
 	sales_order.transaction_date = frappe.utils.today()
 	sales_order.delivery_date = frappe.utils.today()
@@ -125,6 +136,7 @@ class TestBundleComponentDraftDemand(IntegrationTestCase):
 		super().setUpClass()
 		cls.template_name = create_strategy_template()
 		cls.warehouse, cls.company = get_stock_warehouse()
+		cls.customer = make_customer(f"NG Bundle Draft {frappe.generate_hash(length=6)}")
 
 	def build_bundle(self, component_qty=15):
 		suffix = frappe.generate_hash(length=6)
@@ -137,7 +149,7 @@ class TestBundleComponentDraftDemand(IntegrationTestCase):
 
 	def test_a_draft_order_on_a_component_does_not_shrink_the_buildable_count(self):
 		component, proxy_sku, buildable = self.build_bundle()
-		sell_component_on_a_draft_order(component, buildable, self.warehouse, self.company)
+		sell_component_on_a_draft_order(component, buildable, self.warehouse, self.company, self.customer)
 
 		stock_info = get_stock_info(proxy_sku)
 		self.assertEqual(
@@ -159,7 +171,7 @@ class TestBundleComponentDraftDemand(IntegrationTestCase):
 
 	def test_the_feed_publishes_a_bundle_the_shelf_can_still_build(self):
 		component, proxy_sku, buildable = self.build_bundle()
-		sell_component_on_a_draft_order(component, buildable, self.warehouse, self.company)
+		sell_component_on_a_draft_order(component, buildable, self.warehouse, self.company, self.customer)
 
 		pricing = frappe.get_doc("Amazon Product Pricing", {"proxy_sku": proxy_sku})
 		pricing.active_strategy = pricing.sfp_strategy
@@ -173,7 +185,7 @@ class TestBundleComponentDraftDemand(IntegrationTestCase):
 	def test_an_afn_draft_on_a_component_never_touches_the_buildable_count(self):
 		component, proxy_sku, buildable = self.build_bundle()
 		sell_component_on_a_draft_order(
-			component, buildable, self.warehouse, self.company, fulfillment_channel="AFN"
+			component, buildable, self.warehouse, self.company, self.customer, fulfillment_channel="AFN"
 		)
 
 		self.assertEqual(get_stock_info(proxy_sku)["mfn_stock"], buildable)

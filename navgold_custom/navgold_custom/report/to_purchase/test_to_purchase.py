@@ -5,7 +5,11 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import add_days, flt, nowdate
 
-from navgold_custom.navgold_custom.amazon_pricing.test_bundle_stock import make_item, receive_stock
+from navgold_custom.navgold_custom.amazon_pricing.test_bundle_stock import (
+	make_customer,
+	make_item,
+	receive_stock,
+)
 from navgold_custom.navgold_custom.custom_script.stock_entry.test_fba_clearing import (
 	COMPANY,
 	create_test_warehouse,
@@ -143,7 +147,7 @@ class TestToPurchaseDraftDemand(IntegrationTestCase):
 	def setUpClass(cls):
 		super().setUpClass()
 		cls.warehouse = create_test_warehouse("Test To Purchase Drafts")
-		cls.customer = frappe.db.get_value("Customer", {}, "name")
+		cls.customer = make_customer(f"NG To Purchase Draft {frappe.generate_hash(length=6)}")
 
 	def stocked_item(self, qty):
 		item_code = make_item(f"TEST-DRAFT-DEMAND-{frappe.generate_hash(length=6)}", is_stock_item=1)

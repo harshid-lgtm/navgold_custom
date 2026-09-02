@@ -15,6 +15,7 @@ from navgold_custom.navgold_custom.amazon_pricing.strategy_selector import (
 from navgold_custom.navgold_custom.amazon_pricing.template_applicator import apply_template_to_proxy_sku
 from navgold_custom.navgold_custom.amazon_pricing.test_bundle_stock import (
 	get_stock_warehouse,
+	make_customer,
 	receive_stock,
 )
 from navgold_custom.navgold_custom.amazon_pricing.test_template_applicator import create_strategy_template
@@ -271,6 +272,7 @@ class TestStrategyLadderIgnoresDraftOrders(IntegrationTestCase):
 		super().setUpClass()
 		cls.template_name = create_strategy_template()
 		cls.warehouse, cls.company = get_stock_warehouse()
+		cls.customer = make_customer(f"NG Ladder Draft {frappe.generate_hash(length=6)}")
 
 	def build_sku(self, warehouse_qty=0, fba_qty=0):
 		item_code = create_test_item()
@@ -288,7 +290,7 @@ class TestStrategyLadderIgnoresDraftOrders(IntegrationTestCase):
 
 	def sell_on_a_draft_order(self, item_code, qty):
 		sales_order = frappe.new_doc("Sales Order")
-		sales_order.customer = frappe.db.get_value("Customer", {}, "name")
+		sales_order.customer = self.customer
 		sales_order.company = self.company
 		sales_order.transaction_date = frappe.utils.today()
 		sales_order.delivery_date = frappe.utils.today()

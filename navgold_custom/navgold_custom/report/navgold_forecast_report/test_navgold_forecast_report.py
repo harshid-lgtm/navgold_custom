@@ -9,6 +9,7 @@ from frappe.tests import IntegrationTestCase
 from navgold_custom.navgold_custom.amazon_pricing.test_bundle_stock import (
 	get_stock_warehouse,
 	make_bundle,
+	make_customer,
 	make_item,
 	receive_stock,
 )
@@ -38,17 +39,6 @@ def make_supplier(supplier_name):
 	)
 	supplier.insert()
 	return supplier.name
-
-
-def make_customer(customer_name):
-	customer = frappe.new_doc("Customer")
-	customer.customer_name = customer_name
-	# The site default is a group node, which Customer rejects.
-	customer.customer_group = frappe.get_all(
-		"Customer Group", filters={"is_group": 0}, limit=1, pluck="name"
-	)[0]
-	customer.insert()
-	return customer.name
 
 
 def make_supplier_price(item_code, supplier, price, uom="Nos"):
