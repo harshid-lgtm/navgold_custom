@@ -9,6 +9,7 @@ from frappe.tests import IntegrationTestCase
 from navgold_custom.navgold_custom.amazon_pricing.test_bundle_stock import (
 	get_stock_warehouse,
 	make_bundle,
+	make_customer,
 	make_item,
 	receive_stock,
 )
@@ -38,17 +39,6 @@ def make_supplier(supplier_name):
 	)
 	supplier.insert()
 	return supplier.name
-
-
-def make_customer(customer_name):
-	customer = frappe.new_doc("Customer")
-	customer.customer_name = customer_name
-	# The site default is a group node, which Customer rejects.
-	customer.customer_group = frappe.get_all(
-		"Customer Group", filters={"is_group": 0}, limit=1, pluck="name"
-	)[0]
-	customer.insert()
-	return customer.name
 
 
 def make_supplier_price(item_code, supplier, price, uom="Nos"):
@@ -152,7 +142,7 @@ class TestForecastReportActions(IntegrationTestCase):
 		receive_stock(item_code, qty, self.warehouse, self.company)
 		return item_code
 
-	def make_draft_amazon_order(self, item_code, qty):
+	def make_draft_amazon_order(self, item_code, qty, fulfillment_channel="MFN"):
 		"""A draft Amazon Sales Order — sold but not yet submitted, so the report nets it off free qty."""
 		sales_order = frappe.new_doc("Sales Order")
 		sales_order.customer = self.customer
@@ -160,6 +150,7 @@ class TestForecastReportActions(IntegrationTestCase):
 		sales_order.transaction_date = frappe.utils.today()
 		sales_order.delivery_date = frappe.utils.today()
 		sales_order.amazon_order_id = f"TEST-{frappe.generate_hash(length=8)}"
+		sales_order.fulfillment_channel = fulfillment_channel
 		sales_order.append(
 			"items",
 			{
@@ -428,16 +419,17 @@ class TestForecastReportActions(IntegrationTestCase):
 		self.assertEqual(kept_rows, transfer_rows)
 		self.assertFalse(shortfalls[0]["answered"])
 
-	def test_stock_reserved_for_an_amazon_order_is_not_offered_to_amazon(self):
+	def test_a_draft_amazon_order_does_not_hold_back_a_transfer(self):
 		item_code = self.make_stocked_item(20)
 		self.make_draft_amazon_order(item_code, 15)
 		transfer_rows = self.expand([(item_code, "Nos", 20)])
 
 		shortfalls = resolve_transfer_shortfalls(transfer_rows, self.company, self.afn_warehouse)[1]
 
-		# 20 on the shelf, 15 already sold on a draft Amazon order — the report calls 5 of them free
-		# and the transfer must not be offered the other 15.
-		self.assertEqual(shortfalls[0]["available_qty"], 5.0)
+		# All 20 are physically on the shelf. A draft order reserves nothing in Bin, and on submit
+		# it either reserves the stock or raises its own request, so netting it off here only hid
+		# sellable stock from the transfer.
+		self.assertEqual(shortfalls, [])
 
 	def test_exact_fit_is_covered_and_one_unit_more_is_short(self):
 		item_code = self.make_stocked_item(12)

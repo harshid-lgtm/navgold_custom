@@ -5,7 +5,11 @@ import frappe
 from frappe.tests import IntegrationTestCase
 from frappe.utils import add_days, flt, nowdate
 
-from navgold_custom.navgold_custom.amazon_pricing.test_bundle_stock import make_item
+from navgold_custom.navgold_custom.amazon_pricing.test_bundle_stock import (
+	make_customer,
+	make_item,
+	receive_stock,
+)
 from navgold_custom.navgold_custom.custom_script.stock_entry.test_fba_clearing import (
 	COMPANY,
 	create_test_warehouse,
@@ -18,6 +22,7 @@ from navgold_custom.navgold_custom.report.navgold_forecast_report.test_navgold_f
 from navgold_custom.navgold_custom.report.to_purchase.to_purchase import (
 	create_purchase_orders_from_report,
 )
+from navgold_custom.navgold_custom.utils import get_free_qty_map
 
 PACK_UOM = "Pack of 6"
 PACK_SIZE = 6
@@ -132,3 +137,68 @@ class TestToPurchasePurchaseOrders(IntegrationTestCase):
 
 		material_request.reload()
 		self.assertEqual(flt(material_request.items[0].ordered_qty), 12)
+
+
+class TestToPurchaseDraftDemand(IntegrationTestCase):
+	"""Purchasing is the one reader that nets off draft orders: those units are already sold, so
+	buying against them would under-order. Every other reader asks what is physically sellable."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.warehouse = create_test_warehouse("Test To Purchase Drafts")
+		cls.customer = make_customer(f"NG To Purchase Draft {frappe.generate_hash(length=6)}")
+
+	def stocked_item(self, qty):
+		item_code = make_item(f"TEST-DRAFT-DEMAND-{frappe.generate_hash(length=6)}", is_stock_item=1)
+		receive_stock(item_code, qty, self.warehouse, COMPANY)
+		return item_code
+
+	def draft_order(self, item_code, qty, fulfillment_channel):
+		sales_order = frappe.new_doc("Sales Order")
+		sales_order.customer = self.customer
+		sales_order.company = COMPANY
+		sales_order.transaction_date = nowdate()
+		sales_order.delivery_date = nowdate()
+		sales_order.amazon_order_id = f"TEST-{frappe.generate_hash(length=8)}"
+		sales_order.fulfillment_channel = fulfillment_channel
+		sales_order.amazon_order_status = "Pending"
+		sales_order.append(
+			"items",
+			{
+				"item_code": item_code,
+				"qty": qty,
+				"rate": 10,
+				"warehouse": self.warehouse,
+				"delivery_date": nowdate(),
+			},
+		)
+		sales_order.insert()
+
+	def free_qty(self, item_code, deduct_draft_orders):
+		return flt(
+			get_free_qty_map([item_code], deduct_draft_orders=deduct_draft_orders)
+			.get(item_code, {})
+			.get("free_qty")
+		)
+
+	def test_purchasing_nets_off_an_mfn_draft_but_the_shelf_reading_does_not(self):
+		item_code = self.stocked_item(10)
+		self.draft_order(item_code, 4, "MFN")
+
+		self.assertEqual(self.free_qty(item_code, deduct_draft_orders=True), 6, "4 are already sold")
+		self.assertEqual(
+			self.free_qty(item_code, deduct_draft_orders=False),
+			10,
+			"a draft reserves nothing, so the shelf still holds 10 to sell and to transfer",
+		)
+
+	def test_an_afn_draft_is_never_netted_off_even_for_purchasing(self):
+		item_code = self.stocked_item(10)
+		self.draft_order(item_code, 4, "AFN")
+
+		self.assertEqual(
+			self.free_qty(item_code, deduct_draft_orders=True),
+			10,
+			"an AFN order ships from Amazon's warehouse and never draws on this shelf",
+		)
