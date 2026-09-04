@@ -27,3 +27,4 @@ navgold_custom.patches.v1.retire_dead_material_request_demand
 navgold_custom.patches.v1.complete_pick_lists_stranded_by_bundle_rows
 navgold_custom.patches.v1.close_cancelled_amazon_sales_orders
 navgold_custom.patches.v1.set_over_order_allowance_for_pack_rounding
+navgold_custom.patches.v1.request_stock_for_orders_left_uncovered

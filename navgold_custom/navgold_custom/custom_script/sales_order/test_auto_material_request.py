@@ -21,6 +21,9 @@ from navgold_custom.navgold_custom.report.navgold_forecast_report.test_navgold_f
 	add_uom_conversion,
 	make_supplier,
 )
+from navgold_custom.patches.v1.request_stock_for_orders_left_uncovered import (
+	execute as execute_uncovered_patch,
+)
 
 
 class TestAutoMaterialRequest(IntegrationTestCase):
@@ -306,4 +309,88 @@ class TestUnclaimedSupplyNeverCoversAnOrder(IntegrationTestCase):
 			self.requested_qty_for(sales_order),
 			3,
 			"AFN stock sits on Amazon's shelf — we cannot pick it for a merchant-fulfilled order",
+		)
+
+
+class TestRequestStockForOrdersLeftUncovered(IntegrationTestCase):
+	"""The backlog half of the fix: orders already stranded by the old reading get their requests
+	raised once, and only once."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.warehouse = create_test_warehouse("Test Uncovered Backfill")
+		cls.customer = make_test_customer()
+
+	def setUp(self):
+		super().setUp()
+		self.item_code = make_item(f"TEST-BACKFILL-{self._testMethodName}", is_stock_item=1)
+
+	def strand_an_order(self, qty, amazon_order_status="Unshipped"):
+		"""An order submitted with no request of its own — what the old reading left behind whenever
+		it judged the order covered by someone else's supply."""
+		sales_order = frappe.new_doc("Sales Order")
+		sales_order.customer = self.customer
+		sales_order.company = COMPANY
+		sales_order.fulfillment_channel = "MFN"
+		sales_order.amazon_order_status = amazon_order_status
+		sales_order.transaction_date = nowdate()
+		sales_order.delivery_date = add_days(nowdate(), 1)
+		sales_order.append(
+			"items",
+			{
+				"item_code": self.item_code,
+				"qty": qty,
+				"uom": "Nos",
+				"rate": 10,
+				"warehouse": self.warehouse,
+				"delivery_date": add_days(nowdate(), 1),
+			},
+		)
+		sales_order.insert()
+		# submit without the hook, so the order lands stranded exactly as the old reading left it
+		sales_order.flags.ignore_validate_update_after_submit = True
+		with patch(
+			"navgold_custom.navgold_custom.custom_script.sales_order.sales_order.create_material_request"
+		):
+			sales_order.submit()
+		return sales_order
+
+	def requested_qty_for(self, sales_order):
+		rows = frappe.get_all(
+			"Material Request Item",
+			filters={"sales_order": sales_order.name, "docstatus": 1},
+			fields=["stock_qty"],
+		)
+		return sum(flt(row.stock_qty) for row in rows)
+
+	def test_a_stranded_order_gets_its_request_raised(self):
+		sales_order = self.strand_an_order(4)
+		self.assertEqual(self.requested_qty_for(sales_order), 0, "the order must start stranded")
+
+		execute_uncovered_patch()
+
+		self.assertEqual(self.requested_qty_for(sales_order), 4)
+
+	def test_running_it_twice_does_not_request_the_stock_twice(self):
+		sales_order = self.strand_an_order(4)
+
+		execute_uncovered_patch()
+		execute_uncovered_patch()
+
+		self.assertEqual(
+			self.requested_qty_for(sales_order),
+			4,
+			"requested_qty caps the line, so a re-run on migrate must be a no-op",
+		)
+
+	def test_an_order_amazon_has_already_shipped_is_left_alone(self):
+		sales_order = self.strand_an_order(4, amazon_order_status="Shipped")
+
+		execute_uncovered_patch()
+
+		self.assertEqual(
+			self.requested_qty_for(sales_order),
+			0,
+			"the goods have already left — buying replacements is not a fix",
 		)
