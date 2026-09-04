@@ -49,6 +49,11 @@ except ImportError:
 	from erpnext.buying.doctype.purchase_order.purchase_order import make_purchase_receipt
 
 try:
+	from erpnext.stock.doctype.material_request.mapper import make_purchase_order
+except ImportError:
+	from erpnext.stock.doctype.material_request.material_request import make_purchase_order
+
+try:
 	from erpnext.stock.doctype.packed_item.packed_item import get_product_bundle_items
 except ImportError:
 	# v17+: Product Bundle is versioned, no longer named by item_code; resolve active version first.
