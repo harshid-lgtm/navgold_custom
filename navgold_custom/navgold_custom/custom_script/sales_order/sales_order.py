@@ -12,11 +12,11 @@ from erpnext.stock.doctype.stock_reservation_entry.stock_reservation_entry impor
 )
 from frappe import _
 from frappe.query_builder import DocType
-from frappe.query_builder.functions import Sum
 from frappe.utils import cint, flt, getdate, nowdate
 
 from navgold_custom.navgold_custom.amazon_pricing.alerts import alert_material_request_failed
 from navgold_custom.navgold_custom.erpnext_compat import make_material_request
+from navgold_custom.navgold_custom.utils import get_free_qty_map
 
 
 def sales_order_on_submit(doc, method):
@@ -92,36 +92,25 @@ def get_item_bin_data(item_code, warehouse=None):
 	return items
 
 
-def get_projected_qty_map(item_codes: list) -> dict:
-	if not item_codes:
-		return {}
+def get_shelf_qty_map(item_codes: list) -> dict:
+	"""What this order can actually draw on: our own shelf, less what submitted orders reserve.
 
-	Bin = DocType("Bin")
-	Warehouse = DocType("Warehouse")
+	Deliberately not ``Bin.projected_qty``. That folds in open Material Requests and Purchase
+	Orders, which are real supply but claimed by nobody — so an order would be judged covered by
+	paperwork raised for a different order, without any link recording it. When that paperwork was
+	later stopped, the order it was silently covering was stranded with nothing on order and no
+	alert. Every order now asks only what is on the shelf and raises its own request.
 
-	allowed_wh = frappe.get_list("Warehouse", pluck="name", ignore_permissions=False)
-
-	query = (
-		frappe.qb.from_(Bin)
-		.join(Warehouse)
-		.on(Bin.warehouse == Warehouse.name)
-		.select(Bin.item_code, Sum(Bin.projected_qty).as_("projected_qty"))
-		.where((Bin.item_code.isin(item_codes)) & (Warehouse.is_rejected_warehouse != 1))
-		.groupby(Bin.item_code)
-	)
-
-	if allowed_wh:
-		query = query.where(Bin.warehouse.isin(allowed_wh))
-
-	rows = query.run(as_dict=True)
-	return {row.item_code: flt(row.projected_qty) for row in rows}
+	Stock held at Amazon needs no special case: the AFN warehouse is flagged as a rejected
+	warehouse, which this reading already excludes.
+	"""
+	free_qty_map = get_free_qty_map(item_codes)
+	return {item_code: flt(row.get("free_qty")) for item_code, row in free_qty_map.items()}
 
 
-def get_shortage_by_sales_order_item(doc, projected_qty_map):
+def get_shortage_by_sales_order_item(doc, shelf_qty_map):
 	shortage_by_item = {
-		item_code: abs(projected_qty)
-		for item_code, projected_qty in projected_qty_map.items()
-		if projected_qty < 0
+		item_code: abs(free_qty) for item_code, free_qty in shelf_qty_map.items() if free_qty < 0
 	}
 
 	today = getdate(nowdate())
@@ -153,7 +142,7 @@ def get_shortage_by_sales_order_item(doc, projected_qty_map):
 
 def create_material_request(doc):
 	item_codes = [item.item_code for item in doc.items]
-	items_needing_stock = get_shortage_by_sales_order_item(doc, get_projected_qty_map(item_codes))
+	items_needing_stock = get_shortage_by_sales_order_item(doc, get_shelf_qty_map(item_codes))
 
 	if not items_needing_stock:
 		return
