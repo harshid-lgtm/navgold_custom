@@ -417,6 +417,14 @@ class TestRequestStockForOrdersLeftUncovered(IntegrationTestCase):
 		sales_order.submit()
 		return sales_order
 
+	def requests_for(self, sales_order):
+		return frappe.get_all(
+			"Material Request Item",
+			filters={"sales_order": sales_order.name, "docstatus": 1},
+			pluck="parent",
+			distinct=True,
+		)
+
 	def test_an_order_left_half_covered_is_topped_up_to_its_own_line(self):
 		"""SAL-ORD-2026-29870's shape: it wanted 2, the shelf held 1, so it asked for 1 — and then
 		another order took the unit it had been sized against. Its request is never re-sized, so
@@ -434,6 +442,9 @@ class TestRequestStockForOrdersLeftUncovered(IntegrationTestCase):
 			2,
 			"the unit it was counting on is gone, so the request must cover the whole line",
 		)
+		# The first request is submitted and cannot be edited, so the shortfall arrives as a second
+		# one. Purchasing reads the pair as one figure: To Purchase sums pending qty per item.
+		self.assertEqual(len(self.requests_for(sales_order)), 2)
 
 	def test_an_order_amazon_has_already_shipped_is_left_alone(self):
 		sales_order = self.strand_an_order(4, amazon_order_status="Shipped")
