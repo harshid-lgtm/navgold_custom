@@ -65,6 +65,19 @@ class TestRestockDateFromOpenLines(IntegrationTestCase):
 		self.make_purchase_order(self.item_code, due, qty=10, received_qty=4, status="To Receive and Bill")
 		self.assertEqual(getdate(get_restock_data_map([self.item_code])[self.item_code]), getdate(due))
 
+	def test_the_soonest_open_line_is_the_restock_date(self):
+		"""Two deliveries outstanding: the item is back when the first one lands. Taking the later
+		date promised the customer the worst of them."""
+		soonest = add_days(today(), 4)
+		self.make_purchase_order(
+			self.item_code, soonest, qty=10, received_qty=0, status="To Receive and Bill"
+		)
+		self.make_purchase_order(
+			self.item_code, add_days(today(), 26), qty=10, received_qty=0, status="To Receive and Bill"
+		)
+
+		self.assertEqual(getdate(get_restock_data_map([self.item_code])[self.item_code]), getdate(soonest))
+
 	def test_received_line_ignored_even_when_po_header_still_awaits_stock(self):
 		received_due = add_days(today(), -6)
 		self.make_purchase_order(
@@ -136,3 +149,77 @@ class TestRestockDateNeverPublishedInThePast(IntegrationTestCase):
 		for offset in (-30, -6, -1, 0, 1, 20):
 			inventory = self.build_inventory(add_days(today(), offset), lead_time_days=3)
 			self.assertGreaterEqual(getdate(inventory["restock_date"]), getdate(today()))
+
+
+class TestRestockDateOnlyWhenThereIsNothingToShip(IntegrationTestCase):
+	"""CLIP182-DUPx4's shape: a Prime Warehouse listing offering 9 packs off its own shelf still
+	carried restock_date 2026-09-30, because PUR-ORD-2026-00159 sat at 68 of 72 received and kept a
+	pending restock alive. Amazon quotes the delivery promise from that date, so the listing said
+	2 October while the stock was on the shelf."""
+
+	def build_inventory(self, active_strategy, mfn_stock, pack_size=4.0):
+		pricing = frappe._dict(
+			{
+				"proxy_sku": "RESTOCK-SHIP-SKU",
+				"active_strategy": active_strategy,
+				"fba_strategy": "fba",
+				"sfp_strategy": "sfp",
+				"backorder_strategy": "backorder",
+			}
+		)
+		proxy_sku_info = {
+			"RESTOCK-SHIP-SKU": {
+				"item": "RESTOCK-SHIP-ITEM",
+				"uom": "Pack of 4",
+				"pool_size": 1,
+				"pack_size": pack_size,
+				"merchant_shipping_group": None,
+			}
+		}
+		stock_info_map = {
+			"RESTOCK-SHIP-SKU": {
+				"mfn_stock": mfn_stock,
+				"fba_stock": 0,
+				"has_restock_date": True,
+				"restock_date": add_days(today(), 23),
+			}
+		}
+		supplier_data_map = {
+			"RESTOCK-SHIP-ITEM": {
+				"top_supplier": frappe._dict(supplier="S1", stock_qty=70, rank=1, price=5),
+				"in_stock_supplier": frappe._dict(supplier="S1", stock_qty=70, rank=1, price=5),
+			}
+		}
+		return get_sku_inventory_data(
+			pricing,
+			None,
+			proxy_sku_info,
+			stock_info_map,
+			supplier_data_map,
+			{"S1": 3},
+			{},
+			0,
+			0,
+			None,
+			{"RESTOCK-SHIP-SKU": int(mfn_stock // pack_size)},
+		)
+
+	def test_a_listing_shipping_off_the_shelf_publishes_no_restock_date(self):
+		inventory = self.build_inventory("sfp", mfn_stock=36)
+
+		self.assertEqual(inventory["quantity"], 9, "36 units at 4 to a pack is 9 packs")
+		self.assertIsNone(
+			inventory["restock_date"],
+			"the stock is on the shelf, so an incoming delivery is no part of the promise",
+		)
+
+	def test_a_listing_with_nothing_on_the_shelf_still_publishes_one(self):
+		inventory = self.build_inventory("sfp", mfn_stock=0)
+
+		self.assertEqual(inventory["quantity"], 0)
+		self.assertEqual(getdate(inventory["restock_date"]), getdate(add_days(today(), 23)))
+
+	def test_a_backorder_still_publishes_one(self):
+		inventory = self.build_inventory("backorder", mfn_stock=0)
+
+		self.assertEqual(getdate(inventory["restock_date"]), getdate(add_days(today(), 23)))
