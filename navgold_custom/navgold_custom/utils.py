@@ -73,7 +73,9 @@ def get_restock_data_map(item_codes: list[str]) -> dict[str, object]:
 			& (purchase_order_item.received_qty < purchase_order_item.qty)
 			& (purchase_order_item.item_code.isin(item_codes))
 		)
-		.orderby(purchase_order_item.schedule_date, order=Order.desc)
+		# soonest first: with more than one line open the item is back when the earliest lands, and
+		# the latest date would have us promise the customer the worst of them
+		.orderby(purchase_order_item.schedule_date, order=Order.asc)
 	).run(as_dict=True)
 
 	restock_map: dict[str, object] = {}

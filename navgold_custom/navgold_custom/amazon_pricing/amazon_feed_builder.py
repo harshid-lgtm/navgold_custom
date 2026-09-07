@@ -491,13 +491,19 @@ def get_sku_inventory_data(
 	if zero_stock_proxy_skus is not None and pricing.proxy_sku in zero_stock_proxy_skus:
 		quantity = 0
 
+	# Amazon quotes the delivery promise from restock_date, so it belongs only on a listing with
+	# nothing to ship today. Published alongside stock we are already offering it pushes the promise
+	# out for nothing: CLIP182-DUPx4 offered 9 packs off its own shelf and still promised
+	# 30 September, because a purchase order sitting at 68 of 72 received kept a restock date alive.
+	# lead_time_days is already withheld from an SFP listing for the same reason.
 	restock_date = None
-	if stock_info.get("has_restock_date", False):
-		po_date = stock_info.get("restock_date")
-		supplier_eta = add_days(today(), lead_time_days)
-		restock_date = cstr(po_date) if po_date and getdate(po_date) > getdate() else cstr(supplier_eta)
-	elif is_backorder and resolved_supplier_stock > 0:
-		restock_date = cstr(add_days(today(), lead_time_days))
+	if is_backorder or quantity <= 0:
+		if stock_info.get("has_restock_date", False):
+			po_date = stock_info.get("restock_date")
+			supplier_eta = add_days(today(), lead_time_days)
+			restock_date = cstr(po_date) if po_date and getdate(po_date) > getdate() else cstr(supplier_eta)
+		elif is_backorder and resolved_supplier_stock > 0:
+			restock_date = cstr(add_days(today(), lead_time_days))
 
 	if is_sfp:
 		is_two_day = (sku_shipping_group_choice or "").strip().lower() == "twoday"
