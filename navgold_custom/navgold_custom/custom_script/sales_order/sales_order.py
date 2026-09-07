@@ -103,6 +103,12 @@ def get_shelf_qty_map(item_codes: list) -> dict:
 
 	Stock held at Amazon needs no special case: the AFN warehouse is flagged as a rejected
 	warehouse, which this reading already excludes.
+
+	Draft Amazon orders are deliberately not netted off: a draft reserves nothing, and on submit it
+	either reserves the stock or raises its own request. What this reading cannot do is revisit an
+	order once its request is written, so a shelf unit counted here and later consumed by another
+	order leaves the earlier order short. request_stock_for_uncovered_orders is what settles that,
+	after the loss is real rather than predicted.
 	"""
 	free_qty_map = get_free_qty_map(item_codes)
 	return {item_code: flt(row.get("free_qty")) for item_code, row in free_qty_map.items()}
@@ -200,3 +206,68 @@ def create_material_request(doc):
 			alert=True,
 			indicator="red",
 		)
+
+
+# Amazon has already handed these to the carrier, whatever ERPNext's delivery state says — several
+# carry per_delivered = 0 because the Delivery Note was never made. Requesting stock for them would
+# buy replacements for goods the customer already has.
+SHIPPED_ORDER_STATUSES = ("Shipped", "PartiallyShipped")
+
+
+def request_stock_for_uncovered_orders() -> list[str]:
+	"""Top every open merchant-fulfilled order back up to its own line.
+
+	Idempotent by construction: erpnext raises the Sales Order line's requested_qty when a request
+	is submitted, and the per-line cap is stock_qty minus that, so an order already covered asks for
+	nothing. Safe to run on every migrate, and safe to run twice.
+	"""
+	# imported inside the function: amazon_repository pulls in the SP-API client at module level,
+	# and this module is loaded on every Sales Order save
+	from navgold_custom.navgold_custom.amazon_repository import CLOSED_ORDER_STATUSES
+
+	sales_orders = frappe.get_all(
+		"Sales Order",
+		filters={
+			"docstatus": 1,
+			"fulfillment_channel": "MFN",
+			"status": ("not in", ("Closed", "Completed", "Cancelled")),
+			"amazon_order_status": ("not in", SHIPPED_ORDER_STATUSES + CLOSED_ORDER_STATUSES),
+		},
+		pluck="name",
+	)
+	if not sales_orders:
+		return []
+
+	candidates = get_orders_short_of_stock(sales_orders)
+
+	requested = []
+	for name in candidates:
+		# create_material_request needs the whole document, so this is one read per candidate — which
+		# is why the shelf screen above runs first rather than walking every open order.
+		material_request = create_material_request(frappe.get_doc("Sales Order", name))
+		if material_request:
+			requested.append(material_request.name)
+
+	return requested
+
+
+def get_orders_short_of_stock(sales_orders: list[str]) -> list[str]:
+	"""Orders holding a line for an item whose shelf is already in deficit, still short of its own
+	request. A deliberately generous screen: an item with stock to spare would raise nothing anyway,
+	so this only skips the reads that create_material_request would have thrown away."""
+	order_items = frappe.get_all(
+		"Sales Order Item",
+		filters={"parent": ("in", sales_orders), "docstatus": 1},
+		fields=["parent", "item_code", "stock_qty", "requested_qty"],
+	)
+	if not order_items:
+		return []
+
+	shelf_qty_map = get_shelf_qty_map(list({row.item_code for row in order_items}))
+
+	candidates = {
+		row.parent
+		for row in order_items
+		if shelf_qty_map.get(row.item_code, 0) < 0 and flt(row.stock_qty) > flt(row.requested_qty)
+	}
+	return [name for name in sales_orders if name in candidates]

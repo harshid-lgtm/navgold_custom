@@ -384,6 +384,68 @@ class TestRequestStockForOrdersLeftUncovered(IntegrationTestCase):
 			"requested_qty caps the line, so a re-run on migrate must be a no-op",
 		)
 
+	def move_stock(self, qty, receive=True):
+		stock_entry = frappe.new_doc("Stock Entry")
+		stock_entry.stock_entry_type = "Material Receipt" if receive else "Material Issue"
+		stock_entry.company = COMPANY
+		row = {"item_code": self.item_code, "qty": qty, "basic_rate": 5}
+		row["t_warehouse" if receive else "s_warehouse"] = self.warehouse
+		stock_entry.append("items", row)
+		stock_entry.insert()
+		stock_entry.submit()
+
+	def order_through_the_hook(self, qty):
+		sales_order = frappe.new_doc("Sales Order")
+		sales_order.customer = self.customer
+		sales_order.company = COMPANY
+		sales_order.fulfillment_channel = "MFN"
+		sales_order.amazon_order_status = "Unshipped"
+		sales_order.transaction_date = nowdate()
+		sales_order.delivery_date = add_days(nowdate(), 1)
+		sales_order.append(
+			"items",
+			{
+				"item_code": self.item_code,
+				"qty": qty,
+				"uom": "Nos",
+				"rate": 10,
+				"warehouse": self.warehouse,
+				"delivery_date": add_days(nowdate(), 1),
+			},
+		)
+		sales_order.insert()
+		sales_order.submit()
+		return sales_order
+
+	def requests_for(self, sales_order):
+		return frappe.get_all(
+			"Material Request Item",
+			filters={"sales_order": sales_order.name, "docstatus": 1},
+			pluck="parent",
+			distinct=True,
+		)
+
+	def test_an_order_left_half_covered_is_topped_up_to_its_own_line(self):
+		"""SAL-ORD-2026-29870's shape: it wanted 2, the shelf held 1, so it asked for 1 — and then
+		another order took the unit it had been sized against. Its request is never re-sized, so
+		without this sweep it stays short by exactly the stock it lost."""
+		self.move_stock(1)
+		sales_order = self.order_through_the_hook(2)
+		self.assertEqual(self.requested_qty_for(sales_order), 1, "the shelf unit covered half the line")
+
+		self.move_stock(1, receive=False)
+
+		execute_uncovered_patch()
+
+		self.assertEqual(
+			self.requested_qty_for(sales_order),
+			2,
+			"the unit it was counting on is gone, so the request must cover the whole line",
+		)
+		# The first request is submitted and cannot be edited, so the shortfall arrives as a second
+		# one. Purchasing reads the pair as one figure: To Purchase sums pending qty per item.
+		self.assertEqual(len(self.requests_for(sales_order)), 2)
+
 	def test_an_order_amazon_has_already_shipped_is_left_alone(self):
 		sales_order = self.strand_an_order(4, amazon_order_status="Shipped")
 
