@@ -342,15 +342,19 @@ function update_quantity_display(item_code, supplier, new_qty) {
 
 	if (!edit_icon) return;
 
-	const wrapper = edit_icon.closest('.qty-edit-wrapper');
-	if (wrapper) {
-		const quantity_span = wrapper.querySelector('span:first-child');
-		if (quantity_span) {
-			quantity_span.textContent = new_qty;
-		}
+	const row = edit_icon.closest('.dt-row');
+	const cell = edit_icon.closest('.dt-cell');
+	const datatable = purchase_report_state.report?.datatable;
+
+	if (cell && datatable) {
+		datatable.cellmanager.updateCell(
+			Number(cell.dataset.colIndex),
+			Number(cell.dataset.rowIndex),
+			new_qty,
+			true,
+		);
 	}
 
-	const row = edit_icon.closest('.dt-row');
 	if (row) {
 		const checkbox = row.querySelector(
 			'.dt-cell--col-0 input[type="checkbox"]',
