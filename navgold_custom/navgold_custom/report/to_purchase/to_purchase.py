@@ -283,7 +283,7 @@ def get_supplier_list(item_codes: list[str], supplier_filter: str | None) -> lis
 	if supplier_filter:
 		query = query.where(supplier_item_price_and_stock.supplier == supplier_filter)
 
-	return query.orderby(supplier_item_price_and_stock.item, supplier_item_price_and_stock.unit_price).run(
+	return query.orderby(supplier_item_price_and_stock.item, supplier_item_price_and_stock.rank).run(
 		as_dict=True
 	)
 
