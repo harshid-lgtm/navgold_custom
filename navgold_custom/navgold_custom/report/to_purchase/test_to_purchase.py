@@ -21,6 +21,7 @@ from navgold_custom.navgold_custom.report.navgold_forecast_report.test_navgold_f
 )
 from navgold_custom.navgold_custom.report.to_purchase.to_purchase import (
 	create_purchase_orders_from_report,
+	get_data,
 )
 from navgold_custom.navgold_custom.utils import get_free_qty_map
 
@@ -202,3 +203,82 @@ class TestToPurchaseDraftDemand(IntegrationTestCase):
 			10,
 			"an AFN order ships from Amazon's warehouse and never draws on this shelf",
 		)
+
+
+class TestToPurchaseSupplierChoice(IntegrationTestCase):
+	"""Which supplier the report hands to the buyer: rank order, falling through to the next one
+	when the top-ranked supplier cannot cover the demand."""
+
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.warehouse = create_test_warehouse("Test To Purchase Choice")
+
+	def setUp(self):
+		super().setUp()
+		self.item_code = make_item(f"TEST-TO-PURCHASE-RANK-{frappe.generate_hash(length=6)}", is_stock_item=1)
+
+	def offer(self, supplier_name, price, rank, stock_qty):
+		supplier = make_supplier(f"{supplier_name} {frappe.generate_hash(length=6)}")
+		name = make_supplier_price(self.item_code, supplier, price=price)
+		frappe.db.set_value("Supplier Item Price and Stock", name, {"rank": rank, "stock_qty": stock_qty})
+		return supplier
+
+	def make_material_request(self, qty):
+		material_request = frappe.new_doc("Material Request")
+		material_request.company = COMPANY
+		material_request.material_request_type = "Purchase"
+		material_request.transaction_date = nowdate()
+		material_request.schedule_date = add_days(nowdate(), 1)
+		material_request.append(
+			"items",
+			{
+				"item_code": self.item_code,
+				"qty": qty,
+				"uom": "Nos",
+				"conversion_factor": 1,
+				"warehouse": self.warehouse,
+				"schedule_date": add_days(nowdate(), 1),
+			},
+		)
+		material_request.insert()
+		material_request.submit()
+		return material_request
+
+	def rows_for_item(self):
+		rows, _max_offers, _reference_suppliers = get_data({})
+		return [row for row in rows if row["item_code"] == self.item_code]
+
+	def test_the_top_ranked_supplier_wins_even_when_another_name_sorts_first(self):
+		# The rank-1 name sorts last alphabetically: row order alone would hand this to the rank-2
+		# supplier, which is exactly what the report used to do.
+		top = self.offer("ZZ Rank One", price=2.5, rank=1, stock_qty=30)
+		self.offer("AA Rank Two", price=2.9, rank=2, stock_qty=30)
+
+		self.make_material_request(10)
+
+		rows = self.rows_for_item()
+		self.assertEqual(len(rows), 1)
+		self.assertEqual(rows[0]["supplier"], top)
+		self.assertEqual(flt(rows[0]["allocated_qty"]), 10)
+
+	def test_an_out_of_stock_top_rank_falls_through_to_the_next_supplier(self):
+		self.offer("Rank One No Stock", price=2.5, rank=1, stock_qty=0)
+		second = self.offer("Rank Two In Stock", price=2.9, rank=2, stock_qty=30)
+
+		self.make_material_request(10)
+
+		rows = self.rows_for_item()
+		self.assertEqual(len(rows), 1)
+		self.assertEqual(rows[0]["supplier"], second)
+		self.assertEqual(flt(rows[0]["allocated_qty"]), 10)
+
+	def test_demand_beyond_the_top_supplier_spills_onto_the_next_rank(self):
+		top = self.offer("Rank One Short", price=2.5, rank=1, stock_qty=8)
+		second = self.offer("Rank Two Rest", price=2.9, rank=2, stock_qty=30)
+
+		self.make_material_request(10)
+
+		rows = sorted(self.rows_for_item(), key=lambda row: row["supplier_rank"])
+		self.assertEqual([row["supplier"] for row in rows], [top, second])
+		self.assertEqual([flt(row["allocated_qty"]) for row in rows], [8, 2])
