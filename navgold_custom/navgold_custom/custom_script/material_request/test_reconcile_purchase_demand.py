@@ -16,6 +16,7 @@ from navgold_custom.navgold_custom.custom_script.stock_entry.test_fba_clearing i
 	COMPANY,
 	create_test_warehouse,
 )
+from navgold_custom.navgold_custom.custom_script.supplier.supplier import DAYS_OF_WEEK
 
 
 class TestReconcilePurchaseDemand(IntegrationTestCase):
@@ -176,6 +177,36 @@ class TestReconcilePurchaseDemand(IntegrationTestCase):
 
 		self.assertEqual(self.status_of(material_request), "Pending")
 
+	def test_a_request_spanning_an_order_being_picked_is_kept(self):
+		covered_order = self.make_sales_order(qty=3)
+		picked_order = self.make_sales_order(qty=3)
+		material_request = frappe.new_doc("Material Request")
+		material_request.company = COMPANY
+		material_request.material_request_type = "Purchase"
+		material_request.transaction_date = nowdate()
+		material_request.schedule_date = add_days(nowdate(), 3)
+		for order in (covered_order, picked_order):
+			material_request.append(
+				"items",
+				{
+					"item_code": self.item_code,
+					"qty": 3,
+					"uom": "Nos",
+					"warehouse": self.warehouse,
+					"schedule_date": add_days(nowdate(), 3),
+					"sales_order": order.name,
+					"sales_order_item": order.items[0].name,
+				},
+			)
+		material_request.insert()
+		material_request.submit()
+
+		self.receive_stock(20)
+		self.make_pick_list(picked_order)
+		reconcile_purchase_demand()
+
+		self.assertEqual(self.status_of(material_request), "Pending")
+
 	def test_a_request_already_on_a_purchase_order_is_kept(self):
 		sales_order = self.make_sales_order(qty=3)
 		material_request = self.make_material_request(sales_order, qty=3)
@@ -189,15 +220,18 @@ class TestReconcilePurchaseDemand(IntegrationTestCase):
 	def test_stock_staged_for_delivery_still_counts_as_cover(self):
 		consolidation_warehouse = create_test_warehouse("Test Reconcile Consolidation")
 		frappe.db.set_value("Warehouse", consolidation_warehouse, "is_rejected_warehouse", 1)
-		settings = frappe.get_single("Navgold Settings")
-		settings.db_set("delivery_consolidation_warehouse", consolidation_warehouse)
-		frappe.clear_cache(doctype="Navgold Settings")
 
-		sales_order = self.make_sales_order(qty=3)
-		material_request = self.make_material_request(sales_order, qty=3)
-		self.receive_stock(3, warehouse=consolidation_warehouse)
+		# change_settings restores the singles value cache too — pointing the whole site at this
+		# warehouse without putting it back sends every other test's pick list down the
+		# consolidation path and reserves stock nobody asked it to
+		with self.change_settings(
+			"Navgold Settings", {"delivery_consolidation_warehouse": consolidation_warehouse}
+		):
+			sales_order = self.make_sales_order(qty=3)
+			material_request = self.make_material_request(sales_order, qty=3)
+			self.receive_stock(3, warehouse=consolidation_warehouse)
 
-		reconcile_purchase_demand()
+			reconcile_purchase_demand()
 
 		self.assertEqual(self.status_of(material_request), "Stopped")
 
@@ -256,5 +290,8 @@ def make_test_supplier():
 	supplier = frappe.new_doc("Supplier")
 	supplier.supplier_name = name
 	supplier.supplier_group = frappe.db.get_value("Supplier Group", {"is_group": 0}, "name")
+	supplier.custom_rank = 1
+	for day in DAYS_OF_WEEK:
+		supplier.append("custom_lead_time", {"day": day, "lead_time_before_12": 1, "lead_time_after_12": 2})
 	supplier.insert()
 	return supplier.name

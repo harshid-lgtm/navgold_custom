@@ -148,7 +148,7 @@ def retire_demand_covered_by_shelf(sales_orders: list[str]) -> list[str]:
 	if not material_requests:
 		return []
 
-	retirable_items = get_retirable_material_request_items(material_requests)
+	retirable_items = get_retirable_material_request_items(material_requests, set(sales_orders))
 	if not retirable_items:
 		return []
 
@@ -173,23 +173,37 @@ def retire_demand_covered_by_shelf(sales_orders: list[str]) -> list[str]:
 	return retired
 
 
-def get_retirable_material_request_items(material_requests: list[str]) -> list[frappe._dict]:
+def get_retirable_material_request_items(
+	material_requests: list[str], sales_orders: set[str]
+) -> list[frappe._dict]:
 	"""Lines whose demand we are still free to withdraw.
 
 	A line already on a Purchase Order is not one of them. Stopping its request would not unbuy
 	the stock, and erpnext guards every Material Request status rule with ``status != "Stopped"``,
 	so the document would never move again once the goods land.
+
+	Retirement is all-or-nothing per request, so a request is only in play when every one of its
+	lines is: linked to a Sales Order line, and to an order this pass is allowed to decide for.
 	"""
 	rows = frappe.get_all(
 		"Material Request Item",
 		filters={"parent": ("in", material_requests), "docstatus": 1},
-		fields=["parent", "name", "item_code", "stock_qty", "ordered_qty", "sales_order_item"],
+		fields=[
+			"parent",
+			"name",
+			"item_code",
+			"stock_qty",
+			"ordered_qty",
+			"sales_order",
+			"sales_order_item",
+		],
 	)
 
-	ordered_against = {row.parent for row in rows if flt(row.ordered_qty) > 0}
-	unlinked = {row.parent for row in rows if not row.sales_order_item}
+	held_back = {row.parent for row in rows if flt(row.ordered_qty) > 0}
+	held_back |= {row.parent for row in rows if not row.sales_order_item}
+	held_back |= {row.parent for row in rows if row.sales_order not in sales_orders}
 
-	return [row for row in rows if row.parent not in ordered_against and row.parent not in unlinked]
+	return [row for row in rows if row.parent not in held_back]
 
 
 def get_sales_order_items_covered_by_shelf(item_codes: set[str]) -> set[str]:
