@@ -26,13 +26,9 @@ def execute(filters: dict | None = None):
 
 
 def reconcile_demand_before_run() -> None:
-	"""Walk demand back to the truth before the buyer reads it.
-
-	The report is the moment the numbers get spent, so they are re-derived here rather than left to
-	the next scheduled sweep. Kept off the critical path deliberately: a refresh inside the window
-	reuses the last result, a second buyer opening the report waits for nobody, and a failure here
-	must never cost the buyer the report.
-	"""
+	# the report is where the numbers get spent, so they are re-derived here rather than left to
+	# the next sweep — but never at the cost of the report itself: a refresh inside the window
+	# reuses the last result, a second buyer waits for nobody, and a failure only logs
 	from navgold_custom.navgold_custom.custom_script.material_request.material_request import (
 		reconcile_purchase_demand,
 	)

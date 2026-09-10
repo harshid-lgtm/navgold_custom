@@ -123,14 +123,6 @@ def get_free_qty_map(item_codes: list[str], deduct_draft_orders: bool = False) -
 
 
 def get_shelf_actual_qty_map(item_codes: list[str]) -> dict[str, float]:
-	"""What is physically ours to allocate: every non-rejected warehouse plus delivery consolidation.
-
-	Consolidation is flagged as a rejected warehouse so free-qty readings ignore it, but stock
-	staged there is still ours and still reserved against the order it was staged for. Leaving it
-	out would read those orders as uncovered and buy replacements for goods already boxed.
-
-	Amazon's own stock stays out: AFN is rejected too, and nothing here adds it back.
-	"""
 	if not item_codes:
 		return {}
 
@@ -141,6 +133,9 @@ def get_shelf_actual_qty_map(item_codes: list[str]) -> dict[str, float]:
 	bin_dt = DocType("Bin")
 	warehouse_dt = DocType("Warehouse")
 
+	# consolidation is flagged rejected so free-qty readings skip it, but its bins carry no
+	# reserved_qty — dropping the stock while keeping the reservation buys replacements for
+	# goods already boxed. AFN is rejected too and is deliberately not added back.
 	allocatable = warehouse_dt.is_rejected_warehouse == 0
 	consolidation_warehouse = get_delivery_consolidation_warehouse()
 	if consolidation_warehouse:

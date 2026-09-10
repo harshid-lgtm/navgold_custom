@@ -30,8 +30,6 @@ class TestReconcilePurchaseDemand(IntegrationTestCase):
 		super().setUp()
 		self.item_code = make_item(f"TEST-RECONCILE-{self._testMethodName}", is_stock_item=1)
 
-	# helpers
-
 	def make_sales_order(self, qty, delivery_date=None, item_code=None):
 		sales_order = frappe.new_doc("Sales Order")
 		sales_order.customer = self.customer
@@ -118,15 +116,12 @@ class TestReconcilePurchaseDemand(IntegrationTestCase):
 			pluck="parent",
 		)
 
-	# tests
-
 	def test_a_pack_bought_whole_retires_the_requests_it_now_covers(self):
 		first_order = self.make_sales_order(qty=3)
 		second_order = self.make_sales_order(qty=3)
 		first_request = self.make_material_request(first_order, qty=3)
 		second_request = self.make_material_request(second_order, qty=3)
 
-		# the supplier only sells in tens, so buying for the first order covers the second too
 		self.receive_stock(10)
 		reconcile_purchase_demand()
 
@@ -139,7 +134,6 @@ class TestReconcilePurchaseDemand(IntegrationTestCase):
 		urgent_request = self.make_material_request(urgent_order, qty=6)
 		later_request = self.make_material_request(later_order, qty=6)
 
-		# only one order's worth on the shelf: the one promised first gets it
 		self.receive_stock(6)
 		reconcile_purchase_demand()
 
@@ -155,7 +149,6 @@ class TestReconcilePurchaseDemand(IntegrationTestCase):
 		self.assertEqual(self.status_of(material_request), "Stopped")
 		self.assertEqual(self.requested_qty_of(sales_order), 0)
 
-		# the unit it was counting on leaves on somebody else's delivery note
 		self.issue_stock(3)
 		reconcile_purchase_demand()
 
@@ -221,9 +214,8 @@ class TestReconcilePurchaseDemand(IntegrationTestCase):
 		consolidation_warehouse = create_test_warehouse("Test Reconcile Consolidation")
 		frappe.db.set_value("Warehouse", consolidation_warehouse, "is_rejected_warehouse", 1)
 
-		# change_settings restores the singles value cache too — pointing the whole site at this
-		# warehouse without putting it back sends every other test's pick list down the
-		# consolidation path and reserves stock nobody asked it to
+		# change_settings restores the singles value cache too; a bare db_set here leaks into every
+		# later test in the shared transaction and sends their pick lists down the consolidation path
 		with self.change_settings(
 			"Navgold Settings", {"delivery_consolidation_warehouse": consolidation_warehouse}
 		):
@@ -234,8 +226,6 @@ class TestReconcilePurchaseDemand(IntegrationTestCase):
 			reconcile_purchase_demand()
 
 		self.assertEqual(self.status_of(material_request), "Stopped")
-
-	# fixtures that need more than a couple of lines
 
 	def make_pick_list(self, sales_order):
 		pick_list = frappe.new_doc("Pick List")

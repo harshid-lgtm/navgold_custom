@@ -118,14 +118,6 @@ def retire_demand_on_delivery_note(doc, method=None):
 
 
 def reconcile_purchase_demand() -> dict[str, list[str]]:
-	"""Re-decide every open order's coverage against the shelf as it stands now.
-
-	The submit-time decision is taken once, against the shelf of that moment, and nothing revisits
-	it. Both directions go stale: a pack bought whole for one order leaves a surplus that would
-	cover the next one, and a unit an order was counting on can leave on someone else's delivery
-	note. This walks both back to the truth — retiring the requests the shelf now covers, and
-	raising fresh ones for the orders left short.
-	"""
 	from navgold_custom.navgold_custom.custom_script.sales_order.sales_order import (
 		get_orders_open_for_supply,
 		request_stock_for_uncovered_orders,
@@ -135,8 +127,7 @@ def reconcile_purchase_demand() -> dict[str, list[str]]:
 	if not sales_orders:
 		return {"retired": [], "requested": []}
 
-	# retire first: an order the shelf already covers must drop its request before the top-up runs,
-	# or the same pass would raise a request and then stop it again on the next one
+	# retire first, or the top-up raises a request this same pass would then stop
 	retired = retire_demand_covered_by_shelf(sales_orders)
 	requested = request_stock_for_uncovered_orders(sales_orders)
 
@@ -176,15 +167,6 @@ def retire_demand_covered_by_shelf(sales_orders: list[str]) -> list[str]:
 def get_retirable_material_request_items(
 	material_requests: list[str], sales_orders: set[str]
 ) -> list[frappe._dict]:
-	"""Lines whose demand we are still free to withdraw.
-
-	A line already on a Purchase Order is not one of them. Stopping its request would not unbuy
-	the stock, and erpnext guards every Material Request status rule with ``status != "Stopped"``,
-	so the document would never move again once the goods land.
-
-	Retirement is all-or-nothing per request, so a request is only in play when every one of its
-	lines is: linked to a Sales Order line, and to an order this pass is allowed to decide for.
-	"""
 	rows = frappe.get_all(
 		"Material Request Item",
 		filters={"parent": ("in", material_requests), "docstatus": 1},
@@ -199,6 +181,8 @@ def get_retirable_material_request_items(
 		],
 	)
 
+	# erpnext guards every Material Request status rule with status != "Stopped", so one stopped
+	# mid-purchase would never move again once the goods land
 	held_back = {row.parent for row in rows if flt(row.ordered_qty) > 0}
 	held_back |= {row.parent for row in rows if not row.sales_order_item}
 	held_back |= {row.parent for row in rows if row.sales_order not in sales_orders}
@@ -207,13 +191,6 @@ def get_retirable_material_request_items(
 
 
 def get_sales_order_items_covered_by_shelf(item_codes: set[str]) -> set[str]:
-	"""Sales Order lines the shelf can supply once the orders ahead of them have taken their share.
-
-	Earliest delivery date wins, because that is the order the warehouse will pick in and the one
-	whose promise breaks first. The tie-break on line name only exists to keep the answer stable:
-	an allocation that flips between runs would retire a request on one pass and raise it again on
-	the next.
-	"""
 	if not item_codes:
 		return set()
 
@@ -224,6 +201,8 @@ def get_sales_order_items_covered_by_shelf(item_codes: set[str]) -> set[str]:
 	shelf_qty_map = get_shelf_actual_qty_map(list(item_codes))
 
 	covered = set()
+	# tie-break on name so the allocation is stable: one that flips between runs would retire a
+	# request on one pass and raise it again on the next
 	for row in sorted(order_lines, key=lambda line: (getdate(line.delivery_date), line.name)):
 		outstanding = flt(row.stock_qty) - flt(row.delivered_qty)
 		if outstanding <= 0:
@@ -240,9 +219,8 @@ def get_sales_order_items_covered_by_shelf(item_codes: set[str]) -> set[str]:
 
 
 def get_outstanding_order_lines(item_codes: set[str]) -> list[frappe._dict]:
-	"""Every line still owed to a customer, which is exactly the set erpnext holds in
-	``Bin.reserved_qty``. Orders being picked and orders Amazon has already shipped are in here on
-	purpose: they still hold their stock, and crediting it to somebody else would oversell it."""
+	# deliberately the same set erpnext holds in Bin.reserved_qty, picked and shipped orders
+	# included: they still hold their stock, and crediting it elsewhere would oversell it
 	sales_order = frappe.qb.DocType("Sales Order")
 	sales_order_item = frappe.qb.DocType("Sales Order Item")
 
@@ -267,13 +245,9 @@ def get_outstanding_order_lines(item_codes: set[str]) -> list[frappe._dict]:
 
 
 def release_requested_qty(rows: list[frappe._dict]) -> None:
-	"""Hand the retired quantity back to the Sales Order line.
-
-	erpnext maintains ``requested_qty`` through the status updater on submit and cancel only —
-	stopping a request leaves it standing. Since the top-up caps each line at
-	``stock_qty - requested_qty``, an untouched value would make retirement a one-way door: the
-	order could never ask for stock again when the shelf that covered it went elsewhere.
-	"""
+	# erpnext maintains requested_qty through the status updater on submit and cancel only, so
+	# stopping leaves it standing. The top-up caps each line at stock_qty - requested_qty, so
+	# without this retirement is a one-way door and the order can never ask again.
 	for row in rows:
 		requested_qty = flt(frappe.db.get_value("Sales Order Item", row.sales_order_item, "requested_qty"))
 		frappe.db.set_value(

@@ -218,12 +218,6 @@ PICK_LIST_OPEN_STATUSES = ("Draft", "Open", "Partly Delivered", "Partially Trans
 
 
 def get_orders_open_for_supply() -> list[str]:
-	"""Open merchant-fulfilled orders whose supply is still ours to decide.
-
-	An order already on a Pick List is being fulfilled right now — its stock is claimed on the
-	shelf and half-picked in a tote. Both raising a fresh request for it and retiring the one it
-	has would act on a position that is mid-move, so it is left alone until the pick settles.
-	"""
 	# imported inside the function: amazon_repository pulls in the SP-API client at module level,
 	# and this module is loaded on every Sales Order save
 	from navgold_custom.navgold_custom.amazon_repository import CLOSED_ORDER_STATUSES
@@ -241,6 +235,8 @@ def get_orders_open_for_supply() -> list[str]:
 	if not sales_orders:
 		return []
 
+	# an order mid-pick has its stock half-claimed on the shelf and half in a tote: neither
+	# raising nor retiring its request would act on a settled position
 	being_picked = get_orders_on_open_pick_lists(sales_orders)
 	return [name for name in sales_orders if name not in being_picked]
 
