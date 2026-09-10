@@ -122,6 +122,42 @@ def get_free_qty_map(item_codes: list[str], deduct_draft_orders: bool = False) -
 	}
 
 
+def get_shelf_actual_qty_map(item_codes: list[str]) -> dict[str, float]:
+	"""What is physically ours to allocate: every non-rejected warehouse plus delivery consolidation.
+
+	Consolidation is flagged as a rejected warehouse so free-qty readings ignore it, but stock
+	staged there is still ours and still reserved against the order it was staged for. Leaving it
+	out would read those orders as uncovered and buy replacements for goods already boxed.
+
+	Amazon's own stock stays out: AFN is rejected too, and nothing here adds it back.
+	"""
+	if not item_codes:
+		return {}
+
+	from navgold_custom.navgold_custom.custom_script.pick_list.pick_list import (
+		get_delivery_consolidation_warehouse,
+	)
+
+	bin_dt = DocType("Bin")
+	warehouse_dt = DocType("Warehouse")
+
+	allocatable = warehouse_dt.is_rejected_warehouse == 0
+	consolidation_warehouse = get_delivery_consolidation_warehouse()
+	if consolidation_warehouse:
+		allocatable = allocatable | (bin_dt.warehouse == consolidation_warehouse)
+
+	rows = (
+		frappe.qb.from_(bin_dt)
+		.left_join(warehouse_dt)
+		.on(bin_dt.warehouse == warehouse_dt.name)
+		.select(bin_dt.item_code, Sum(bin_dt.actual_qty).as_("actual_qty"))
+		.where(bin_dt.item_code.isin(item_codes) & allocatable)
+		.groupby(bin_dt.item_code)
+	).run(as_dict=True)
+
+	return {row.item_code: flt(row.actual_qty) for row in rows}
+
+
 def get_draft_amazon_order_qty_map(item_codes: list[str]) -> dict[str, float]:
 	if not item_codes:
 		return {}

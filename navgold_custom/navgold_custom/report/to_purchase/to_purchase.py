@@ -5,16 +5,51 @@ from frappe import _
 from frappe.query_builder import DocType, Order
 from frappe.query_builder.functions import Sum
 from frappe.utils import ceil, flt
+from frappe.utils.file_lock import LockTimeoutError
+from frappe.utils.synchronization import filelock
 
 from navgold_custom.navgold_custom.utils import get_conversion_factor, get_free_qty_map
 
 material_request_status_list = ["Pending", "Partially Ordered", "Partially Received"]
 
 
+RECONCILE_LOCK = "navgold_reconcile_purchase_demand"
+RECONCILE_THROTTLE_KEY = "navgold_purchase_demand_reconciled_at"
+RECONCILE_THROTTLE_SECONDS = 300
+
+
 def execute(filters: dict | None = None):
+	reconcile_demand_before_run()
 	rows, max_supplier_offers, reference_suppliers = get_data(filters)
 	columns = get_columns(max_supplier_offers, reference_suppliers)
 	return columns, rows
+
+
+def reconcile_demand_before_run() -> None:
+	"""Walk demand back to the truth before the buyer reads it.
+
+	The report is the moment the numbers get spent, so they are re-derived here rather than left to
+	the next scheduled sweep. Kept off the critical path deliberately: a refresh inside the window
+	reuses the last result, a second buyer opening the report waits for nobody, and a failure here
+	must never cost the buyer the report.
+	"""
+	from navgold_custom.navgold_custom.custom_script.material_request.material_request import (
+		reconcile_purchase_demand,
+	)
+
+	if frappe.flags.read_only or frappe.cache().get_value(RECONCILE_THROTTLE_KEY):
+		return
+
+	try:
+		with filelock(RECONCILE_LOCK, timeout=1):
+			reconcile_purchase_demand()
+	except LockTimeoutError:
+		return
+	except Exception:
+		frappe.log_error(title="Purchase demand reconciliation failed before To Purchase run")
+		return
+
+	frappe.cache().set_value(RECONCILE_THROTTLE_KEY, 1, expires_in_sec=RECONCILE_THROTTLE_SECONDS)
 
 
 def get_columns(max_supplier_offers: int, reference_suppliers: list[dict]) -> list[dict]:
