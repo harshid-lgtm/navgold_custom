@@ -23,9 +23,6 @@ def execute(filters: dict | None = None):
 
 
 def reconcile_demand_before_run() -> None:
-	# the report is where the numbers get spent, so they are re-derived here rather than left to
-	# the next sweep — but never at the cost of the report itself: a refresh inside the window
-	# reuses the last result, a second buyer waits for nobody, and a failure only logs
 	from navgold_custom.navgold_custom.custom_script.material_request.material_request import (
 		reconcile_purchase_demand_job,
 	)

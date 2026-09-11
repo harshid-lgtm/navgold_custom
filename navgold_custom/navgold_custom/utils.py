@@ -123,15 +123,6 @@ def get_free_qty_map(item_codes: list[str], deduct_draft_orders: bool = False) -
 
 
 def get_allocatable_warehouse_filter(warehouse_field):
-	"""Warehouses whose stock is ours to allocate.
-
-	Consolidation is flagged rejected so free-qty readings skip it, but its bins carry no
-	reserved_qty — dropping the stock while keeping the reservation buys replacements for goods
-	already boxed. AFN is rejected too and is deliberately not added back.
-
-	``warehouse_field`` is the caller's own warehouse column, so the same rule can gate a stock
-	reading and the order lines allocated against it without the two drifting apart.
-	"""
 	from navgold_custom.navgold_custom.custom_script.pick_list.pick_list import (
 		get_delivery_consolidation_warehouse,
 	)

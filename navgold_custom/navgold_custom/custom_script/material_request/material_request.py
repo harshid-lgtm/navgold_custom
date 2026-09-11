@@ -17,9 +17,6 @@ SETTLED_SALES_ORDER_STATUSES = ("Closed", "Completed")
 
 RECONCILE_LOCK = "navgold_reconcile_purchase_demand"
 
-# Quantities come back through conversion factors, so a line can land a whisker either side of the
-# figure it is compared against. Without a floor the dust alone is enough to stop a request and
-# raise its replacement, forever.
 QTY_TOLERANCE = 0.001
 
 
@@ -139,15 +136,9 @@ def reconcile_purchase_demand() -> dict[str, list[str]]:
 	if not sales_orders:
 		return {"retired": [], "requested": []}
 
-	# one allocation, spent by both halves. Sizing the two independently is what let a pass stop a
-	# request and the very next one raise it again
 	required_qty_map = get_required_qty_by_sales_order_item(sales_orders)
 
 	retired = stop_requests_larger_than_demand(sales_orders, required_qty_map)
-	# before the raises, or the replacement never gets written: erpnext's mapper keeps a line only
-	# while qty - requested_qty - delivered_qty > 0 (sales_order/mapper.py:get_remaining_qty), and
-	# the request just stopped is still counted in requested_qty. Again after, because submitting
-	# the replacement recomputes that stale sum on top.
 	sync_requested_qty(retired)
 	requested = raise_requests_for_uncovered_demand(sales_orders, required_qty_map)
 	sync_requested_qty(retired + requested)
@@ -156,8 +147,6 @@ def reconcile_purchase_demand() -> dict[str, list[str]]:
 
 
 def reconcile_purchase_demand_job() -> None:
-	# the report reconciles on read and this runs hourly: unlocked, the two passes interleave and
-	# each raises the request the other has just stopped
 	try:
 		with filelock(RECONCILE_LOCK, timeout=1):
 			reconcile_purchase_demand()
@@ -166,13 +155,6 @@ def reconcile_purchase_demand_job() -> None:
 
 
 def get_required_qty_by_sales_order_item(sales_orders: list[str]) -> dict[str, float]:
-	"""Per order line, the qty the shelf cannot cover.
-
-	The one figure both halves of the reconciliation spend. Coverage is allocated earliest
-	delivery date first, tie-broken on line name so the answer is stable between runs, and against
-	``actual`` qty rather than free qty — the orders being walked *are* the reservations, so
-	netting them twice would under-buy.
-	"""
 	item_codes = set(
 		frappe.get_all(
 			"Sales Order Item",
@@ -195,7 +177,6 @@ def get_required_qty_by_sales_order_item(sales_orders: list[str]) -> dict[str, f
 		if outstanding <= 0:
 			continue
 
-		# an oversold bin reads negative; it covers nothing rather than owing the next line
 		available = max(shelf_qty_map.get(row.item_code, 0), 0)
 		covered = min(available, outstanding)
 		shelf_qty_map[row.item_code] = available - covered
@@ -207,13 +188,6 @@ def get_required_qty_by_sales_order_item(sales_orders: list[str]) -> dict[str, f
 def stop_requests_larger_than_demand(
 	sales_orders: list[str], required_qty_map: dict[str, float]
 ) -> list[str]:
-	"""Stop every request asking for more than its line still needs.
-
-	A request at or under the figure is left standing, which is what makes a second pass over an
-	unchanged shelf do nothing at all. There is no way to shrink a submitted Material Request in
-	place — qty is not allow_on_submit and update_child_qty_rate does not carry the doctype — so a
-	line that has shrunk is stopped here and re-raised at the right size below.
-	"""
 	material_requests = get_open_material_requests(sales_orders)
 	if not material_requests:
 		return []
@@ -222,9 +196,6 @@ def stop_requests_larger_than_demand(
 	if not retirable_items:
 		return []
 
-	# measured against everything still asking for the line, not just the stoppable part: a line
-	# carrying one request already on a Purchase Order and one clean request is over-asking by the
-	# pair, and the clean one is the half we can still withdraw
 	requested_by_order_line = get_requested_qty_by_order_line(
 		get_submitted_material_request_items(material_requests)
 	)
@@ -259,8 +230,6 @@ def raise_requests_for_uncovered_demand(
 		raise_material_request,
 	)
 
-	# read back after the stops, so a request retired a moment ago no longer counts as cover.
-	# Requests already on a Purchase Order are counted in full: that demand is bought, not shelved
 	already_requested = get_requested_qty_by_order_line(
 		get_submitted_material_request_items(get_open_material_requests(sales_orders))
 	)
@@ -320,8 +289,6 @@ def get_retirable_material_request_items(
 ) -> list[frappe._dict]:
 	rows = get_submitted_material_request_items(material_requests)
 
-	# erpnext guards every Material Request status rule with status != "Stopped", so one stopped
-	# mid-purchase would never move again once the goods land
 	held_back = {row.parent for row in rows if flt(row.ordered_qty) > 0}
 	held_back |= {row.parent for row in rows if not row.sales_order_item}
 	held_back |= {row.parent for row in rows if row.sales_order not in sales_orders}
@@ -330,10 +297,6 @@ def get_retirable_material_request_items(
 
 
 def get_outstanding_order_lines(item_codes: set[str]) -> list[frappe._dict]:
-	# deliberately the same set erpnext holds in Bin.reserved_qty, picked and shipped orders
-	# included: they still hold their stock, and crediting it elsewhere would oversell it. Gated on
-	# the warehouses the shelf reading counts, or a line reserving at Amazon would eat cover our
-	# own shelf never had.
 	sales_order = frappe.qb.DocType("Sales Order")
 	sales_order_item = frappe.qb.DocType("Sales Order Item")
 	warehouse = frappe.qb.DocType("Warehouse")
@@ -362,17 +325,6 @@ def get_outstanding_order_lines(item_codes: set[str]) -> list[frappe._dict]:
 
 
 def sync_requested_qty(material_requests: list[str]) -> None:
-	"""Re-point requested_qty at the requests that are still live.
-
-	erpnext reads a stopped request two different ways. Bin.indented_qty excludes it
-	(stock_balance.get_indented_qty filters status != "Stopped"), but the Sales Order line's
-	requested_qty is summed by the status updater over every submitted Material Request Item with
-	no status condition at all (status_updater._update_children). So a line that has been cut back
-	still reads as fully requested, and the submit-time sizer — which caps each line at
-	stock_qty - requested_qty — would never raise for it again.
-
-	Run after the stops and the raises, or the next submit recomputes the stale sum on top.
-	"""
 	if not material_requests:
 		return
 

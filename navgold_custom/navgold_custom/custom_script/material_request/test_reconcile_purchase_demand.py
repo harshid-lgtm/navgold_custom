@@ -130,8 +130,6 @@ class TestReconcilePurchaseDemand(IntegrationTestCase):
 		self.assertEqual(self.status_of(second_request), "Stopped")
 
 	def test_the_earliest_delivery_date_keeps_the_cover(self):
-		# each order raises its own request on submit, so asserting on the surviving document would
-		# only say which of two identical requests was stopped. The figures are the claim.
 		urgent_order = self.make_sales_order(qty=6, delivery_date=add_days(nowdate(), 1))
 		later_order = self.make_sales_order(qty=6, delivery_date=add_days(nowdate(), 5))
 
@@ -215,8 +213,6 @@ class TestReconcilePurchaseDemand(IntegrationTestCase):
 		consolidation_warehouse = create_test_warehouse("Test Reconcile Consolidation")
 		frappe.db.set_value("Warehouse", consolidation_warehouse, "is_rejected_warehouse", 1)
 
-		# change_settings restores the singles value cache too; a bare db_set here leaks into every
-		# later test in the shared transaction and sends their pick lists down the consolidation path
 		with self.change_settings(
 			"Navgold Settings", {"delivery_consolidation_warehouse": consolidation_warehouse}
 		):
@@ -255,8 +251,6 @@ class TestReconcilePurchaseDemand(IntegrationTestCase):
 		)
 
 	def touching_this_item(self, material_requests):
-		# the suite runs against restored data, so a pass moves hundreds of requests that have
-		# nothing to do with this test
 		if not material_requests:
 			return []
 		return sorted(
@@ -271,7 +265,6 @@ class TestReconcilePurchaseDemand(IntegrationTestCase):
 
 	def test_a_request_is_cut_to_the_qty_the_shelf_cannot_cover(self):
 		sales_order = self.make_sales_order(qty=24)
-		# submitted against an empty shelf, so the order asks for its whole line
 		self.assertEqual([qty for _parent, qty in self.open_requests_for_item()], [24.0])
 
 		self.receive_stock(6)

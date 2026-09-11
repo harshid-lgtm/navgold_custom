@@ -386,9 +386,6 @@ scheduler_events = {
 		"40 * * * *": [
 			"navgold_custom.navgold_custom.doctype.supplier_stock_import.clf_stock_api.schedule_clf_fetch",
 		],
-		# Demand goes stale in both directions between report runs — a pack bought whole leaves a
-		# surplus, and a picked unit leaves an order short. The report reconciles on read; this
-		# keeps the figures honest for everything else that reads Material Requests.
 		"25 * * * *": [
 			"navgold_custom.navgold_custom.custom_script.material_request.material_request.reconcile_purchase_demand_job",
 		],

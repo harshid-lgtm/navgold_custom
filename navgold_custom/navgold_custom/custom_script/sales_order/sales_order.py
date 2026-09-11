@@ -154,12 +154,6 @@ def create_material_request(doc):
 
 
 def raise_material_request(doc, items_needing_stock):
-	"""Raise one request for this order, each line sized by the caller.
-
-	Split from the sizing so reconciliation can ask for figures it worked out itself: a sweep that
-	retires a request and then re-derives the replacement from a different reading would stop and
-	raise the same line forever.
-	"""
 	if not items_needing_stock:
 		return
 
@@ -245,8 +239,6 @@ def get_orders_open_for_supply() -> list[str]:
 	if not sales_orders:
 		return []
 
-	# an order mid-pick has its stock half-claimed on the shelf and half in a tote: neither
-	# raising nor retiring its request would act on a settled position
 	being_picked = get_orders_on_open_pick_lists(sales_orders)
 	return [name for name in sales_orders if name not in being_picked]
 
