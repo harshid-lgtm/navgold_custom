@@ -52,27 +52,23 @@ class TestReconcilePurchaseDemand(IntegrationTestCase):
 		sales_order.submit()
 		return sales_order
 
-	def make_material_request(self, sales_order, qty):
-		material_request = frappe.new_doc("Material Request")
-		material_request.company = COMPANY
-		material_request.material_request_type = "Purchase"
-		material_request.transaction_date = nowdate()
-		material_request.schedule_date = add_days(nowdate(), 3)
-		material_request.append(
-			"items",
-			{
-				"item_code": sales_order.items[0].item_code,
-				"qty": qty,
-				"uom": "Nos",
-				"warehouse": self.warehouse,
-				"schedule_date": add_days(nowdate(), 3),
-				"sales_order": sales_order.name,
-				"sales_order_item": sales_order.items[0].name,
-			},
+	def auto_request_for(self, sales_order):
+		# submitting the order already raises its request against an empty shelf. Building a second
+		# one by hand puts the line over its own qty, which only passes where Stock Settings carries
+		# an over-receipt allowance.
+		names = set(
+			frappe.get_all(
+				"Material Request Item",
+				filters={"sales_order_item": sales_order.items[0].name, "docstatus": 1},
+				pluck="parent",
+			)
 		)
-		material_request.insert()
-		material_request.submit()
-		return material_request
+		self.assertEqual(len(names), 1)
+		return frappe.get_doc("Material Request", names.pop())
+
+	def cancel_auto_requests(self, *sales_orders):
+		for sales_order in sales_orders:
+			self.auto_request_for(sales_order).cancel()
 
 	def receive_stock(self, qty, warehouse=None, item_code=None):
 		receipt = frappe.new_doc("Stock Entry")
@@ -120,8 +116,8 @@ class TestReconcilePurchaseDemand(IntegrationTestCase):
 	def test_a_pack_bought_whole_retires_the_requests_it_now_covers(self):
 		first_order = self.make_sales_order(qty=3)
 		second_order = self.make_sales_order(qty=3)
-		first_request = self.make_material_request(first_order, qty=3)
-		second_request = self.make_material_request(second_order, qty=3)
+		first_request = self.auto_request_for(first_order)
+		second_request = self.auto_request_for(second_order)
 
 		self.receive_stock(10)
 		reconcile_purchase_demand()
@@ -141,7 +137,7 @@ class TestReconcilePurchaseDemand(IntegrationTestCase):
 
 	def test_stock_lost_to_another_order_brings_the_request_back(self):
 		sales_order = self.make_sales_order(qty=3)
-		material_request = self.make_material_request(sales_order, qty=3)
+		material_request = self.auto_request_for(sales_order)
 
 		self.receive_stock(3)
 		reconcile_purchase_demand()
@@ -161,7 +157,7 @@ class TestReconcilePurchaseDemand(IntegrationTestCase):
 
 	def test_an_order_being_picked_is_left_alone(self):
 		sales_order = self.make_sales_order(qty=3)
-		material_request = self.make_material_request(sales_order, qty=3)
+		material_request = self.auto_request_for(sales_order)
 		self.receive_stock(10)
 		self.make_pick_list(sales_order)
 
@@ -172,6 +168,9 @@ class TestReconcilePurchaseDemand(IntegrationTestCase):
 	def test_a_request_spanning_an_order_being_picked_is_kept(self):
 		covered_order = self.make_sales_order(qty=3)
 		picked_order = self.make_sales_order(qty=3)
+		# a request spanning two orders is never raised automatically, so the per-order ones have to
+		# give their qty back before this one can claim the same lines
+		self.cancel_auto_requests(covered_order, picked_order)
 		material_request = frappe.new_doc("Material Request")
 		material_request.company = COMPANY
 		material_request.material_request_type = "Purchase"
@@ -201,7 +200,7 @@ class TestReconcilePurchaseDemand(IntegrationTestCase):
 
 	def test_a_request_already_on_a_purchase_order_is_kept(self):
 		sales_order = self.make_sales_order(qty=3)
-		material_request = self.make_material_request(sales_order, qty=3)
+		material_request = self.auto_request_for(sales_order)
 		self.make_purchase_order(material_request)
 
 		self.receive_stock(10)
@@ -217,7 +216,7 @@ class TestReconcilePurchaseDemand(IntegrationTestCase):
 			"Navgold Settings", {"delivery_consolidation_warehouse": consolidation_warehouse}
 		):
 			sales_order = self.make_sales_order(qty=3)
-			material_request = self.make_material_request(sales_order, qty=3)
+			material_request = self.auto_request_for(sales_order)
 			self.receive_stock(3, warehouse=consolidation_warehouse)
 
 			reconcile_purchase_demand()

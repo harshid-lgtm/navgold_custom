@@ -386,9 +386,6 @@ scheduler_events = {
 		"40 * * * *": [
 			"navgold_custom.navgold_custom.doctype.supplier_stock_import.clf_stock_api.schedule_clf_fetch",
 		],
-		"25 * * * *": [
-			"navgold_custom.navgold_custom.custom_script.material_request.material_request.reconcile_purchase_demand_job",
-		],
 	},
 	"daily": [
 		"navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku.schedule_bulk_fetch_selling_prices",
