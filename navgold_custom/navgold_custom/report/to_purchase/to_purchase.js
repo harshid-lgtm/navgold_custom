@@ -24,6 +24,10 @@ frappe.query_reports['To Purchase'] = {
 			create_info_bar(report);
 		}, 200);
 
+		report.page.add_inner_button(__('Reconcile Demand'), async () => {
+			await reconcile_demand(report);
+		});
+
 		report.page.add_inner_button(__('Create Purchase Orders'), async () => {
 			const selected_rows = purchase_report_state.get_selected_items();
 
@@ -363,6 +367,35 @@ function update_quantity_display(item_code, supplier, new_qty) {
 			checkbox.click();
 		}
 	}
+}
+
+async function reconcile_demand(report) {
+	const response = await frappe.call({
+		method:
+			'navgold_custom.navgold_custom.report.to_purchase.to_purchase.reconcile_demand_now',
+		freeze: true,
+		freeze_message: __('Reconciling purchase demand against current stock...'),
+	});
+
+	const { retired, requested, blocked } = response.message;
+
+	let message = __('{0} request(s) withdrawn, {1} raised.', [
+		retired,
+		requested,
+	]);
+	if (blocked) {
+		message += ` ${__('{0} could not be raised — see the Error Log.', [
+			blocked,
+		])}`;
+	}
+
+	frappe.msgprint({
+		title: __('Demand Reconciled'),
+		indicator: blocked ? 'orange' : 'green',
+		message: message,
+	});
+
+	report.refresh();
 }
 
 async function create_purchase_orders(selected_items, report) {

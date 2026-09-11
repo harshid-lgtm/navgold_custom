@@ -17,6 +17,21 @@ def execute(filters: dict | None = None):
 	return columns, rows
 
 
+@frappe.whitelist()
+def reconcile_demand_now() -> dict[str, int]:
+	from navgold_custom.navgold_custom.custom_script.material_request.material_request import (
+		reconcile_purchase_demand_job,
+	)
+
+	frappe.has_permission("Material Request", "write", throw=True)
+
+	result = reconcile_purchase_demand_job()
+	if result is None:
+		frappe.throw(_("Purchase demand is already being reconciled. Try again in a moment."))
+
+	return {"retired": len(result["retired"]), "requested": len(result["requested"])}
+
+
 def get_columns(max_supplier_offers: int, reference_suppliers: list[dict]) -> list[dict]:
 	columns = get_static_columns()
 	columns += build_offer_columns(max_supplier_offers, fieldname_prefix="offer")

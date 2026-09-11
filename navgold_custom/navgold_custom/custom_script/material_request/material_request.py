@@ -2,10 +2,22 @@
 # For license information, please see license.txt
 
 import frappe
-from frappe.utils import flt
+from frappe.query_builder.functions import Sum
+from frappe.utils import flt, getdate, nowdate
+from frappe.utils.file_lock import LockTimeoutError
+from frappe.utils.synchronization import filelock
+
+from navgold_custom.navgold_custom.utils import (
+	get_allocatable_warehouse_filter,
+	get_shelf_actual_qty_map,
+)
 
 OPEN_STATUSES = ("Pending", "Partially Ordered", "Partially Received")
 SETTLED_SALES_ORDER_STATUSES = ("Closed", "Completed")
+
+RECONCILE_LOCK = "navgold_reconcile_purchase_demand"
+
+QTY_TOLERANCE = 0.001
 
 
 def retire_demand_for_sales_orders(sales_orders):
@@ -113,3 +125,267 @@ def retire_demand_on_delivery_note(doc, method=None):
 
 	sales_orders = {row.against_sales_order for row in doc.items if row.get("against_sales_order")}
 	retire_demand_for_sales_orders(list(sales_orders))
+
+
+def reconcile_purchase_demand() -> dict[str, list[str]]:
+	from navgold_custom.navgold_custom.custom_script.sales_order.sales_order import (
+		get_orders_open_for_supply,
+	)
+
+	sales_orders = get_orders_open_for_supply()
+	if not sales_orders:
+		return {"retired": [], "requested": [], "blocked": []}
+
+	order_lines = frappe.get_all(
+		"Sales Order Item",
+		filters={"parent": ("in", sales_orders), "docstatus": 1},
+		pluck="name",
+	)
+	required_qty_map = get_required_qty_by_sales_order_item(sales_orders)
+
+	previously_muted = frappe.flags.mute_messages
+	frappe.flags.mute_messages = True
+	try:
+		retired = stop_requests_larger_than_demand(sales_orders, required_qty_map)
+		sync_requested_qty(order_lines)
+		requested, blocked = raise_requests_for_uncovered_demand(sales_orders, required_qty_map)
+		sync_requested_qty(order_lines)
+	finally:
+		frappe.flags.mute_messages = previously_muted
+
+	report_blocked_orders(blocked)
+
+	return {"retired": retired, "requested": requested, "blocked": blocked}
+
+
+def report_blocked_orders(blocked: list[str]) -> None:
+	if not blocked:
+		return
+
+	# one entry for the pass, not one per order: these fail the same way on every run, because
+	# erpnext's mapper compares the line's pack qty against requested_qty in stock units, so a pack
+	# line already carrying part of a request can never be topped up
+	frappe.log_error(
+		title="Purchase demand could not be raised",
+		message="Material Request refused for: " + ", ".join(sorted(blocked)),
+	)
+
+
+def reconcile_purchase_demand_job() -> dict[str, list[str]] | None:
+	try:
+		with filelock(RECONCILE_LOCK, timeout=1):
+			return reconcile_purchase_demand()
+	except LockTimeoutError:
+		return None
+
+
+def get_required_qty_by_sales_order_item(sales_orders: list[str]) -> dict[str, float]:
+	item_codes = set(
+		frappe.get_all(
+			"Sales Order Item",
+			filters={"parent": ("in", sales_orders), "docstatus": 1},
+			pluck="item_code",
+		)
+	)
+	if not item_codes:
+		return {}
+
+	order_lines = get_outstanding_order_lines(item_codes)
+	if not order_lines:
+		return {}
+
+	shelf_qty_map = get_shelf_actual_qty_map(list(item_codes))
+
+	required_qty_map = {}
+	for row in sorted(order_lines, key=lambda line: (getdate(line.delivery_date), line.name)):
+		outstanding = flt(row.stock_qty) - flt(row.delivered_qty)
+		if outstanding <= 0:
+			continue
+
+		available = max(shelf_qty_map.get(row.item_code, 0), 0)
+		covered = min(available, outstanding)
+		shelf_qty_map[row.item_code] = available - covered
+		required_qty_map[row.name] = outstanding - covered
+
+	return required_qty_map
+
+
+def stop_requests_larger_than_demand(
+	sales_orders: list[str], required_qty_map: dict[str, float]
+) -> list[str]:
+	material_requests = get_open_material_requests(sales_orders)
+	if not material_requests:
+		return []
+
+	retirable_items = get_retirable_material_request_items(material_requests, set(sales_orders))
+	if not retirable_items:
+		return []
+
+	requested_by_order_line = get_requested_qty_by_order_line(
+		get_submitted_material_request_items(material_requests)
+	)
+	overasking_order_lines = {
+		sales_order_item
+		for sales_order_item, requested_qty in requested_by_order_line.items()
+		if requested_qty > flt(required_qty_map.get(sales_order_item, 0)) + QTY_TOLERANCE
+	}
+	if not overasking_order_lines:
+		return []
+
+	claimed_by = {}
+	for row in retirable_items:
+		claimed_by.setdefault(row.parent, []).append(row)
+
+	retired = []
+	for name, rows in claimed_by.items():
+		if not any(row.sales_order_item in overasking_order_lines for row in rows):
+			continue
+
+		material_request = frappe.get_doc("Material Request", name)
+		material_request.update_status("Stopped")
+		retired.append(name)
+
+	return retired
+
+
+def raise_requests_for_uncovered_demand(
+	sales_orders: list[str], required_qty_map: dict[str, float]
+) -> list[str]:
+	from navgold_custom.navgold_custom.custom_script.sales_order.sales_order import (
+		raise_material_request,
+	)
+
+	already_requested = get_requested_qty_by_order_line(
+		get_submitted_material_request_items(get_open_material_requests(sales_orders))
+	)
+
+	today = getdate(nowdate())
+	shortfall_by_order = {}
+	order_lines = frappe.get_all(
+		"Sales Order Item",
+		filters={"parent": ("in", sales_orders), "docstatus": 1},
+		fields=["name", "parent", "delivery_date"],
+	)
+
+	for row in order_lines:
+		shortfall = flt(required_qty_map.get(row.name, 0)) - flt(already_requested.get(row.name, 0))
+		if shortfall <= QTY_TOLERANCE:
+			continue
+
+		delivery_date = getdate(row.delivery_date) if row.delivery_date else today
+		shortfall_by_order.setdefault(row.parent, {})[row.name] = {
+			"required_qty": shortfall,
+			"schedule_date": max(delivery_date, today),
+		}
+
+	requested = []
+	blocked = []
+	for name, items_needing_stock in shortfall_by_order.items():
+		material_request = raise_material_request(
+			frappe.get_doc("Sales Order", name), items_needing_stock, alert_on_failure=False
+		)
+		if material_request:
+			requested.append(material_request.name)
+		else:
+			blocked.append(name)
+
+	return requested, blocked
+
+
+def get_requested_qty_by_order_line(rows: list[frappe._dict]) -> dict[str, float]:
+	requested_by_order_line = {}
+	for row in rows:
+		if not row.sales_order_item:
+			continue
+		requested_by_order_line[row.sales_order_item] = requested_by_order_line.get(
+			row.sales_order_item, 0
+		) + flt(row.stock_qty)
+	return requested_by_order_line
+
+
+def get_submitted_material_request_items(material_requests: list[str]) -> list[frappe._dict]:
+	if not material_requests:
+		return []
+
+	return frappe.get_all(
+		"Material Request Item",
+		filters={"parent": ("in", material_requests), "docstatus": 1},
+		fields=["parent", "name", "item_code", "stock_qty", "ordered_qty", "sales_order", "sales_order_item"],
+	)
+
+
+def get_retirable_material_request_items(
+	material_requests: list[str], sales_orders: set[str]
+) -> list[frappe._dict]:
+	rows = get_submitted_material_request_items(material_requests)
+
+	held_back = {row.parent for row in rows if flt(row.ordered_qty) > 0}
+	held_back |= {row.parent for row in rows if not row.sales_order_item}
+	held_back |= {row.parent for row in rows if row.sales_order not in sales_orders}
+
+	return [row for row in rows if row.parent not in held_back]
+
+
+def get_outstanding_order_lines(item_codes: set[str]) -> list[frappe._dict]:
+	sales_order = frappe.qb.DocType("Sales Order")
+	sales_order_item = frappe.qb.DocType("Sales Order Item")
+	warehouse = frappe.qb.DocType("Warehouse")
+
+	return (
+		frappe.qb.from_(sales_order_item)
+		.join(sales_order)
+		.on(sales_order_item.parent == sales_order.name)
+		.left_join(warehouse)
+		.on(sales_order_item.warehouse == warehouse.name)
+		.select(
+			sales_order_item.name,
+			sales_order_item.item_code,
+			sales_order_item.stock_qty,
+			sales_order_item.delivered_qty,
+			sales_order_item.delivery_date,
+		)
+		.where(
+			sales_order_item.item_code.isin(list(item_codes))
+			& (sales_order.docstatus == 1)
+			& sales_order.status.notin(("Closed", "Completed", "Cancelled"))
+			& (sales_order_item.stock_qty > sales_order_item.delivered_qty)
+			& get_allocatable_warehouse_filter(sales_order_item.warehouse)
+		)
+	).run(as_dict=True)
+
+
+def sync_requested_qty(sales_order_items: list[str]) -> None:
+	if not sales_order_items:
+		return
+
+	material_request = frappe.qb.DocType("Material Request")
+	material_request_item = frappe.qb.DocType("Material Request Item")
+
+	rows = (
+		frappe.qb.from_(material_request_item)
+		.inner_join(material_request)
+		.on(material_request_item.parent == material_request.name)
+		.select(
+			material_request_item.sales_order_item,
+			Sum(material_request_item.stock_qty).as_("requested_qty"),
+		)
+		.where(
+			material_request_item.sales_order_item.isin(sales_order_items)
+			& (material_request.docstatus == 1)
+			& (material_request.status != "Stopped")
+		)
+		.groupby(material_request_item.sales_order_item)
+	).run(as_dict=True)
+
+	live_requested_qty = {row.sales_order_item: flt(row.requested_qty) for row in rows}
+
+	for row in frappe.get_all(
+		"Sales Order Item",
+		filters={"name": ("in", sales_order_items)},
+		fields=["name", "requested_qty"],
+	):
+		live = live_requested_qty.get(row.name, 0)
+		if abs(flt(row.requested_qty) - live) <= QTY_TOLERANCE:
+			continue
+
+		frappe.db.set_value("Sales Order Item", row.name, "requested_qty", live, update_modified=False)

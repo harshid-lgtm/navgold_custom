@@ -122,6 +122,40 @@ def get_free_qty_map(item_codes: list[str], deduct_draft_orders: bool = False) -
 	}
 
 
+def get_allocatable_warehouse_filter(warehouse_field):
+	from navgold_custom.navgold_custom.custom_script.pick_list.pick_list import (
+		get_delivery_consolidation_warehouse,
+	)
+
+	warehouse_dt = DocType("Warehouse")
+
+	allocatable = warehouse_dt.is_rejected_warehouse == 0
+	consolidation_warehouse = get_delivery_consolidation_warehouse()
+	if consolidation_warehouse:
+		allocatable = allocatable | (warehouse_field == consolidation_warehouse)
+
+	return allocatable
+
+
+def get_shelf_actual_qty_map(item_codes: list[str]) -> dict[str, float]:
+	if not item_codes:
+		return {}
+
+	bin_dt = DocType("Bin")
+	warehouse_dt = DocType("Warehouse")
+
+	rows = (
+		frappe.qb.from_(bin_dt)
+		.left_join(warehouse_dt)
+		.on(bin_dt.warehouse == warehouse_dt.name)
+		.select(bin_dt.item_code, Sum(bin_dt.actual_qty).as_("actual_qty"))
+		.where(bin_dt.item_code.isin(item_codes) & get_allocatable_warehouse_filter(bin_dt.warehouse))
+		.groupby(bin_dt.item_code)
+	).run(as_dict=True)
+
+	return {row.item_code: flt(row.actual_qty) for row in rows}
+
+
 def get_draft_amazon_order_qty_map(item_codes: list[str]) -> dict[str, float]:
 	if not item_codes:
 		return {}

@@ -150,6 +150,10 @@ def create_material_request(doc):
 	item_codes = [item.item_code for item in doc.items]
 	items_needing_stock = get_shortage_by_sales_order_item(doc, get_shelf_qty_map(item_codes))
 
+	return raise_material_request(doc, items_needing_stock)
+
+
+def raise_material_request(doc, items_needing_stock, alert_on_failure=True):
 	if not items_needing_stock:
 		return
 
@@ -196,6 +200,9 @@ def create_material_request(doc):
 		return mr
 
 	except Exception as error:
+		if not alert_on_failure:
+			return
+
 		# Swallowed on purpose: the order sync must not lose an Amazon order because its request
 		# failed. But the msgprint lands nowhere in a background job and the Error Log is purged
 		# after 14 days, so the shortage would go missing in silence — alert instead of trusting it.
@@ -214,13 +221,10 @@ def create_material_request(doc):
 SHIPPED_ORDER_STATUSES = ("Shipped", "PartiallyShipped")
 
 
-def request_stock_for_uncovered_orders() -> list[str]:
-	"""Top every open merchant-fulfilled order back up to its own line.
+PICK_LIST_OPEN_STATUSES = ("Draft", "Open", "Partly Delivered", "Partially Transferred")
 
-	Idempotent by construction: erpnext raises the Sales Order line's requested_qty when a request
-	is submitted, and the per-line cap is stock_qty minus that, so an order already covered asks for
-	nothing. Safe to run on every migrate, and safe to run twice.
-	"""
+
+def get_orders_open_for_supply() -> list[str]:
 	# imported inside the function: amazon_repository pulls in the SP-API client at module level,
 	# and this module is loaded on every Sales Order save
 	from navgold_custom.navgold_custom.amazon_repository import CLOSED_ORDER_STATUSES
@@ -235,6 +239,44 @@ def request_stock_for_uncovered_orders() -> list[str]:
 		},
 		pluck="name",
 	)
+	if not sales_orders:
+		return []
+
+	being_picked = get_orders_on_open_pick_lists(sales_orders)
+	return [name for name in sales_orders if name not in being_picked]
+
+
+def get_orders_on_open_pick_lists(sales_orders: list[str]) -> set[str]:
+	if not sales_orders:
+		return set()
+
+	pick_list = DocType("Pick List")
+	pick_list_item = DocType("Pick List Item")
+
+	return set(
+		(
+			frappe.qb.from_(pick_list_item)
+			.join(pick_list)
+			.on(pick_list_item.parent == pick_list.name)
+			.select(pick_list_item.sales_order)
+			.distinct()
+			.where(
+				pick_list_item.sales_order.isin(sales_orders)
+				& pick_list.status.isin(PICK_LIST_OPEN_STATUSES)
+				& (pick_list.docstatus < 2)
+			)
+		).run(pluck=True)
+	)
+
+
+def request_stock_for_uncovered_orders() -> list[str]:
+	"""Top every open merchant-fulfilled order back up to its own line.
+
+	Idempotent by construction: erpnext raises the Sales Order line's requested_qty when a request
+	is submitted, and the per-line cap is stock_qty minus that, so an order already covered asks for
+	nothing. Safe to run on every migrate, and safe to run twice.
+	"""
+	sales_orders = get_orders_open_for_supply()
 	if not sales_orders:
 		return []
 
