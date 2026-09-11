@@ -11,32 +11,25 @@ from navgold_custom.navgold_custom.utils import get_conversion_factor, get_free_
 material_request_status_list = ["Pending", "Partially Ordered", "Partially Received"]
 
 
-RECONCILE_THROTTLE_KEY = "navgold_purchase_demand_reconciled_at"
-RECONCILE_THROTTLE_SECONDS = 300
-
-
 def execute(filters: dict | None = None):
-	reconcile_demand_before_run()
 	rows, max_supplier_offers, reference_suppliers = get_data(filters)
 	columns = get_columns(max_supplier_offers, reference_suppliers)
 	return columns, rows
 
 
-def reconcile_demand_before_run() -> None:
+@frappe.whitelist()
+def reconcile_demand_now() -> dict[str, int]:
 	from navgold_custom.navgold_custom.custom_script.material_request.material_request import (
 		reconcile_purchase_demand_job,
 	)
 
-	if frappe.flags.read_only or frappe.cache().get_value(RECONCILE_THROTTLE_KEY):
-		return
+	frappe.has_permission("Material Request", "write", throw=True)
 
-	try:
-		reconcile_purchase_demand_job()
-	except Exception:
-		frappe.log_error(title="Purchase demand reconciliation failed before To Purchase run")
-		return
+	result = reconcile_purchase_demand_job()
+	if result is None:
+		frappe.throw(_("Purchase demand is already being reconciled. Try again in a moment."))
 
-	frappe.cache().set_value(RECONCILE_THROTTLE_KEY, 1, expires_in_sec=RECONCILE_THROTTLE_SECONDS)
+	return {"retired": len(result["retired"]), "requested": len(result["requested"])}
 
 
 def get_columns(max_supplier_offers: int, reference_suppliers: list[dict]) -> list[dict]:

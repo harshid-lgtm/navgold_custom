@@ -134,24 +134,49 @@ def reconcile_purchase_demand() -> dict[str, list[str]]:
 
 	sales_orders = get_orders_open_for_supply()
 	if not sales_orders:
-		return {"retired": [], "requested": []}
+		return {"retired": [], "requested": [], "blocked": []}
 
+	order_lines = frappe.get_all(
+		"Sales Order Item",
+		filters={"parent": ("in", sales_orders), "docstatus": 1},
+		pluck="name",
+	)
 	required_qty_map = get_required_qty_by_sales_order_item(sales_orders)
 
-	retired = stop_requests_larger_than_demand(sales_orders, required_qty_map)
-	sync_requested_qty(retired)
-	requested = raise_requests_for_uncovered_demand(sales_orders, required_qty_map)
-	sync_requested_qty(retired + requested)
+	previously_muted = frappe.flags.mute_messages
+	frappe.flags.mute_messages = True
+	try:
+		retired = stop_requests_larger_than_demand(sales_orders, required_qty_map)
+		sync_requested_qty(order_lines)
+		requested, blocked = raise_requests_for_uncovered_demand(sales_orders, required_qty_map)
+		sync_requested_qty(order_lines)
+	finally:
+		frappe.flags.mute_messages = previously_muted
 
-	return {"retired": retired, "requested": requested}
+	report_blocked_orders(blocked)
+
+	return {"retired": retired, "requested": requested, "blocked": blocked}
 
 
-def reconcile_purchase_demand_job() -> None:
+def report_blocked_orders(blocked: list[str]) -> None:
+	if not blocked:
+		return
+
+	# one entry for the pass, not one per order: these fail the same way on every run, because
+	# erpnext's mapper compares the line's pack qty against requested_qty in stock units, so a pack
+	# line already carrying part of a request can never be topped up
+	frappe.log_error(
+		title="Purchase demand could not be raised",
+		message="Material Request refused for: " + ", ".join(sorted(blocked)),
+	)
+
+
+def reconcile_purchase_demand_job() -> dict[str, list[str]] | None:
 	try:
 		with filelock(RECONCILE_LOCK, timeout=1):
-			reconcile_purchase_demand()
+			return reconcile_purchase_demand()
 	except LockTimeoutError:
-		return
+		return None
 
 
 def get_required_qty_by_sales_order_item(sales_orders: list[str]) -> dict[str, float]:
@@ -254,12 +279,17 @@ def raise_requests_for_uncovered_demand(
 		}
 
 	requested = []
+	blocked = []
 	for name, items_needing_stock in shortfall_by_order.items():
-		material_request = raise_material_request(frappe.get_doc("Sales Order", name), items_needing_stock)
+		material_request = raise_material_request(
+			frappe.get_doc("Sales Order", name), items_needing_stock, alert_on_failure=False
+		)
 		if material_request:
 			requested.append(material_request.name)
+		else:
+			blocked.append(name)
 
-	return requested
+	return requested, blocked
 
 
 def get_requested_qty_by_order_line(rows: list[frappe._dict]) -> dict[str, float]:
@@ -324,18 +354,7 @@ def get_outstanding_order_lines(item_codes: set[str]) -> list[frappe._dict]:
 	).run(as_dict=True)
 
 
-def sync_requested_qty(material_requests: list[str]) -> None:
-	if not material_requests:
-		return
-
-	sales_order_items = set(
-		frappe.get_all(
-			"Material Request Item",
-			filters={"parent": ("in", material_requests), "docstatus": 1},
-			pluck="sales_order_item",
-		)
-	)
-	sales_order_items.discard(None)
+def sync_requested_qty(sales_order_items: list[str]) -> None:
 	if not sales_order_items:
 		return
 
@@ -351,7 +370,7 @@ def sync_requested_qty(material_requests: list[str]) -> None:
 			Sum(material_request_item.stock_qty).as_("requested_qty"),
 		)
 		.where(
-			material_request_item.sales_order_item.isin(list(sales_order_items))
+			material_request_item.sales_order_item.isin(sales_order_items)
 			& (material_request.docstatus == 1)
 			& (material_request.status != "Stopped")
 		)
@@ -360,11 +379,13 @@ def sync_requested_qty(material_requests: list[str]) -> None:
 
 	live_requested_qty = {row.sales_order_item: flt(row.requested_qty) for row in rows}
 
-	for sales_order_item in sales_order_items:
-		frappe.db.set_value(
-			"Sales Order Item",
-			sales_order_item,
-			"requested_qty",
-			live_requested_qty.get(sales_order_item, 0),
-			update_modified=False,
-		)
+	for row in frappe.get_all(
+		"Sales Order Item",
+		filters={"name": ("in", sales_order_items)},
+		fields=["name", "requested_qty"],
+	):
+		live = live_requested_qty.get(row.name, 0)
+		if abs(flt(row.requested_qty) - live) <= QTY_TOLERANCE:
+			continue
+
+		frappe.db.set_value("Sales Order Item", row.name, "requested_qty", live, update_modified=False)

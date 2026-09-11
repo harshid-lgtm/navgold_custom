@@ -153,7 +153,7 @@ def create_material_request(doc):
 	return raise_material_request(doc, items_needing_stock)
 
 
-def raise_material_request(doc, items_needing_stock):
+def raise_material_request(doc, items_needing_stock, alert_on_failure=True):
 	if not items_needing_stock:
 		return
 
@@ -200,6 +200,9 @@ def raise_material_request(doc, items_needing_stock):
 		return mr
 
 	except Exception as error:
+		if not alert_on_failure:
+			return
+
 		# Swallowed on purpose: the order sync must not lose an Amazon order because its request
 		# failed. But the msgprint lands nowhere in a background job and the Error Log is purged
 		# after 14 days, so the shortage would go missing in silence — alert instead of trusting it.
