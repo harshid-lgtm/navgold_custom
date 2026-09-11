@@ -150,6 +150,16 @@ def create_material_request(doc):
 	item_codes = [item.item_code for item in doc.items]
 	items_needing_stock = get_shortage_by_sales_order_item(doc, get_shelf_qty_map(item_codes))
 
+	return raise_material_request(doc, items_needing_stock)
+
+
+def raise_material_request(doc, items_needing_stock):
+	"""Raise one request for this order, each line sized by the caller.
+
+	Split from the sizing so reconciliation can ask for figures it worked out itself: a sweep that
+	retires a request and then re-derives the replacement from a different reading would stop and
+	raise the same line forever.
+	"""
 	if not items_needing_stock:
 		return
 
@@ -264,15 +274,14 @@ def get_orders_on_open_pick_lists(sales_orders: list[str]) -> set[str]:
 	)
 
 
-def request_stock_for_uncovered_orders(sales_orders: list[str] | None = None) -> list[str]:
+def request_stock_for_uncovered_orders() -> list[str]:
 	"""Top every open merchant-fulfilled order back up to its own line.
 
 	Idempotent by construction: erpnext raises the Sales Order line's requested_qty when a request
 	is submitted, and the per-line cap is stock_qty minus that, so an order already covered asks for
 	nothing. Safe to run on every migrate, and safe to run twice.
 	"""
-	if sales_orders is None:
-		sales_orders = get_orders_open_for_supply()
+	sales_orders = get_orders_open_for_supply()
 	if not sales_orders:
 		return []
 

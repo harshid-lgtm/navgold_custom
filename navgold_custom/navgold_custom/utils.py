@@ -122,31 +122,43 @@ def get_free_qty_map(item_codes: list[str], deduct_draft_orders: bool = False) -
 	}
 
 
-def get_shelf_actual_qty_map(item_codes: list[str]) -> dict[str, float]:
-	if not item_codes:
-		return {}
+def get_allocatable_warehouse_filter(warehouse_field):
+	"""Warehouses whose stock is ours to allocate.
 
+	Consolidation is flagged rejected so free-qty readings skip it, but its bins carry no
+	reserved_qty — dropping the stock while keeping the reservation buys replacements for goods
+	already boxed. AFN is rejected too and is deliberately not added back.
+
+	``warehouse_field`` is the caller's own warehouse column, so the same rule can gate a stock
+	reading and the order lines allocated against it without the two drifting apart.
+	"""
 	from navgold_custom.navgold_custom.custom_script.pick_list.pick_list import (
 		get_delivery_consolidation_warehouse,
 	)
 
-	bin_dt = DocType("Bin")
 	warehouse_dt = DocType("Warehouse")
 
-	# consolidation is flagged rejected so free-qty readings skip it, but its bins carry no
-	# reserved_qty — dropping the stock while keeping the reservation buys replacements for
-	# goods already boxed. AFN is rejected too and is deliberately not added back.
 	allocatable = warehouse_dt.is_rejected_warehouse == 0
 	consolidation_warehouse = get_delivery_consolidation_warehouse()
 	if consolidation_warehouse:
-		allocatable = allocatable | (bin_dt.warehouse == consolidation_warehouse)
+		allocatable = allocatable | (warehouse_field == consolidation_warehouse)
+
+	return allocatable
+
+
+def get_shelf_actual_qty_map(item_codes: list[str]) -> dict[str, float]:
+	if not item_codes:
+		return {}
+
+	bin_dt = DocType("Bin")
+	warehouse_dt = DocType("Warehouse")
 
 	rows = (
 		frappe.qb.from_(bin_dt)
 		.left_join(warehouse_dt)
 		.on(bin_dt.warehouse == warehouse_dt.name)
 		.select(bin_dt.item_code, Sum(bin_dt.actual_qty).as_("actual_qty"))
-		.where(bin_dt.item_code.isin(item_codes) & allocatable)
+		.where(bin_dt.item_code.isin(item_codes) & get_allocatable_warehouse_filter(bin_dt.warehouse))
 		.groupby(bin_dt.item_code)
 	).run(as_dict=True)
 

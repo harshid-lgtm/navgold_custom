@@ -7,6 +7,7 @@ from frappe.utils import add_days, flt, nowdate
 
 from navgold_custom.navgold_custom.amazon_pricing.test_bundle_stock import make_item
 from navgold_custom.navgold_custom.custom_script.material_request.material_request import (
+	OPEN_STATUSES,
 	reconcile_purchase_demand,
 )
 from navgold_custom.navgold_custom.custom_script.material_request.test_retire_dead_demand import (
@@ -129,16 +130,16 @@ class TestReconcilePurchaseDemand(IntegrationTestCase):
 		self.assertEqual(self.status_of(second_request), "Stopped")
 
 	def test_the_earliest_delivery_date_keeps_the_cover(self):
+		# each order raises its own request on submit, so asserting on the surviving document would
+		# only say which of two identical requests was stopped. The figures are the claim.
 		urgent_order = self.make_sales_order(qty=6, delivery_date=add_days(nowdate(), 1))
 		later_order = self.make_sales_order(qty=6, delivery_date=add_days(nowdate(), 5))
-		urgent_request = self.make_material_request(urgent_order, qty=6)
-		later_request = self.make_material_request(later_order, qty=6)
 
 		self.receive_stock(6)
 		reconcile_purchase_demand()
 
-		self.assertEqual(self.status_of(urgent_request), "Stopped")
-		self.assertEqual(self.status_of(later_request), "Pending")
+		self.assertEqual(self.open_requests_for(urgent_order), [])
+		self.assertEqual([qty for _parent, qty in self.open_requests_for(later_order)], [6.0])
 
 	def test_stock_lost_to_another_order_brings_the_request_back(self):
 		sales_order = self.make_sales_order(qty=3)
@@ -226,6 +227,83 @@ class TestReconcilePurchaseDemand(IntegrationTestCase):
 			reconcile_purchase_demand()
 
 		self.assertEqual(self.status_of(material_request), "Stopped")
+
+	def open_requests_where(self, condition):
+		material_request = frappe.qb.DocType("Material Request")
+		material_request_item = frappe.qb.DocType("Material Request Item")
+
+		rows = (
+			frappe.qb.from_(material_request_item)
+			.join(material_request)
+			.on(material_request_item.parent == material_request.name)
+			.select(material_request_item.parent, material_request_item.stock_qty)
+			.where(
+				condition & (material_request.docstatus == 1) & material_request.status.isin(OPEN_STATUSES)
+			)
+		).run(as_dict=True)
+
+		return sorted((row.parent, flt(row.stock_qty)) for row in rows)
+
+	def open_requests_for_item(self):
+		return self.open_requests_where(
+			frappe.qb.DocType("Material Request Item").item_code == self.item_code
+		)
+
+	def open_requests_for(self, sales_order):
+		return self.open_requests_where(
+			frappe.qb.DocType("Material Request Item").sales_order_item == sales_order.items[0].name
+		)
+
+	def touching_this_item(self, material_requests):
+		# the suite runs against restored data, so a pass moves hundreds of requests that have
+		# nothing to do with this test
+		if not material_requests:
+			return []
+		return sorted(
+			set(
+				frappe.get_all(
+					"Material Request Item",
+					filters={"parent": ("in", material_requests), "item_code": self.item_code},
+					pluck="parent",
+				)
+			)
+		)
+
+	def test_a_request_is_cut_to_the_qty_the_shelf_cannot_cover(self):
+		sales_order = self.make_sales_order(qty=24)
+		# submitted against an empty shelf, so the order asks for its whole line
+		self.assertEqual([qty for _parent, qty in self.open_requests_for_item()], [24.0])
+
+		self.receive_stock(6)
+		reconcile_purchase_demand()
+
+		open_requests = self.open_requests_for_item()
+		self.assertEqual(len(open_requests), 1)
+		self.assertEqual(open_requests[0][1], 18.0)
+		self.assertEqual(self.requested_qty_of(sales_order), 18.0)
+
+	def test_a_second_pass_over_an_unchanged_shelf_does_nothing(self):
+		first_order = self.make_sales_order(qty=10, delivery_date=add_days(nowdate(), 1))
+		second_order = self.make_sales_order(qty=10, delivery_date=add_days(nowdate(), 5))
+
+		self.receive_stock(10)
+		reconcile_purchase_demand()
+
+		settled_requests = self.open_requests_for_item()
+		settled_requested_qty = (
+			self.requested_qty_of(first_order),
+			self.requested_qty_of(second_order),
+		)
+
+		second_pass = reconcile_purchase_demand()
+
+		self.assertEqual(self.touching_this_item(second_pass["retired"]), [])
+		self.assertEqual(self.touching_this_item(second_pass["requested"]), [])
+		self.assertEqual(self.open_requests_for_item(), settled_requests)
+		self.assertEqual(
+			(self.requested_qty_of(first_order), self.requested_qty_of(second_order)),
+			settled_requested_qty,
+		)
 
 	def make_pick_list(self, sales_order):
 		pick_list = frappe.new_doc("Pick List")

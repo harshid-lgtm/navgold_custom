@@ -390,7 +390,7 @@ scheduler_events = {
 		# surplus, and a picked unit leaves an order short. The report reconciles on read; this
 		# keeps the figures honest for everything else that reads Material Requests.
 		"25 * * * *": [
-			"navgold_custom.navgold_custom.custom_script.material_request.material_request.reconcile_purchase_demand",
+			"navgold_custom.navgold_custom.custom_script.material_request.material_request.reconcile_purchase_demand_job",
 		],
 	},
 	"daily": [
