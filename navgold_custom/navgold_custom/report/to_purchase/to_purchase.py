@@ -397,6 +397,12 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 			}
 		)
 
+	stock_uom_by_item = dict(
+		frappe.get_all(
+			"Item", filters={"name": ("in", items_to_order)}, fields=["name", "stock_uom"], as_list=True
+		)
+	)
+
 	po = frappe.new_doc("Purchase Order")
 	po.supplier = supplier
 	po.company = company
@@ -413,27 +419,24 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 		supplier_uom = item_data.get("supplier_uom")
 		unit_price = flt(item_data.get("unit_price", 0))
 
-		conversion_factor = get_conversion_factor(item_code, supplier_uom)
+		pack_size = get_conversion_factor(item_code, supplier_uom)
 
 		mrs_for_item = mr_by_item.get(item_code, [])
 		if not mrs_for_item:
 			continue
 
-		allocated_qty_in_supplier_uom = (
-			ceil(allocated_qty / conversion_factor) if conversion_factor > 0 else allocated_qty
-		)
-
-		supplier_uom_remaining = allocated_qty_in_supplier_uom
+		# Ordered in single units, still in whole supplier packs: a short delivery is then booked in
+		# as a plain unit count instead of a fraction of a pack.
+		allocated_units = ceil(allocated_qty / pack_size) * pack_size
+		units_remaining = allocated_units
 
 		for mr in mrs_for_item:
-			if supplier_uom_remaining <= 0:
+			if units_remaining <= 0:
 				break
 
-			mr_pending_in_supplier_uom = (
-				ceil(mr["pending_qty"] / conversion_factor) if conversion_factor > 0 else mr["pending_qty"]
-			)
+			mr_pending_units = ceil(mr["pending_qty"] / pack_size) * pack_size
 
-			qty_to_order = min(mr_pending_in_supplier_uom, supplier_uom_remaining)
+			qty_to_order = min(mr_pending_units, units_remaining)
 
 			if qty_to_order <= 0:
 				continue
@@ -455,9 +458,9 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 				{
 					"item_code": item_code,
 					"qty": qty_to_order,
-					"uom": supplier_uom,
-					"stock_uom": supplier_uom,
-					"conversion_factor": conversion_factor,
+					"uom": stock_uom_by_item.get(item_code),
+					"stock_uom": stock_uom_by_item.get(item_code),
+					"conversion_factor": 1,
 					"rate": unit_price,
 					"schedule_date": schedule_date,
 					"warehouse": warehouse,
@@ -465,9 +468,9 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 					"material_request_item": mr["material_request_item"],
 				},
 			)
-			supplier_uom_remaining -= qty_to_order
+			units_remaining -= qty_to_order
 
-		total_ordered = allocated_qty_in_supplier_uom - supplier_uom_remaining
+		total_ordered = allocated_units - units_remaining
 		new_stock = max(0, available_stock - total_ordered)
 		update_supplier_stock_after_po(supplier, supplier_uom, item_code, new_stock)
 

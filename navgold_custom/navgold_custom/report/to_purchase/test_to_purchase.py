@@ -106,7 +106,7 @@ class TestToPurchasePurchaseOrders(IntegrationTestCase):
 
 		purchase_order = frappe.get_doc("Purchase Order", created["purchase_orders"][0])
 		self.assertEqual(purchase_order.docstatus, 1)
-		self.assertEqual(flt(purchase_order.items[0].qty), 16)
+		self.assertEqual(flt(purchase_order.items[0].qty), 96)
 		self.assertEqual(flt(purchase_order.items[0].stock_qty), 96)
 		self.assertEqual(purchase_order.items[0].material_request, material_request.name)
 
@@ -119,8 +119,43 @@ class TestToPurchasePurchaseOrders(IntegrationTestCase):
 		created = create_purchase_orders_from_report([self.report_row(90)])
 
 		purchase_order = frappe.get_doc("Purchase Order", created["purchase_orders"][0])
-		self.assertEqual(flt(purchase_order.items[0].qty), 15)
+		self.assertEqual(flt(purchase_order.items[0].qty), 90)
 		self.assertEqual(flt(purchase_order.items[0].stock_qty), 90)
+
+	def test_a_pack_supplier_is_ordered_in_single_units(self):
+		# Suppliers short-ship loose units; a line held in packs then has to be booked in as a
+		# fraction of a pack, so the order is written in the item's own unit from the start.
+		self.make_material_request(10)
+
+		created = create_purchase_orders_from_report([self.report_row(10)])
+
+		purchase_order_item = frappe.get_doc("Purchase Order", created["purchase_orders"][0]).items[0]
+		self.assertEqual(purchase_order_item.uom, "Nos")
+		self.assertEqual(flt(purchase_order_item.conversion_factor), 1)
+		self.assertEqual(flt(purchase_order_item.qty), 12)
+
+	def test_the_per_unit_supplier_price_is_charged_on_every_unit(self):
+		# Supplier price is per Nos; on a pack line it was billed once per pack, a sixth of the cost.
+		self.make_material_request(18)
+		row = self.report_row(18)
+		row["unit_price"] = 0.69
+
+		created = create_purchase_orders_from_report([row])
+
+		purchase_order = frappe.get_doc("Purchase Order", created["purchase_orders"][0])
+		self.assertEqual(flt(purchase_order.items[0].amount, 2), 12.42)
+
+	def test_supplier_stock_drops_by_the_units_ordered(self):
+		self.make_material_request(92)
+
+		create_purchase_orders_from_report([self.report_row(92)])
+
+		remaining_stock = frappe.db.get_value(
+			"Supplier Item Price and Stock",
+			{"supplier": self.supplier, "item": self.item_code, "uom": PACK_UOM},
+			"stock_qty",
+		)
+		self.assertEqual(remaining_stock, 100 - 96)
 
 	def test_one_unit_of_demand_still_buys_a_whole_pack(self):
 		# The worst the rounding gets: a single loose unit reaches for a full pack of twelve, which
@@ -133,7 +168,7 @@ class TestToPurchasePurchaseOrders(IntegrationTestCase):
 		created = create_purchase_orders_from_report([self.report_row(1, supplier_uom=large_pack)])
 
 		purchase_order = frappe.get_doc("Purchase Order", created["purchase_orders"][0])
-		self.assertEqual(flt(purchase_order.items[0].qty), 1)
+		self.assertEqual(flt(purchase_order.items[0].qty), 12)
 		self.assertEqual(flt(purchase_order.items[0].stock_qty), 12)
 
 		material_request.reload()
