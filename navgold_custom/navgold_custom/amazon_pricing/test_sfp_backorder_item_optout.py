@@ -164,11 +164,11 @@ class TestBackorderSupplierRestockDate(IntegrationTestCase):
 		)
 		self.assertIsNone(inventory["restock_date"])
 
-	def test_open_po_restock_date_wins_over_supplier_lead_time(self):
+	def test_supplier_lead_time_wins_over_open_po_restock_date(self):
 		inventory = inventory_for_backorder(
 			supplier_sfp_eligible=True, row_sfp=True, has_restock_date=True, supplier_stock=5
 		)
-		self.assertEqual(inventory["restock_date"], cstr(add_days(today(), OPEN_PO_RESTOCK_DAYS_AHEAD)))
+		self.assertEqual(inventory["restock_date"], cstr(add_days(today(), SUPPLIER_LEAD_TIME_DAYS)))
 
 
 class TestBackorderHandlingTime(IntegrationTestCase):

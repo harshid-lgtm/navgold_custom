@@ -496,14 +496,18 @@ def get_sku_inventory_data(
 	# out for nothing: CLIP182-DUPx4 offered 9 packs off its own shelf and still promised
 	# 30 September, because a purchase order sitting at 68 of 72 received kept a restock date alive.
 	# lead_time_days is already withheld from an SFP listing for the same reason.
+	#
+	# A backorder ships from the supplier, so its promise is the supplier lead time. The open purchase
+	# order date is no supplier ETA: it is the triggering customer order's delivery date, copied through
+	# the Material Request. 18632-DUPx12 promised 16 September against a 3-day CLF lead time.
 	restock_date = None
-	if is_backorder or quantity <= 0:
-		if stock_info.get("has_restock_date", False):
-			po_date = stock_info.get("restock_date")
-			supplier_eta = add_days(today(), lead_time_days)
-			restock_date = cstr(po_date) if po_date and getdate(po_date) > getdate() else cstr(supplier_eta)
-		elif is_backorder and resolved_supplier_stock > 0:
+	if is_backorder:
+		if stock_info.get("has_restock_date", False) or resolved_supplier_stock > 0:
 			restock_date = cstr(add_days(today(), lead_time_days))
+	elif quantity <= 0 and stock_info.get("has_restock_date", False):
+		po_date = stock_info.get("restock_date")
+		supplier_eta = add_days(today(), lead_time_days)
+		restock_date = cstr(po_date) if po_date and getdate(po_date) > getdate() else cstr(supplier_eta)
 
 	if is_sfp:
 		is_two_day = (sku_shipping_group_choice or "").strip().lower() == "twoday"
