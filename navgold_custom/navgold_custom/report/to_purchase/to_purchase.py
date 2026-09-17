@@ -426,17 +426,17 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 			continue
 
 		# Ordered in single units, still in whole supplier packs: a short delivery is then booked in
-		# as a plain unit count instead of a fraction of a pack.
+		# as a plain unit count instead of a fraction of a pack. The item is rounded once here rather
+		# than each request on its own, which used to reach for a spare pack per request.
 		allocated_units = ceil(allocated_qty / pack_size) * pack_size
 		units_remaining = allocated_units
+		last_line = None
 
 		for mr in mrs_for_item:
 			if units_remaining <= 0:
 				break
 
-			mr_pending_units = ceil(mr["pending_qty"] / pack_size) * pack_size
-
-			qty_to_order = min(mr_pending_units, units_remaining)
+			qty_to_order = min(flt(mr["pending_qty"]), units_remaining)
 
 			if qty_to_order <= 0:
 				continue
@@ -453,7 +453,7 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 			if not earliest_date or schedule_date < earliest_date:
 				earliest_date = schedule_date
 
-			po.append(
+			last_line = po.append(
 				"items",
 				{
 					"item_code": item_code,
@@ -469,6 +469,12 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 				},
 			)
 			units_remaining -= qty_to_order
+
+		# Whatever the pack rounding added over the requests rides on the last line, so the supplier
+		# still gets whole packs without every request buying one of its own.
+		if last_line and units_remaining > 0:
+			last_line.qty += units_remaining
+			units_remaining = 0
 
 		total_ordered = allocated_units - units_remaining
 		new_stock = max(0, available_stock - total_ordered)

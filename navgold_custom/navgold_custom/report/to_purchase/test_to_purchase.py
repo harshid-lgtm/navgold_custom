@@ -145,6 +145,42 @@ class TestToPurchasePurchaseOrders(IntegrationTestCase):
 		purchase_order = frappe.get_doc("Purchase Order", created["purchase_orders"][0])
 		self.assertEqual(flt(purchase_order.items[0].amount, 2), 12.42)
 
+	def test_two_requests_share_one_pack_rounding(self):
+		# PUR-ORD-2026-00051, item 429027: requests of 12 and 11 against a Pack of 9. Rounding each
+		# request on its own gave 18 + 9 — the second was left 2 short and asked again later.
+		pack_of_nine = "Pack of 9"
+		add_uom_conversion(self.item_code, pack_of_nine, 9)
+		make_supplier_price(self.item_code, self.supplier, price=1, uom=pack_of_nine)
+		asked_by_request = {self.make_material_request(qty).name: qty for qty in (12, 11)}
+
+		created = create_purchase_orders_from_report([self.report_row(23, supplier_uom=pack_of_nine)])
+
+		purchase_order = frappe.get_doc("Purchase Order", created["purchase_orders"][0])
+		# Which line carries the leftover depends on request order, so assert the shape: each request
+		# gets exactly what it asked for and one line absorbs the 4 that fill the third pack.
+		over_ordered = sorted(
+			flt(item.qty) - asked_by_request[item.material_request] for item in purchase_order.items
+		)
+		self.assertEqual(over_ordered, [0, 4])
+		self.assertEqual(sum(flt(item.qty) for item in purchase_order.items), 27)
+
+	def test_many_small_requests_round_once_for_the_item(self):
+		# PUR-ORD-2026-00052, item 433896: five requests for 24 units of a Pack of 5 bought 35 when
+		# each was rounded on its own. One rounding for the item buys 25.
+		pack_of_five = "Pack of 5"
+		add_uom_conversion(self.item_code, pack_of_five, 5)
+		make_supplier_price(self.item_code, self.supplier, price=1, uom=pack_of_five)
+		asked_by_request = {self.make_material_request(qty).name: qty for qty in (6, 4, 4, 6, 4)}
+
+		created = create_purchase_orders_from_report([self.report_row(24, supplier_uom=pack_of_five)])
+
+		purchase_order = frappe.get_doc("Purchase Order", created["purchase_orders"][0])
+		over_ordered = sorted(
+			flt(item.qty) - asked_by_request[item.material_request] for item in purchase_order.items
+		)
+		self.assertEqual(over_ordered, [0, 0, 0, 0, 1])
+		self.assertEqual(sum(flt(item.qty) for item in purchase_order.items), 25)
+
 	def test_supplier_stock_drops_by_the_units_ordered(self):
 		self.make_material_request(92)
 
