@@ -4,7 +4,7 @@ import frappe
 from frappe import _
 from frappe.query_builder import DocType, Order
 from frappe.query_builder.functions import Sum
-from frappe.utils import ceil, flt
+from frappe.utils import ceil, cint, flt
 
 from navgold_custom.navgold_custom.utils import get_conversion_factor, get_free_qty_map
 
@@ -310,9 +310,11 @@ def get_supplier_list(item_codes: list[str], supplier_filter: str | None) -> lis
 
 
 @frappe.whitelist()
-def create_purchase_orders_from_report(selected_items: str | list[dict]):
+def create_purchase_orders_from_report(selected_items: str | list[dict], is_amazon_pending: int = 0):
 	if isinstance(selected_items, str):
 		selected_items = frappe.parse_json(selected_items)
+
+	is_amazon_pending = cint(is_amazon_pending)
 
 	if not selected_items:
 		frappe.throw(_("No items selected"))
@@ -332,7 +334,7 @@ def create_purchase_orders_from_report(selected_items: str | list[dict]):
 
 	for supplier, data in supplier_groups.items():
 		try:
-			po = create_purchase_order_with_mr_allocation(supplier, data)
+			po = create_purchase_order_with_mr_allocation(supplier, data, is_amazon_pending)
 			if po:
 				created_pos.append(po.name)
 
@@ -347,7 +349,7 @@ def create_purchase_orders_from_report(selected_items: str | list[dict]):
 	}
 
 
-def create_purchase_order_with_mr_allocation(supplier, data):
+def create_purchase_order_with_mr_allocation(supplier, data, is_amazon_pending=0):
 	items_to_order = [item.get("item_code") for item in data["items"]]
 
 	material_request = DocType("Material Request")
@@ -368,6 +370,7 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 		.where(
 			(material_request.material_request_type == "Purchase")
 			& (material_request.status.isin(material_request_status_list))
+			& (material_request.custom_is_amazon_pending == is_amazon_pending)
 			& (material_request_item.item_code.isin(items_to_order))
 		)
 		.orderby(material_request_item.schedule_date)
@@ -397,6 +400,12 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 			}
 		)
 
+	stock_uom_by_item = dict(
+		frappe.get_all(
+			"Item", filters={"name": ("in", items_to_order)}, fields=["name", "stock_uom"], as_list=True
+		)
+	)
+
 	po = frappe.new_doc("Purchase Order")
 	po.supplier = supplier
 	po.company = company
@@ -413,27 +422,24 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 		supplier_uom = item_data.get("supplier_uom")
 		unit_price = flt(item_data.get("unit_price", 0))
 
-		conversion_factor = get_conversion_factor(item_code, supplier_uom)
+		pack_size = get_conversion_factor(item_code, supplier_uom)
 
 		mrs_for_item = mr_by_item.get(item_code, [])
 		if not mrs_for_item:
 			continue
 
-		allocated_qty_in_supplier_uom = (
-			ceil(allocated_qty / conversion_factor) if conversion_factor > 0 else allocated_qty
-		)
-
-		supplier_uom_remaining = allocated_qty_in_supplier_uom
+		# Ordered in single units, still in whole supplier packs: a short delivery is then booked in
+		# as a plain unit count instead of a fraction of a pack. The item is rounded once here rather
+		# than each request on its own, which used to reach for a spare pack per request.
+		allocated_units = ceil(allocated_qty / pack_size) * pack_size
+		units_remaining = allocated_units
+		last_schedule_date = None
 
 		for mr in mrs_for_item:
-			if supplier_uom_remaining <= 0:
+			if units_remaining <= 0:
 				break
 
-			mr_pending_in_supplier_uom = (
-				ceil(mr["pending_qty"] / conversion_factor) if conversion_factor > 0 else mr["pending_qty"]
-			)
-
-			qty_to_order = min(mr_pending_in_supplier_uom, supplier_uom_remaining)
+			qty_to_order = min(flt(mr["pending_qty"]), units_remaining)
 
 			if qty_to_order <= 0:
 				continue
@@ -455,9 +461,9 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 				{
 					"item_code": item_code,
 					"qty": qty_to_order,
-					"uom": supplier_uom,
-					"stock_uom": supplier_uom,
-					"conversion_factor": conversion_factor,
+					"uom": stock_uom_by_item.get(item_code),
+					"stock_uom": stock_uom_by_item.get(item_code),
+					"conversion_factor": 1,
 					"rate": unit_price,
 					"schedule_date": schedule_date,
 					"warehouse": warehouse,
@@ -465,9 +471,28 @@ def create_purchase_order_with_mr_allocation(supplier, data):
 					"material_request_item": mr["material_request_item"],
 				},
 			)
-			supplier_uom_remaining -= qty_to_order
+			units_remaining -= qty_to_order
+			last_schedule_date = schedule_date
 
-		total_ordered = allocated_qty_in_supplier_uom - supplier_uom_remaining
+		# The units that fill the last pack answer no request, so they ride a line of their own rather
+		# than pushing a request past what it asked for and leaning on the over-order allowance.
+		if last_schedule_date and units_remaining > 0:
+			po.append(
+				"items",
+				{
+					"item_code": item_code,
+					"qty": units_remaining,
+					"uom": stock_uom_by_item.get(item_code),
+					"stock_uom": stock_uom_by_item.get(item_code),
+					"conversion_factor": 1,
+					"rate": unit_price,
+					"schedule_date": last_schedule_date,
+					"warehouse": warehouse,
+				},
+			)
+			units_remaining = 0
+
+		total_ordered = allocated_units - units_remaining
 		new_stock = max(0, available_stock - total_ordered)
 		update_supplier_stock_after_po(supplier, supplier_uom, item_code, new_stock)
 

@@ -413,6 +413,7 @@ async function create_purchase_orders(selected_items, report) {
 				'navgold_custom.navgold_custom.report.to_purchase.to_purchase.create_purchase_orders_from_report',
 			args: {
 				selected_items: items_with_edited_qty,
+				is_amazon_pending: report.get_filter_value('is_amazon_pending'),
 			},
 			freeze: true,
 			freeze_message: __('Creating Purchase Orders...'),
