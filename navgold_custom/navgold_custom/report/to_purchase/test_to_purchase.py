@@ -64,12 +64,13 @@ class TestToPurchasePurchaseOrders(IntegrationTestCase):
 			previous,
 		)
 
-	def make_material_request(self, qty):
+	def make_material_request(self, qty, is_amazon_pending=0, days_out=1):
 		material_request = frappe.new_doc("Material Request")
 		material_request.company = COMPANY
 		material_request.material_request_type = "Purchase"
 		material_request.transaction_date = nowdate()
-		material_request.schedule_date = add_days(nowdate(), 1)
+		material_request.schedule_date = add_days(nowdate(), days_out)
+		material_request.custom_is_amazon_pending = is_amazon_pending
 		material_request.append(
 			"items",
 			{
@@ -78,7 +79,7 @@ class TestToPurchasePurchaseOrders(IntegrationTestCase):
 				"uom": "Nos",
 				"conversion_factor": 1,
 				"warehouse": self.warehouse,
-				"schedule_date": add_days(nowdate(), 1),
+				"schedule_date": add_days(nowdate(), days_out),
 			},
 		)
 		material_request.insert()
@@ -95,9 +96,17 @@ class TestToPurchasePurchaseOrders(IntegrationTestCase):
 			"unit_price": 1,
 		}
 
+	def ordered_by_request(self, purchase_order):
+		return {
+			item.material_request: flt(item.qty) for item in purchase_order.items if item.material_request
+		}
+
+	def unrequested_lines(self, purchase_order):
+		return [flt(item.qty) for item in purchase_order.items if not item.material_request]
+
 	def test_a_purchase_order_rounds_demand_up_to_a_whole_supplier_pack(self):
-		# 92 is not a multiple of 6, so the order has to reach for a 16th pack and ends up 4 units
-		# past what the request asked for — the shape that used to abort the whole batch.
+		# 92 is not a multiple of 6, so the order has to reach for a 16th pack. The request is still
+		# booked for the 92 it asked for; the 4 that fill the pack sit on a line of their own.
 		material_request = self.make_material_request(92)
 
 		created = create_purchase_orders_from_report([self.report_row(92)])
@@ -106,12 +115,14 @@ class TestToPurchasePurchaseOrders(IntegrationTestCase):
 
 		purchase_order = frappe.get_doc("Purchase Order", created["purchase_orders"][0])
 		self.assertEqual(purchase_order.docstatus, 1)
-		self.assertEqual(flt(purchase_order.items[0].qty), 96)
-		self.assertEqual(flt(purchase_order.items[0].stock_qty), 96)
+		self.assertEqual(flt(purchase_order.items[0].qty), 92)
 		self.assertEqual(purchase_order.items[0].material_request, material_request.name)
+		self.assertEqual(flt(purchase_order.items[1].qty), 4)
+		self.assertIsNone(purchase_order.items[1].material_request)
+		self.assertEqual(sum(flt(item.qty) for item in purchase_order.items), 96)
 
 		material_request.reload()
-		self.assertEqual(flt(material_request.items[0].ordered_qty), 96)
+		self.assertEqual(flt(material_request.items[0].ordered_qty), 92)
 
 	def test_pack_aligned_demand_orders_exactly_what_was_asked_for(self):
 		self.make_material_request(90)
@@ -129,10 +140,12 @@ class TestToPurchasePurchaseOrders(IntegrationTestCase):
 
 		created = create_purchase_orders_from_report([self.report_row(10)])
 
-		purchase_order_item = frappe.get_doc("Purchase Order", created["purchase_orders"][0]).items[0]
-		self.assertEqual(purchase_order_item.uom, "Nos")
-		self.assertEqual(flt(purchase_order_item.conversion_factor), 1)
-		self.assertEqual(flt(purchase_order_item.qty), 12)
+		purchase_order = frappe.get_doc("Purchase Order", created["purchase_orders"][0])
+		for purchase_order_item in purchase_order.items:
+			self.assertEqual(purchase_order_item.uom, "Nos")
+			self.assertEqual(flt(purchase_order_item.conversion_factor), 1)
+
+		self.assertEqual(sum(flt(item.qty) for item in purchase_order.items), 12)
 
 	def test_the_per_unit_supplier_price_is_charged_on_every_unit(self):
 		# Supplier price is per Nos; on a pack line it was billed once per pack, a sixth of the cost.
@@ -156,12 +169,8 @@ class TestToPurchasePurchaseOrders(IntegrationTestCase):
 		created = create_purchase_orders_from_report([self.report_row(23, supplier_uom=pack_of_nine)])
 
 		purchase_order = frappe.get_doc("Purchase Order", created["purchase_orders"][0])
-		# Which line carries the leftover depends on request order, so assert the shape: each request
-		# gets exactly what it asked for and one line absorbs the 4 that fill the third pack.
-		over_ordered = sorted(
-			flt(item.qty) - asked_by_request[item.material_request] for item in purchase_order.items
-		)
-		self.assertEqual(over_ordered, [0, 4])
+		self.assertEqual(self.ordered_by_request(purchase_order), asked_by_request)
+		self.assertEqual(self.unrequested_lines(purchase_order), [4])
 		self.assertEqual(sum(flt(item.qty) for item in purchase_order.items), 27)
 
 	def test_many_small_requests_round_once_for_the_item(self):
@@ -175,11 +184,36 @@ class TestToPurchasePurchaseOrders(IntegrationTestCase):
 		created = create_purchase_orders_from_report([self.report_row(24, supplier_uom=pack_of_five)])
 
 		purchase_order = frappe.get_doc("Purchase Order", created["purchase_orders"][0])
-		over_ordered = sorted(
-			flt(item.qty) - asked_by_request[item.material_request] for item in purchase_order.items
-		)
-		self.assertEqual(over_ordered, [0, 0, 0, 0, 1])
+		self.assertEqual(self.ordered_by_request(purchase_order), asked_by_request)
+		self.assertEqual(self.unrequested_lines(purchase_order), [1])
 		self.assertEqual(sum(flt(item.qty) for item in purchase_order.items), 25)
+
+	def test_an_amazon_pending_request_is_left_alone_by_an_ordinary_order(self):
+		# PUR-ORD-2026-00059, item 433896: demand was sized from the ordinary pool, but the order
+		# filled the Amazon-pending requests first because they fell due earlier, and the demand
+		# that paid for the stock stayed open.
+		amazon_pending = self.make_material_request(6, is_amazon_pending=1, days_out=1)
+		ordinary = self.make_material_request(4, days_out=2)
+
+		created = create_purchase_orders_from_report([self.report_row(4)])
+
+		purchase_order = frappe.get_doc("Purchase Order", created["purchase_orders"][0])
+		self.assertEqual(list(self.ordered_by_request(purchase_order)), [ordinary.name])
+
+		amazon_pending.reload()
+		self.assertEqual(flt(amazon_pending.items[0].ordered_qty), 0)
+
+	def test_an_amazon_pending_order_only_fills_amazon_pending_requests(self):
+		amazon_pending = self.make_material_request(6, is_amazon_pending=1, days_out=2)
+		ordinary = self.make_material_request(4, days_out=1)
+
+		created = create_purchase_orders_from_report([self.report_row(6)], is_amazon_pending=1)
+
+		purchase_order = frappe.get_doc("Purchase Order", created["purchase_orders"][0])
+		self.assertEqual(list(self.ordered_by_request(purchase_order)), [amazon_pending.name])
+
+		ordinary.reload()
+		self.assertEqual(flt(ordinary.items[0].ordered_qty), 0)
 
 	def test_supplier_stock_drops_by_the_units_ordered(self):
 		self.make_material_request(92)
@@ -204,11 +238,12 @@ class TestToPurchasePurchaseOrders(IntegrationTestCase):
 		created = create_purchase_orders_from_report([self.report_row(1, supplier_uom=large_pack)])
 
 		purchase_order = frappe.get_doc("Purchase Order", created["purchase_orders"][0])
-		self.assertEqual(flt(purchase_order.items[0].qty), 12)
-		self.assertEqual(flt(purchase_order.items[0].stock_qty), 12)
+		self.assertEqual(flt(purchase_order.items[0].qty), 1)
+		self.assertEqual(self.unrequested_lines(purchase_order), [11])
+		self.assertEqual(sum(flt(item.qty) for item in purchase_order.items), 12)
 
 		material_request.reload()
-		self.assertEqual(flt(material_request.items[0].ordered_qty), 12)
+		self.assertEqual(flt(material_request.items[0].ordered_qty), 1)
 
 
 class TestToPurchaseDraftDemand(IntegrationTestCase):
