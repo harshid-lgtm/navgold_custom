@@ -15,7 +15,6 @@ from frappe.query_builder import DocType
 from frappe.utils import cint, flt, getdate, nowdate
 
 from navgold_custom.navgold_custom.amazon_pricing.alerts import alert_material_request_failed
-from navgold_custom.navgold_custom.erpnext_compat import make_material_request
 from navgold_custom.navgold_custom.utils import get_free_qty_map
 
 
@@ -158,33 +157,9 @@ def raise_material_request(doc, items_needing_stock, alert_on_failure=True):
 		return
 
 	try:
-		mr = make_material_request(doc.name)
-		mr.custom_is_amazon_pending = doc.amazon_order_status == "Pending"
-		updated_items = []
-		for mr_item in mr.items:
-			if mr_item.sales_order_item in items_needing_stock:
-				item_data = items_needing_stock[mr_item.sales_order_item]
-
-				# Keep the Sales Order line's UOM. ERPNext compares item_code, uom and
-				# conversion_factor against that line, so rewriting the row to "Nos" throws and
-				# loses the whole request. required_qty is in stock units, so divide it back into
-				# the line's own UOM and let stock_qty carry the real figure downstream.
-				conversion_factor = flt(mr_item.conversion_factor) or 1
-				mr_item.qty = item_data["required_qty"] / conversion_factor
-				mr_item.stock_qty = item_data["required_qty"]
-				mr_item.schedule_date = item_data["schedule_date"]
-
-				updated_items.append(mr_item)
-
-		mr.items = updated_items
-
+		mr = build_material_request(doc, items_needing_stock)
 		if not mr.items:
 			return
-
-		mr.material_request_type = "Purchase"
-
-		mr.schedule_date = max([item.schedule_date for item in mr.items])
-		mr.title = doc.customer_name if doc.customer_name else {doc.name}
 
 		mr.insert()
 		mr.submit()
@@ -213,6 +188,59 @@ def raise_material_request(doc, items_needing_stock, alert_on_failure=True):
 			alert=True,
 			indicator="red",
 		)
+
+
+def build_material_request(doc, items_needing_stock):
+	# Built from the order lines directly rather than erpnext's make_material_request: its mapper
+	# drops a line once requested_qty reaches it, and it compares a pack line's qty in packs against
+	# requested_qty in units, so a line that already asked once can never be asked for again.
+	mr = frappe.new_doc("Material Request")
+	mr.material_request_type = "Purchase"
+	mr.company = doc.company
+	mr.transaction_date = nowdate()
+	mr.custom_is_amazon_pending = doc.amazon_order_status == "Pending"
+	mr.title = doc.customer_name or doc.name
+
+	for item in doc.items:
+		item_data = items_needing_stock.get(item.name)
+		if not item_data:
+			continue
+
+		# Keep the Sales Order line's UOM. ERPNext compares item_code, uom and conversion_factor
+		# against that line, so rewriting the row to "Nos" throws and loses the whole request.
+		# required_qty is in stock units, so divide it back into the line's own UOM and let
+		# stock_qty carry the real figure downstream.
+		conversion_factor = flt(item.conversion_factor) or 1
+		mr.append(
+			"items",
+			{
+				"item_code": item.item_code,
+				"item_name": item.item_name,
+				"description": item.description,
+				"uom": item.uom,
+				"stock_uom": item.stock_uom,
+				"conversion_factor": conversion_factor,
+				"qty": item_data["required_qty"] / conversion_factor,
+				"stock_qty": item_data["required_qty"],
+				"warehouse": item.warehouse,
+				"schedule_date": item_data["schedule_date"],
+				"sales_order": doc.name,
+				"sales_order_item": item.name,
+				"project": doc.project,
+			},
+		)
+
+	if mr.items:
+		mr.schedule_date = max(row.schedule_date for row in mr.items)
+
+	# erpnext sums every request ever raised against the line, Stopped and Received included, and
+	# refuses past the over-delivery allowance. Stock that arrived and then went to another order
+	# would make the line unaskable forever; sync_requested_qty keeps the live figure instead.
+	for updater in mr.status_updater:
+		if updater["target_dt"] == "Sales Order Item":
+			updater["validate_qty"] = False
+
+	return mr
 
 
 # Amazon has already handed these to the carrier, whatever ERPNext's delivery state says — several

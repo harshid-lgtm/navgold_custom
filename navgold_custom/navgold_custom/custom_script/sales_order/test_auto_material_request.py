@@ -153,7 +153,7 @@ class TestAutoMaterialRequest(IntegrationTestCase):
 
 		with (
 			patch(
-				"navgold_custom.navgold_custom.custom_script.sales_order.sales_order.make_material_request",
+				"navgold_custom.navgold_custom.custom_script.sales_order.sales_order.build_material_request",
 				side_effect=frappe.ValidationError("upstream said no"),
 			),
 			patch(
