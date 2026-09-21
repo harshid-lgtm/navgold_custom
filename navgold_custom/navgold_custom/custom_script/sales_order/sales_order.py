@@ -7,6 +7,7 @@
 # For license information, please see license.txt
 
 import frappe
+from erpnext.selling.doctype.sales_order.sales_order import close_or_unclose_sales_orders
 from erpnext.stock.doctype.stock_reservation_entry.stock_reservation_entry import (
 	get_sre_reserved_qty_for_items_and_warehouses as get_reserved_stock_details,
 )
@@ -15,6 +16,9 @@ from frappe.query_builder import DocType
 from frappe.utils import cint, flt, getdate, nowdate
 
 from navgold_custom.navgold_custom.amazon_pricing.alerts import alert_material_request_failed
+from navgold_custom.navgold_custom.custom_script.material_request.material_request import (
+	retire_demand_for_sales_orders,
+)
 from navgold_custom.navgold_custom.utils import get_free_qty_map
 
 
@@ -294,6 +298,50 @@ def get_orders_on_open_pick_lists(sales_orders: list[str]) -> set[str]:
 				& (pick_list.docstatus < 2)
 			)
 		).run(pluck=True)
+	)
+
+
+def close_shipped_orders_without_delivery() -> list[str]:
+	# Amazon has the goods with the customer, but with no Delivery Note erpnext keeps the order's
+	# reservation in Bin for good, and every shortage reading counts it as stock spoken for.
+	# Partly delivered orders are left open on purpose.
+	sales_orders = frappe.get_all(
+		"Sales Order",
+		filters={
+			"docstatus": 1,
+			"fulfillment_channel": "MFN",
+			"amazon_order_status": "Shipped",
+			"status": ("not in", ("Closed", "Completed")),
+			"per_delivered": 0,
+		},
+		pluck="name",
+	)
+	if not sales_orders:
+		return []
+
+	# a draft Delivery Note or an open pick list means the warehouse is still working the order,
+	# and closing it would block that Delivery Note from submitting
+	still_being_packed = get_orders_on_open_pick_lists(sales_orders) | get_orders_with_delivery_notes(
+		sales_orders
+	)
+	closable = [name for name in sales_orders if name not in still_being_packed]
+	if not closable:
+		return []
+
+	close_or_unclose_sales_orders(frappe.as_json(closable), "Closed")
+	retire_demand_for_sales_orders(closable)
+
+	return closable
+
+
+def get_orders_with_delivery_notes(sales_orders: list[str]) -> set[str]:
+	return set(
+		frappe.get_all(
+			"Delivery Note Item",
+			filters={"against_sales_order": ("in", sales_orders), "docstatus": ("<", 2)},
+			pluck="against_sales_order",
+			distinct=True,
+		)
 	)
 
 
