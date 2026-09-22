@@ -162,9 +162,8 @@ def report_blocked_orders(blocked: list[str]) -> None:
 	if not blocked:
 		return
 
-	# one entry for the pass, not one per order: these fail the same way on every run, because
-	# erpnext's mapper compares the line's pack qty against requested_qty in stock units, so a pack
-	# line already carrying part of a request can never be topped up
+	# one entry for the pass, not one per order: a refusal repeats on every run until someone fixes
+	# the order behind it
 	frappe.log_error(
 		title="Purchase demand could not be raised",
 		message="Material Request refused for: " + ", ".join(sorted(blocked)),
@@ -221,13 +220,13 @@ def stop_requests_larger_than_demand(
 	if not retirable_items:
 		return []
 
-	requested_by_order_line = get_requested_qty_by_order_line(
-		get_submitted_material_request_items(material_requests)
+	supply_by_order_line = get_supply_by_order_line(
+		list({row.sales_order_item for row in retirable_items if row.sales_order_item})
 	)
 	overasking_order_lines = {
 		sales_order_item
-		for sales_order_item, requested_qty in requested_by_order_line.items()
-		if requested_qty > flt(required_qty_map.get(sales_order_item, 0)) + QTY_TOLERANCE
+		for sales_order_item, supply_qty in supply_by_order_line.items()
+		if supply_qty > flt(required_qty_map.get(sales_order_item, 0)) + QTY_TOLERANCE
 	}
 	if not overasking_order_lines:
 		return []
@@ -255,10 +254,6 @@ def raise_requests_for_uncovered_demand(
 		raise_material_request,
 	)
 
-	already_requested = get_requested_qty_by_order_line(
-		get_submitted_material_request_items(get_open_material_requests(sales_orders))
-	)
-
 	today = getdate(nowdate())
 	shortfall_by_order = {}
 	order_lines = frappe.get_all(
@@ -266,9 +261,10 @@ def raise_requests_for_uncovered_demand(
 		filters={"parent": ("in", sales_orders), "docstatus": 1},
 		fields=["name", "parent", "delivery_date"],
 	)
+	supply_by_order_line = get_supply_by_order_line([row.name for row in order_lines])
 
 	for row in order_lines:
-		shortfall = flt(required_qty_map.get(row.name, 0)) - flt(already_requested.get(row.name, 0))
+		shortfall = flt(required_qty_map.get(row.name, 0)) - flt(supply_by_order_line.get(row.name, 0))
 		if shortfall <= QTY_TOLERANCE:
 			continue
 
@@ -292,15 +288,80 @@ def raise_requests_for_uncovered_demand(
 	return requested, blocked
 
 
-def get_requested_qty_by_order_line(rows: list[frappe._dict]) -> dict[str, float]:
-	requested_by_order_line = {}
+def get_supply_by_order_line(sales_order_items: list[str]) -> dict[str, float]:
+	# Only the line's own requests count, never another order's: what is still to be ordered plus
+	# what its purchase orders have yet to deliver. Received stock is on the shelf and already
+	# shared out there, so once it goes to another order or is counted away, the line asks again.
+	if not sales_order_items:
+		return {}
+
+	material_request = frappe.qb.DocType("Material Request")
+	material_request_item = frappe.qb.DocType("Material Request Item")
+
+	rows = (
+		frappe.qb.from_(material_request_item)
+		.inner_join(material_request)
+		.on(material_request_item.parent == material_request.name)
+		.select(
+			material_request_item.name,
+			material_request_item.sales_order_item,
+			material_request_item.stock_qty,
+			material_request_item.ordered_qty,
+			material_request.status,
+		)
+		.where(
+			material_request_item.sales_order_item.isin(sales_order_items)
+			& (material_request.docstatus == 1)
+			& (material_request.material_request_type == "Purchase")
+		)
+	).run(as_dict=True)
+
+	in_transit_by_request_line = get_in_transit_qty_by_request_line([row.name for row in rows])
+
+	supply_by_order_line = {}
 	for row in rows:
-		if not row.sales_order_item:
-			continue
-		requested_by_order_line[row.sales_order_item] = requested_by_order_line.get(
-			row.sales_order_item, 0
-		) + flt(row.stock_qty)
-	return requested_by_order_line
+		# a Stopped request buys nothing more, but whatever it already put on a purchase order is
+		# still on its way
+		still_to_order = 0 if row.status == "Stopped" else max(flt(row.stock_qty) - flt(row.ordered_qty), 0)
+		supply_by_order_line[row.sales_order_item] = (
+			supply_by_order_line.get(row.sales_order_item, 0)
+			+ still_to_order
+			+ in_transit_by_request_line.get(row.name, 0)
+		)
+
+	return supply_by_order_line
+
+
+def get_in_transit_qty_by_request_line(material_request_items: list[str]) -> dict[str, float]:
+	if not material_request_items:
+		return {}
+
+	purchase_order = frappe.qb.DocType("Purchase Order")
+	purchase_order_item = frappe.qb.DocType("Purchase Order Item")
+
+	# received_qty is in the purchase order line's own UOM, hence the conversion back to units;
+	# a Closed order will send nothing more, whatever it still shows as unreceived
+	rows = (
+		frappe.qb.from_(purchase_order_item)
+		.inner_join(purchase_order)
+		.on(purchase_order_item.parent == purchase_order.name)
+		.select(
+			purchase_order_item.material_request_item,
+			Sum(
+				(purchase_order_item.qty - purchase_order_item.received_qty)
+				* purchase_order_item.conversion_factor
+			).as_("in_transit_qty"),
+		)
+		.where(
+			purchase_order_item.material_request_item.isin(material_request_items)
+			& (purchase_order.docstatus == 1)
+			& purchase_order.status.notin(("Closed", "Completed"))
+			& (purchase_order_item.qty > purchase_order_item.received_qty)
+		)
+		.groupby(purchase_order_item.material_request_item)
+	).run(as_dict=True)
+
+	return {row.material_request_item: flt(row.in_transit_qty) for row in rows}
 
 
 def get_submitted_material_request_items(material_requests: list[str]) -> list[frappe._dict]:

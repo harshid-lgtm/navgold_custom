@@ -362,6 +362,7 @@ scheduler_events = {
 		],
 		"10,40 * * * *": [
 			"navgold_custom.navgold_custom.amazon_repository.schedule_refresh_order_statuses",
+			"navgold_custom.navgold_custom.custom_script.sales_order.sales_order.close_shipped_orders_without_delivery",
 		],
 		# strategy refresh and pricing submits are deliberately offset so a feed is never
 		# built from half-refreshed strategy prices

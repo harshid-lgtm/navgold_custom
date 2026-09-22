@@ -18,6 +18,10 @@ from navgold_custom.navgold_custom.custom_script.stock_entry.test_fba_clearing i
 	create_test_warehouse,
 )
 from navgold_custom.navgold_custom.custom_script.supplier.supplier import DAYS_OF_WEEK
+from navgold_custom.navgold_custom.erpnext_compat import make_purchase_order, make_purchase_receipt
+from navgold_custom.navgold_custom.report.navgold_forecast_report.test_navgold_forecast_report import (
+	add_uom_conversion,
+)
 
 
 class TestReconcilePurchaseDemand(IntegrationTestCase):
@@ -31,7 +35,7 @@ class TestReconcilePurchaseDemand(IntegrationTestCase):
 		super().setUp()
 		self.item_code = make_item(f"TEST-RECONCILE-{self._testMethodName}", is_stock_item=1)
 
-	def make_sales_order(self, qty, delivery_date=None, item_code=None):
+	def make_sales_order(self, qty, delivery_date=None, item_code=None, uom="Nos"):
 		sales_order = frappe.new_doc("Sales Order")
 		sales_order.customer = self.customer
 		sales_order.company = COMPANY
@@ -43,6 +47,7 @@ class TestReconcilePurchaseDemand(IntegrationTestCase):
 			{
 				"item_code": item_code or self.item_code,
 				"qty": qty,
+				"uom": uom,
 				"rate": 10,
 				"warehouse": self.warehouse,
 				"delivery_date": delivery_date or add_days(nowdate(), 3),
@@ -341,6 +346,79 @@ class TestReconcilePurchaseDemand(IntegrationTestCase):
 		purchase_order.insert()
 		purchase_order.submit()
 		return purchase_order
+
+	def order_in_full(self, material_request):
+		purchase_order = make_purchase_order(material_request.name)
+		purchase_order.supplier = make_test_supplier()
+		purchase_order.schedule_date = add_days(nowdate(), 3)
+		for row in purchase_order.items:
+			row.rate = 5
+			row.warehouse = self.warehouse
+			# To Purchase writes its lines without the order link, so receiving them reserves nothing
+			row.sales_order = None
+			row.sales_order_item = None
+		purchase_order.insert()
+		purchase_order.submit()
+		return purchase_order
+
+	def receive_in_full(self, purchase_order):
+		purchase_receipt = make_purchase_receipt(purchase_order.name)
+		purchase_receipt.insert()
+		purchase_receipt.submit()
+		return purchase_receipt
+
+	def requested_for(self, sales_order):
+		return sum(
+			flt(qty)
+			for qty in frappe.get_all(
+				"Material Request Item",
+				filters={"sales_order_item": sales_order.items[0].name, "docstatus": 1},
+				pluck="stock_qty",
+			)
+		)
+
+	def test_stock_received_and_then_lost_is_asked_for_again(self):
+		sales_order = self.make_sales_order(qty=3)
+		material_request = self.auto_request_for(sales_order)
+		self.receive_in_full(self.order_in_full(material_request))
+		self.assertEqual(self.status_of(material_request), "Received")
+
+		# the goods went out on another order, or a stock count took them away
+		self.issue_stock(3)
+		result = reconcile_purchase_demand()
+
+		self.assertNotIn(sales_order.name, result["blocked"])
+		self.assertEqual([qty for _parent, qty in self.open_requests_for(sales_order)], [3.0])
+
+	def test_a_request_already_on_a_purchase_order_is_not_asked_for_twice(self):
+		sales_order = self.make_sales_order(qty=3)
+		self.order_in_full(self.auto_request_for(sales_order))
+
+		result = reconcile_purchase_demand()
+
+		self.assertNotIn(sales_order.name, result["blocked"])
+		self.assertEqual(self.requested_for(sales_order), 3)
+
+	def test_a_closed_purchase_order_no_longer_counts_as_cover(self):
+		sales_order = self.make_sales_order(qty=3)
+		purchase_order = self.order_in_full(self.auto_request_for(sales_order))
+		purchase_order.update_status("Closed")
+
+		reconcile_purchase_demand()
+
+		self.assertEqual([qty for _parent, qty in self.open_requests_for(sales_order)], [3.0])
+
+	def test_a_pack_line_that_lost_its_shelf_cover_is_topped_up(self):
+		add_uom_conversion(self.item_code, "Pack of 6", 6)
+		self.receive_stock(4)
+		sales_order = self.make_sales_order(qty=1, uom="Pack of 6")
+		self.assertEqual(self.requested_for(sales_order), 2, "the shelf covered 4 of the pack")
+
+		self.issue_stock(4)
+		result = reconcile_purchase_demand()
+
+		self.assertNotIn(sales_order.name, result["blocked"])
+		self.assertEqual(self.requested_for(sales_order), 6)
 
 
 def make_test_supplier():
