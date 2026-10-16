@@ -99,7 +99,7 @@ class TestBundlePickListCompletion(IntegrationTestCase):
 		return sales_order
 
 	def deliver(self, sales_order):
-		from erpnext.selling.doctype.sales_order.mapper import make_delivery_note
+		from navgold_custom.navgold_custom.erpnext_compat import make_delivery_note
 
 		delivery_note = frappe.get_doc(make_delivery_note(sales_order.name))
 		for row in delivery_note.items:
