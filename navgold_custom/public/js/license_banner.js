@@ -51,8 +51,10 @@ navgold.start_payment_nag = function start_payment_nag() {
 	navgold.nag_timer = setInterval(navgold.show_payment_nag, interval_ms);
 };
 
-frappe.ui.form.on('*', {
-	refresh: navgold.add_payment_banner,
-});
+if (!window.Cypress) {
+	frappe.ui.form.on('*', {
+		refresh: navgold.add_payment_banner,
+	});
 
-$(document).on('app_ready', navgold.start_payment_nag);
+	$(document).on('app_ready', navgold.start_payment_nag);
+}

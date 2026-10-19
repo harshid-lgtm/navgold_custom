@@ -10,6 +10,8 @@ DEFAULT_INTERVAL = 120
 
 
 def check_license():
+	if frappe.flags.in_test:
+		return
 	try:
 		response = make_get_request(LICENSE_URL)
 		warn, nag_count, interval = parse_flags(response)
@@ -45,6 +47,8 @@ def get_status():
 
 
 def request_refresh():
+	if frappe.flags.in_test:
+		return
 	if frappe.cache().get_value(REFRESH_LOCK):
 		return
 	frappe.cache().set_value(REFRESH_LOCK, 1, expires_in_sec=120)
