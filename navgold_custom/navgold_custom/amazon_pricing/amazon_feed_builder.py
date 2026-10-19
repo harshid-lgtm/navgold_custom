@@ -591,6 +591,14 @@ def build_inventory_patches(inventory_data: dict, marketplace_id: str) -> list:
 				"value": [{"fulfillment_channel_code": "AMAZON_EU"}],
 			}
 		)
+		# Without this Amazon keeps the merchant offer alongside the FBA one: a duplicate listing.
+		patches.append(
+			{
+				"op": "delete",
+				"path": "/attributes/fulfillment_availability",
+				"value": [{"fulfillment_channel_code": "DEFAULT"}],
+			}
+		)
 	else:
 		fulfillment_value = {
 			"quantity": inventory_data["quantity"],

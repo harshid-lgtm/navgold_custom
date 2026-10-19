@@ -134,7 +134,7 @@ def extract_amazon_values(message: dict) -> dict:
 			values["amazon_max"] = get_schedule_value(offer.get("maximum_seller_allowed_price"))
 			values["amazon_min"] = get_schedule_value(offer.get("minimum_seller_allowed_price"))
 			values["amazon_our_price"] = get_schedule_value(offer.get("our_price"))
-		elif path.endswith("fulfillment_availability") and patch_value:
+		elif path.endswith("fulfillment_availability") and patch_value and patch.get("op") != "delete":
 			availability = patch_value[0]
 			values["quantity"] = availability.get("quantity")
 			values["restock_date"] = availability.get("restock_date")

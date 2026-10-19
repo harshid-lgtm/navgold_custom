@@ -907,6 +907,14 @@ class TestFeedBuilderInventoryChannels(IntegrationTestCase):
 		)
 		self.assertEqual(fulfillment_patch["value"][0]["fulfillment_channel_code"], "AMAZON_EU")
 		self.assertNotIn("quantity", fulfillment_patch["value"][0])
+		self.assertIn(
+			{
+				"op": "delete",
+				"path": "/attributes/fulfillment_availability",
+				"value": [{"fulfillment_channel_code": "DEFAULT"}],
+			},
+			patches,
+		)
 
 	def test_sfp_active_emits_sfp_shipping_group(self):
 		pricing = frappe._dict(
