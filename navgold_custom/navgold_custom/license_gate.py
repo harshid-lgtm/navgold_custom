@@ -29,14 +29,14 @@ def check_license():
 		response = make_get_request(url)
 		active = parse_active(response)
 	except Exception:
-		frappe.db.set_value(SETTINGS, SETTINGS, "last_license_check", now, update_modified=False)
+		frappe.db.set_single_value(SETTINGS, "last_license_check", now, update_modified=False)
 		frappe.log_error("License check failed", "Navgold License Gate")
 		return
 
 	values = {"license_active": cint(active), "last_license_check": now}
 	if active:
 		values["last_license_ok"] = now
-	frappe.db.set_value(SETTINGS, SETTINGS, values, update_modified=False)
+	frappe.db.set_single_value(SETTINGS, values, update_modified=False)
 
 
 def parse_active(response):
