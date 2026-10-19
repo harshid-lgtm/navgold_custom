@@ -42,7 +42,7 @@ def check_license():
 def parse_active(response):
 	payload = frappe.parse_json(response) if isinstance(response, str) else response
 	if isinstance(payload, dict):
-		for key in ("active", "checked", "paid", "enabled"):
+		for key in ("active", "checked", "paid", "enabled", "enable"):
 			if key in payload:
 				return bool(payload[key])
 		return False
