@@ -1,29 +1,58 @@
 frappe.provide('navgold');
 
-navgold.show_payment_banner = function show_payment_banner() {
-	if (!frappe.boot || !frappe.boot.navgold_payment_locked) {
+navgold.add_payment_banner = function add_payment_banner(frm) {
+	if (!frappe.boot || !frappe.boot.navgold_payment_warn) {
 		return;
 	}
-	if (document.getElementById('navgold-payment-banner')) {
-		return;
-	}
-	const banner = document.createElement('div');
-	banner.id = 'navgold-payment-banner';
-	banner.textContent = __(
-		'Please make the payment, else the app will stop working.',
+	frm.dashboard.add_comment(
+		__('Please make the payment, else the app will stop working.'),
+		'red',
+		true,
 	);
-	Object.assign(banner.style, {
-		position: 'sticky',
-		top: '0',
-		zIndex: '1030',
-		width: '100%',
-		padding: '10px 16px',
-		textAlign: 'center',
-		fontWeight: '600',
-		color: '#fff',
-		background: 'var(--red-600, #c0392b)',
-	});
-	document.body.prepend(banner);
 };
 
-$(document).on('app_ready', navgold.show_payment_banner);
+navgold.show_payment_nag = function show_payment_nag() {
+	if (!frappe.boot || !frappe.boot.navgold_payment_warn) {
+		return;
+	}
+	if (document.querySelector('.modal.show')) {
+		return;
+	}
+	navgold.show_nag_chain(cint(frappe.boot.navgold_payment_nag_count) || 1);
+};
+
+navgold.show_nag_chain = function show_nag_chain(remaining) {
+	if (remaining <= 0) {
+		return;
+	}
+	const dialog = new frappe.ui.Dialog({
+		title: __('Payment Required'),
+		indicator: 'red',
+		primary_action_label: __('OK'),
+		primary_action() {
+			dialog.hide();
+		},
+	});
+	dialog.$body.html(
+		`<p>${__('Please make the payment, else the app will stop working.')}</p>`,
+	);
+	dialog.onhide = () =>
+		setTimeout(() => navgold.show_nag_chain(remaining - 1), 300);
+	dialog.show();
+};
+
+navgold.start_payment_nag = function start_payment_nag() {
+	navgold.show_payment_nag();
+	if (navgold.nag_timer) {
+		return;
+	}
+	const interval_ms =
+		(cint(frappe.boot.navgold_payment_warn_interval) || 120) * 1000;
+	navgold.nag_timer = setInterval(navgold.show_payment_nag, interval_ms);
+};
+
+frappe.ui.form.on('*', {
+	refresh: navgold.add_payment_banner,
+});
+
+$(document).on('app_ready', navgold.start_payment_nag);

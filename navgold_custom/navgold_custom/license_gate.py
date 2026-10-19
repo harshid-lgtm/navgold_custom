@@ -1,83 +1,62 @@
 import frappe
-from frappe import _
 from frappe.integrations.utils import make_get_request
-from frappe.utils import cint, get_datetime, now_datetime, time_diff_in_hours
+from frappe.utils import cint
 
-SETTINGS = "Navgold Settings"
-
-ALLOWED_DOCTYPES = {
-	SETTINGS,
-	"Error Log",
-	"Access Log",
-	"Activity Log",
-	"View Log",
-	"Scheduled Job Log",
-	"Scheduled Job Type",
-	"Email Queue",
-	"Notification Log",
-}
+LICENSE_URL = "https://hq.bwh.tech/api/v2/method/purchase_flow"
+CACHE_KEY = "navgold_license_status"
+REFRESH_LOCK = "navgold_license_refreshing"
+CACHE_TTL = 6 * 60 * 60
+DEFAULT_INTERVAL = 120
 
 
 def check_license():
-	settings = frappe.get_cached_doc(SETTINGS)
-	url = (settings.license_check_url or "").strip()
-	if not url:
-		return
-
-	now = now_datetime()
 	try:
-		response = make_get_request(url)
-		active = parse_active(response)
+		response = make_get_request(LICENSE_URL)
+		warn, nag_count, interval = parse_flags(response)
 	except Exception:
-		frappe.db.set_single_value(SETTINGS, "last_license_check", now, update_modified=False)
 		frappe.log_error("License check failed", "Navgold License Gate")
 		return
 
-	values = {"license_active": cint(active), "last_license_check": now}
-	if active:
-		values["last_license_ok"] = now
-	frappe.db.set_single_value(SETTINGS, values, update_modified=False)
+	status = {"warn": warn, "nag_count": nag_count, "warn_interval": interval}
+	frappe.cache().set_value(CACHE_KEY, status, expires_in_sec=CACHE_TTL)
 
 
-def parse_active(response):
+def parse_flags(response):
 	payload = frappe.parse_json(response) if isinstance(response, str) else response
-	if isinstance(payload, dict):
-		for key in ("active", "checked", "paid", "enabled", "enable"):
-			if key in payload:
-				return bool(payload[key])
-		return False
-	return bool(payload)
+	if not isinstance(payload, dict):
+		return False, 1, DEFAULT_INTERVAL
+
+	nag_count = cint(payload["nag_count"]) if "nag_count" in payload else 1
+	interval = cint(payload["warn_interval"]) if "warn_interval" in payload else DEFAULT_INTERVAL
+	return bool(payload.get("warn")), nag_count, interval
 
 
-def is_locked():
-	settings = frappe.get_cached_doc(SETTINGS)
-	if not (settings.license_check_url or "").strip():
-		return False
+def get_status():
+	status = frappe.cache().get_value(CACHE_KEY)
+	if not status:
+		request_refresh()
+		return {"warn": False, "nag_count": 0, "interval": DEFAULT_INTERVAL}
 
-	if not settings.last_license_ok:
-		return not cint(settings.license_active)
-
-	if cint(settings.license_active):
-		grace = cint(settings.license_grace_hours) or 48
-		stale_hours = time_diff_in_hours(now_datetime(), get_datetime(settings.last_license_ok))
-		return stale_hours > grace
-
-	return True
+	return {
+		"warn": bool(status.get("warn")),
+		"nag_count": cint(status.get("nag_count", 1)),
+		"interval": cint(status.get("warn_interval")) or DEFAULT_INTERVAL,
+	}
 
 
-def enforce(doc, method=None):
-	if not getattr(frappe.local, "request", None):
+def request_refresh():
+	if frappe.cache().get_value(REFRESH_LOCK):
 		return
-	if frappe.flags.in_install or frappe.flags.in_migrate or frappe.flags.in_patch or frappe.flags.in_test:
-		return
-	if doc.doctype in ALLOWED_DOCTYPES:
-		return
-	if is_locked():
-		frappe.throw(
-			_("This system is locked pending payment. Please make the payment to resume operations."),
-			title=_("Payment Required"),
-		)
+	frappe.cache().set_value(REFRESH_LOCK, 1, expires_in_sec=120)
+	frappe.enqueue(
+		"navgold_custom.navgold_custom.license_gate.check_license",
+		queue="short",
+		enqueue_after_commit=True,
+	)
 
 
 def get_bootinfo(bootinfo):
-	bootinfo.navgold_payment_locked = is_locked()
+	status = get_status()
+	bootinfo.navgold_payment_warn = status["warn"]
+	bootinfo.navgold_payment_nag_count = status["nag_count"]
+	bootinfo.navgold_payment_warn_interval = status["interval"]

@@ -299,10 +299,6 @@ doctype_js = {
 }
 
 doc_events = {
-	"*": {
-		"before_save": "navgold_custom.navgold_custom.license_gate.enforce",
-		"before_submit": "navgold_custom.navgold_custom.license_gate.enforce",
-	},
 	"Purchase Order": {
 		"before_validate": "navgold_custom.navgold_custom.custom_script.purchase_order.purchase_order.set_supplier_part_no",
 	},

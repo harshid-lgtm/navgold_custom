@@ -9,13 +9,6 @@
 		"buying_price_list",
 		"column_break_zziq",
 		"tote_weight_limit",
-		"license_section",
-		"license_check_url",
-		"license_active",
-		"license_grace_hours",
-		"license_col",
-		"last_license_check",
-		"last_license_ok",
 		"proxy_skus_section",
 		"generate_proxy_skus",
 		"column_break_zqvs",
@@ -133,48 +126,6 @@
 			"fieldname": "tote_weight_limit",
 			"fieldtype": "Int",
 			"label": "Tote Weight Limit (In gram)"
-		},
-		{
-			"fieldname": "license_section",
-			"fieldtype": "Section Break",
-			"label": "Licensing"
-		},
-		{
-			"description": "Endpoint on our server polled every 6h. Must return JSON like {\"active\": true}. Leave blank to disable the gate.",
-			"fieldname": "license_check_url",
-			"fieldtype": "Data",
-			"label": "License Check URL",
-			"options": "URL"
-		},
-		{
-			"description": "Last explicit answer from the license server (set automatically).",
-			"fieldname": "license_active",
-			"fieldtype": "Check",
-			"label": "License Active",
-			"read_only": 1
-		},
-		{
-			"default": "48",
-			"description": "Keep working off the last active result for this many hours if the server is unreachable, then lock.",
-			"fieldname": "license_grace_hours",
-			"fieldtype": "Int",
-			"label": "Grace Hours (when unreachable)"
-		},
-		{
-			"fieldname": "license_col",
-			"fieldtype": "Column Break"
-		},
-		{
-			"fieldname": "last_license_check",
-			"fieldtype": "Datetime",
-			"label": "Last Checked",
-			"read_only": 1
-		},
-		{
-			"fieldname": "last_license_ok",
-			"fieldtype": "Datetime",
-			"label": "Last Active Confirmation",
-			"read_only": 1
 		},
 		{
 			"fieldname": "proxy_skus_section",
