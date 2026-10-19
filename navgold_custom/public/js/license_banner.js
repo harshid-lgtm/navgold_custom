@@ -18,7 +18,7 @@ navgold.show_payment_nag = function show_payment_nag() {
 	if (document.querySelector('.modal.show')) {
 		return;
 	}
-	navgold.show_nag_chain(cint(frappe.boot.navgold_payment_nag_count) || 1);
+	navgold.show_nag_chain(cint(frappe.boot.navgold_payment_nag_count));
 };
 
 navgold.show_nag_chain = function show_nag_chain(remaining) {
