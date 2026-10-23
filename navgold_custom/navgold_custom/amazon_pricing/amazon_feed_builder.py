@@ -616,6 +616,13 @@ def build_inventory_patches(inventory_data: dict, marketplace_id: str) -> list:
 				"value": [fulfillment_value],
 			}
 		)
+		patches.append(
+			{
+				"op": "delete",
+				"path": "/attributes/fulfillment_availability",
+				"value": [{"fulfillment_channel_code": "AMAZON_EU"}],
+			}
+		)
 
 		if inventory_data.get("shipping_group"):
 			patches.append(
