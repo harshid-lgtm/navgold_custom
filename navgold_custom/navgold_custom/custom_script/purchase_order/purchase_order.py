@@ -40,7 +40,7 @@ def get_supplier_part_number_value(supplier, item_code, uom):
 
 
 @frappe.whitelist()
-def get_supplier_part_number(supplier, item_code, uom):
+def get_supplier_part_number(supplier: str, item_code: str, uom: str) -> str:
 	return get_supplier_part_number_value(supplier, item_code, uom)
 
 
