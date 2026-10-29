@@ -14,6 +14,7 @@ from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api 
 	CatalogItems,
 	FBAInventory,
 	Listings,
+	ProductPricing,
 	Reports,
 )
 
@@ -261,6 +262,222 @@ def get_amazon_listing_content_by_asin(asin: str):
 		fallback_asin=asin,
 		source="Catalog Items API",
 	)
+
+
+def _dict_value(data: dict, *keys):
+	for key in keys:
+		if key in (data or {}):
+			return data[key]
+	return None
+
+
+def _format_money(value: dict | None):
+	if not value:
+		return None
+	return {
+		"amount": _dict_value(value, "Amount", "amount"),
+		"currency": _dict_value(value, "CurrencyCode", "currencyCode", "currency"),
+	}
+
+
+def _format_offer_count(row: dict) -> dict:
+	return {
+		"condition": _dict_value(row, "condition", "Condition"),
+		"fulfillment_channel": _dict_value(row, "fulfillmentChannel", "FulfillmentChannel"),
+		"offer_count": _dict_value(row, "OfferCount", "offerCount"),
+	}
+
+
+def _format_buy_box_price(row: dict) -> dict:
+	return {
+		"condition": _dict_value(row, "condition", "Condition"),
+		"seller_id": _dict_value(row, "sellerId", "SellerId"),
+		"listing_price": _format_money(_dict_value(row, "ListingPrice", "listingPrice")),
+		"shipping": _format_money(_dict_value(row, "Shipping", "shipping")),
+		"landed_price": _format_money(_dict_value(row, "LandedPrice", "landedPrice")),
+	}
+
+
+def _format_amazon_offer(row: dict, our_seller_id: str | None = None) -> dict:
+	seller_id = _dict_value(row, "SellerId", "sellerId")
+	listing_price = _format_money(_dict_value(row, "ListingPrice", "listingPrice"))
+	shipping = _format_money(_dict_value(row, "Shipping", "shipping"))
+	landed_price = _format_money(_dict_value(row, "LandedPrice", "landedPrice"))
+	if landed_price is None and listing_price and shipping:
+		listing_amount = listing_price.get("amount")
+		shipping_amount = shipping.get("amount")
+		if listing_amount is not None and shipping_amount is not None:
+			landed_price = {
+				"amount": flt(listing_amount) + flt(shipping_amount),
+				"currency": listing_price.get("currency") or shipping.get("currency"),
+			}
+
+	prime = _dict_value(row, "PrimeInformation", "primeInformation") or {}
+	feedback = _dict_value(row, "SellerFeedbackRating", "sellerFeedbackRating") or {}
+	shipping_time = _dict_value(row, "ShippingTime", "shippingTime") or {}
+	ships_from = _dict_value(row, "ShipsFrom", "shipsFrom") or {}
+	my_offer = bool(_dict_value(row, "MyOffer", "myOffer"))
+	is_our_offer = my_offer or bool(our_seller_id and seller_id == our_seller_id)
+
+	return {
+		"seller_id": seller_id,
+		"is_our_offer": is_our_offer,
+		"is_buy_box_winner": bool(_dict_value(row, "IsBuyBoxWinner", "isBuyBoxWinner")),
+		"is_featured_offer_eligible": bool(
+			_dict_value(row, "IsFeaturedMerchant", "isFeaturedMerchant")
+		),
+		"is_fulfilled_by_amazon": bool(
+			_dict_value(row, "IsFulfilledByAmazon", "isFulfilledByAmazon")
+		),
+		"fulfillment": (
+			"FBA"
+			if _dict_value(row, "IsFulfilledByAmazon", "isFulfilledByAmazon")
+			else "Merchant"
+		),
+		"is_prime": bool(_dict_value(prime, "IsPrime", "isPrime")),
+		"is_national_prime": bool(_dict_value(prime, "IsNationalPrime", "isNationalPrime")),
+		"listing_price": listing_price,
+		"shipping": shipping,
+		"landed_price": landed_price,
+		"feedback_count": _dict_value(feedback, "FeedbackCount", "feedbackCount"),
+		"positive_feedback_percentage": _dict_value(
+			feedback,
+			"SellerPositiveFeedbackRating",
+			"sellerPositiveFeedbackRating",
+		),
+		"ships_from": {
+			"country": _dict_value(ships_from, "Country", "country"),
+			"state": _dict_value(ships_from, "State", "state"),
+		},
+		"shipping_time": {
+			"minimum_hours": _dict_value(shipping_time, "minimumHours", "MinimumHours"),
+			"maximum_hours": _dict_value(shipping_time, "maximumHours", "MaximumHours"),
+			"availability_type": _dict_value(
+				shipping_time,
+				"availabilityType",
+				"AvailabilityType",
+			),
+		},
+		"sub_condition": _dict_value(row, "SubCondition", "subCondition"),
+	}
+
+
+def _format_amazon_buybox_response(
+	response: dict,
+	*,
+	our_seller_id: str | None = None,
+	fallback_sku: str | None = None,
+	fallback_asin: str | None = None,
+	source: str,
+) -> dict:
+	payload = (response or {}).get("payload") or response or {}
+	identifier = _dict_value(payload, "Identifier", "identifier") or {}
+	summary = _dict_value(payload, "Summary", "summary") or {}
+	offers = [
+		_format_amazon_offer(row, our_seller_id=our_seller_id)
+		for row in (_dict_value(payload, "Offers", "offers") or [])
+	]
+
+	winners = [offer for offer in offers if offer["is_buy_box_winner"]]
+	our_offers = [offer for offer in offers if offer["is_our_offer"]]
+
+	buy_box_eligible = [
+		_format_offer_count(row)
+		for row in (_dict_value(summary, "BuyBoxEligibleOffers", "buyBoxEligibleOffers") or [])
+	]
+	number_of_offers = [
+		_format_offer_count(row)
+		for row in (_dict_value(summary, "NumberOfOffers", "numberOfOffers") or [])
+	]
+	buy_box_prices = [
+		_format_buy_box_price(row)
+		for row in (_dict_value(summary, "BuyBoxPrices", "buyBoxPrices") or [])
+	]
+
+	return {
+		"source": source,
+		"status": _dict_value(payload, "status", "Status"),
+		"marketplace_id": (
+			_dict_value(payload, "marketplaceId", "MarketplaceId")
+			or _dict_value(identifier, "MarketplaceId", "marketplaceId")
+		),
+		"seller_sku": (
+			_dict_value(payload, "SKU", "SellerSKU", "sellerSKU")
+			or _dict_value(identifier, "SellerSKU", "sellerSKU")
+			or fallback_sku
+		),
+		"asin": (
+			_dict_value(payload, "ASIN", "asin")
+			or _dict_value(identifier, "ASIN", "asin")
+			or fallback_asin
+		),
+		"item_condition": (
+			_dict_value(payload, "ItemCondition", "itemCondition")
+			or _dict_value(identifier, "ItemCondition", "itemCondition")
+		),
+		"total_offer_count": _dict_value(summary, "TotalOfferCount", "totalOfferCount"),
+		"number_of_offers": number_of_offers,
+		"featured_offer_eligible_counts": buy_box_eligible,
+		"buy_box_prices": buy_box_prices,
+		"offers_returned": len(offers),
+		"buy_box_winners": winners,
+		"our_offers": our_offers,
+		"our_is_buy_box_winner": any(offer["is_buy_box_winner"] for offer in our_offers),
+		"our_is_featured_offer_eligible": any(
+			offer["is_featured_offer_eligible"] for offer in our_offers
+		),
+		"offers": offers,
+	}
+
+
+@frappe.whitelist()
+def get_amazon_buybox_by_sku(sku: str):
+	"""Read live Amazon Buy Box / Featured Offer data for an ERP Proxy SKU."""
+	sku = (sku or "").strip()
+	if not sku:
+		frappe.throw(_("Seller SKU is required"))
+
+	if not frappe.db.exists("Proxy SKU", sku):
+		frappe.throw(_("Seller SKU {0} is not present as a Proxy SKU in ERP").format(sku))
+
+	proxy_sku = frappe.get_doc("Proxy SKU", sku)
+	proxy_sku.check_permission("read")
+
+	client = ProductPricing.from_amazon_settings()
+	response = client.get_listing_offers(sku)
+	return _format_amazon_buybox_response(
+		response,
+		our_seller_id=client.seller_id,
+		fallback_sku=sku,
+		fallback_asin=proxy_sku.asin,
+		source="Product Pricing API - getListingOffers",
+	)
+
+
+@frappe.whitelist()
+def get_amazon_buybox_by_asin(asin: str):
+	"""Read live Amazon Buy Box / Featured Offer data for an ASIN linked to ERP inventory."""
+	asin = (asin or "").strip()
+	if not asin:
+		frappe.throw(_("ASIN is required"))
+
+	seller_skus = frappe.get_all("Proxy SKU", filters={"asin": asin}, pluck="name")
+	if not seller_skus:
+		frappe.throw(_("ASIN {0} is not linked to any Proxy SKU in ERP").format(asin))
+
+	for sku in seller_skus:
+		frappe.get_doc("Proxy SKU", sku).check_permission("read")
+
+	client = ProductPricing.from_amazon_settings()
+	response = client.get_item_offers(asin)
+	result = _format_amazon_buybox_response(
+		response,
+		our_seller_id=client.seller_id,
+		fallback_asin=asin,
+		source="Product Pricing API - getItemOffers",
+	)
+	result["linked_seller_skus"] = seller_skus
+	return result
 
 
 @frappe.whitelist()
