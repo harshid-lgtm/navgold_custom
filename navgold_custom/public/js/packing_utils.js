@@ -26,6 +26,7 @@ navgold.packing.open_scan_tote_dialog = function open_scan_tote_dialog(
 	frm,
 	tote_fieldname,
 	show_scanner = true,
+	show_success_alert = true,
 ) {
 	const dialog = new frappe.ui.Dialog({
 		title: __('Scan Tote'),
@@ -42,10 +43,12 @@ navgold.packing.open_scan_tote_dialog = function open_scan_tote_dialog(
 		async primary_action({ tote_barcode }) {
 			await frm.set_value(tote_fieldname, tote_barcode);
 			dialog.hide();
-			frappe.show_alert({
-				message: __('Tote set to {0}', [tote_barcode]),
-				indicator: 'green',
-			});
+			if (show_success_alert) {
+				frappe.show_alert({
+					message: __('Tote set to {0}', [tote_barcode]),
+					indicator: 'green',
+				});
+			}
 			frm.refresh();
 		},
 	});
