@@ -2,26 +2,56 @@ import frappe
 from frappe.utils.csvutils import to_csv
 
 
-def set_supplier_part_no(doc, method):
-	if not doc.supplier:
-		return
+def _rank_sort_value(rank):
+	"""Treat a positive supplier rank as preferred; unranked/blocked rows sort last."""
+	rank = rank or 0
+	return rank if rank > 0 else float("inf")
 
-	item_codes = [item.item_code for item in doc.items if item.item_code]
-	if not item_codes:
-		return
 
-	part_nos = frappe._dict(
-		frappe.get_all(
-			"Supplier Item Price and Stock",
-			filters={"supplier": doc.supplier, "item": ("in", item_codes)},
-			fields=["item", "supplier_part_number"],
-			as_list=True,
-		)
+def get_supplier_part_number_value(supplier, item_code, uom):
+	"""Return the supplier's part number for an exact supplier/item/UOM match."""
+	if not (supplier and item_code and uom):
+		return ""
+
+	rows = frappe.get_all(
+		"Supplier Item Price and Stock",
+		filters={
+			"supplier": supplier,
+			"item": item_code,
+			"uom": uom,
+			"supplier_part_number": ["is", "set"],
+		},
+		fields=["name", "supplier_part_number", "rank", "modified"],
+		order_by="modified desc",
 	)
 
+	if not rows:
+		return ""
+
+	best = min(
+		rows,
+		key=lambda row: (
+			_rank_sort_value(row.rank),
+			str(row.modified or ""),
+			row.name,
+		),
+	)
+	return best.supplier_part_number or ""
+
+
+@frappe.whitelist()
+def get_supplier_part_number(supplier: str, item_code: str, uom: str) -> str:
+	return get_supplier_part_number_value(supplier, item_code, uom)
+
+
+def set_supplier_part_no(doc, method=None):
+	"""Populate ERPNext's standard Purchase Order Item supplier_part_no field."""
 	for item in doc.items:
-		if item.item_code and part_nos.get(item.item_code):
-			item.supplier_part_no = part_nos[item.item_code]
+		item.supplier_part_no = get_supplier_part_number_value(
+			doc.supplier,
+			item.item_code,
+			item.uom,
+		)
 
 
 @frappe.whitelist()
