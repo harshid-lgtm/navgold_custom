@@ -323,16 +323,10 @@ def _format_amazon_offer(row: dict, our_seller_id: str | None = None) -> dict:
 		"seller_id": seller_id,
 		"is_our_offer": is_our_offer,
 		"is_buy_box_winner": bool(_dict_value(row, "IsBuyBoxWinner", "isBuyBoxWinner")),
-		"is_featured_offer_eligible": bool(
-			_dict_value(row, "IsFeaturedMerchant", "isFeaturedMerchant")
-		),
-		"is_fulfilled_by_amazon": bool(
-			_dict_value(row, "IsFulfilledByAmazon", "isFulfilledByAmazon")
-		),
+		"is_featured_offer_eligible": bool(_dict_value(row, "IsFeaturedMerchant", "isFeaturedMerchant")),
+		"is_fulfilled_by_amazon": bool(_dict_value(row, "IsFulfilledByAmazon", "isFulfilledByAmazon")),
 		"fulfillment": (
-			"FBA"
-			if _dict_value(row, "IsFulfilledByAmazon", "isFulfilledByAmazon")
-			else "Merchant"
+			"FBA" if _dict_value(row, "IsFulfilledByAmazon", "isFulfilledByAmazon") else "Merchant"
 		),
 		"is_prime": bool(_dict_value(prime, "IsPrime", "isPrime")),
 		"is_national_prime": bool(_dict_value(prime, "IsNationalPrime", "isNationalPrime")),
@@ -386,12 +380,10 @@ def _format_amazon_buybox_response(
 		for row in (_dict_value(summary, "BuyBoxEligibleOffers", "buyBoxEligibleOffers") or [])
 	]
 	number_of_offers = [
-		_format_offer_count(row)
-		for row in (_dict_value(summary, "NumberOfOffers", "numberOfOffers") or [])
+		_format_offer_count(row) for row in (_dict_value(summary, "NumberOfOffers", "numberOfOffers") or [])
 	]
 	buy_box_prices = [
-		_format_buy_box_price(row)
-		for row in (_dict_value(summary, "BuyBoxPrices", "buyBoxPrices") or [])
+		_format_buy_box_price(row) for row in (_dict_value(summary, "BuyBoxPrices", "buyBoxPrices") or [])
 	]
 
 	return {
@@ -407,9 +399,7 @@ def _format_amazon_buybox_response(
 			or fallback_sku
 		),
 		"asin": (
-			_dict_value(payload, "ASIN", "asin")
-			or _dict_value(identifier, "ASIN", "asin")
-			or fallback_asin
+			_dict_value(payload, "ASIN", "asin") or _dict_value(identifier, "ASIN", "asin") or fallback_asin
 		),
 		"item_condition": (
 			_dict_value(payload, "ItemCondition", "itemCondition")
@@ -423,9 +413,7 @@ def _format_amazon_buybox_response(
 		"buy_box_winners": winners,
 		"our_offers": our_offers,
 		"our_is_buy_box_winner": any(offer["is_buy_box_winner"] for offer in our_offers),
-		"our_is_featured_offer_eligible": any(
-			offer["is_featured_offer_eligible"] for offer in our_offers
-		),
+		"our_is_featured_offer_eligible": any(offer["is_featured_offer_eligible"] for offer in our_offers),
 		"offers": offers,
 	}
 
