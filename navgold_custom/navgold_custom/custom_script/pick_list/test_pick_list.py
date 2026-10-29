@@ -376,8 +376,8 @@ class TestPickListWholeStockUnits(IntegrationTestCase):
 		pick_list = self.make_dusty_pick_list(self.fractional_item, self.fractional_uom)
 
 		row = pick_list.locations[0]
-		self.assertEqual(row.stock_qty, 0.833 * 6)
-		self.assertEqual(row.picked_qty, 0.833 * 6)
+		self.assertAlmostEqual(row.stock_qty, 0.833 * 6)
+		self.assertAlmostEqual(row.picked_qty, 0.833 * 6)
 		self.assertEqual(row.qty, 0.833)
 
 
