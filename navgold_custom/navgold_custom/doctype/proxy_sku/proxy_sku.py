@@ -11,6 +11,7 @@ from frappe.utils.xlsxutils import make_xlsx
 from navgold_custom.navgold_custom.amazon_pricing.report_attachments import save_last_report_attachment
 from navgold_custom.navgold_custom.amazon_pricing.shipping_weight import get_shipping_weight_g
 from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import (
+	CatalogItems,
 	FBAInventory,
 	Listings,
 	Reports,
@@ -107,6 +108,20 @@ class ProxySKU(Document):
 		return asin_value
 
 	@frappe.whitelist()
+	def get_amazon_listing_content(self):
+		"""Read live Amazon listing content for this Proxy SKU without modifying ERP."""
+		listing = Listings.from_amazon_settings().get_listing_item(
+			sku=self.name,
+			included_data="summaries,attributes",
+		)
+		return _format_amazon_listing_content(
+			listing,
+			seller_skus=[self.name],
+			fallback_asin=self.asin,
+			source="Listings Items API",
+		)
+
+	@frappe.whitelist()
 	def fetch_fnsku(self):
 		if not self.is_fba:
 			frappe.throw(_("FNSKU can only be fetched for FBA Proxy SKUs"))
@@ -135,6 +150,101 @@ class ProxySKU(Document):
 			}
 		)
 		return doc.insert(ignore_permissions=True)
+
+
+def _attribute_values(attributes: dict, fieldname: str) -> list:
+	values = []
+	for row in (attributes or {}).get(fieldname) or []:
+		if isinstance(row, dict):
+			value = row.get("value")
+		else:
+			value = row
+		if value not in (None, ""):
+			values.append(value)
+	return values
+
+
+def _first_attribute(attributes: dict, *fieldnames: str):
+	for fieldname in fieldnames:
+		values = _attribute_values(attributes, fieldname)
+		if values:
+			return values[0]
+	return None
+
+
+def _format_amazon_listing_content(
+	payload: dict,
+	*,
+	seller_skus: list[str] | None = None,
+	fallback_asin: str | None = None,
+	source: str,
+) -> dict:
+	payload = payload or {}
+	summaries = payload.get("summaries") or []
+	summary = summaries[0] if summaries else {}
+	attributes = payload.get("attributes") or {}
+
+	asin = payload.get("asin") or summary.get("asin") or fallback_asin
+	title = summary.get("itemName") or _first_attribute(attributes, "item_name", "title")
+	description = _first_attribute(
+		attributes,
+		"product_description",
+		"product_description_legacy",
+		"item_description",
+	)
+	bullet_points = _attribute_values(attributes, "bullet_point")
+	brand = summary.get("brand") or _first_attribute(attributes, "brand")
+	product_type = (
+		summary.get("productType")
+		or payload.get("productType")
+		or _first_attribute(attributes, "product_type")
+	)
+
+	status = []
+	for value in payload.get("status") or []:
+		if isinstance(value, dict):
+			status.append(value.get("status") or value.get("value") or value)
+		else:
+			status.append(value)
+
+	return {
+		"source": source,
+		"seller_skus": seller_skus or [],
+		"asin": asin,
+		"title": title,
+		"description": description,
+		"bullet_points": bullet_points,
+		"brand": brand,
+		"product_type": product_type,
+		"status": [value for value in status if value],
+	}
+
+
+@frappe.whitelist()
+def get_amazon_listing_content_by_asin(asin: str):
+	"""Read live Amazon catalog content for an ASIN already linked to a Proxy SKU."""
+	asin = (asin or "").strip()
+	if not asin:
+		frappe.throw(_("ASIN is required"))
+
+	seller_skus = frappe.get_all(
+		"Proxy SKU",
+		filters={"asin": asin},
+		pluck="name",
+	)
+	if not seller_skus:
+		frappe.throw(_("ASIN {0} is not linked to any Proxy SKU in ERP").format(asin))
+
+	payload = CatalogItems.from_amazon_settings().get_catalog_item(
+		asin,
+		included_data="summaries,attributes,productTypes",
+	)
+	return _format_amazon_listing_content(
+		payload,
+		seller_skus=seller_skus,
+		fallback_asin=asin,
+		source="Catalog Items API",
+	)
 
 
 @frappe.whitelist()

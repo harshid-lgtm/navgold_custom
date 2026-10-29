@@ -404,17 +404,18 @@ class CatalogItems(SPAPI):
 		self,
 		asin: str,
 		marketplace_id: str | None = None,
+		included_data: str | None = None,
 	) -> dict:
-		"""Returns a specified item and its attributes."""
+		"""Return a catalog item, optionally including specific Amazon datasets."""
 		if not marketplace_id:
 			marketplace_id = self.marketplace_id
 
 		append_to_base_uri = f"/items/{asin}"
-		data = dict(marketplaceIds=marketplace_id)
-		# append_to_base_uri = f"?marketplaceIds={marketplace_id}"
-		data
-		response_from_reqeust = self.make_request(append_to_base_uri=append_to_base_uri, params=data)
-		return response_from_reqeust
+		params = {"marketplaceIds": marketplace_id}
+		if included_data:
+			params["includedData"] = included_data
+
+		return self.make_request(append_to_base_uri=append_to_base_uri, params=params)
 
 
 class Util:
