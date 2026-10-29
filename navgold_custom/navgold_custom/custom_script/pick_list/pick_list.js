@@ -467,10 +467,11 @@ async function save_pick_progress_silently(frm) {
 	const original_call = frappe.call;
 
 	frappe.call = function silent_pick_list_save(options) {
-		if (options?.method === 'frappe.desk.form.save.savedocs') {
-			options = { ...options, silent: true };
-		}
-		return original_call.call(this, options);
+		const request_options =
+			options?.method === 'frappe.desk.form.save.savedocs'
+				? { ...options, silent: true }
+				: options;
+		return original_call.call(this, request_options);
 	};
 
 	try {
