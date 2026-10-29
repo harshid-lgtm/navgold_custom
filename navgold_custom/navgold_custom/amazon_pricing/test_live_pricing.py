@@ -14,6 +14,7 @@ from navgold_custom.navgold_custom.amazon_pricing.live_pricing_fetcher import (
 from navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku import (
 	_format_amazon_listing_content,
 	get_amazon_listing_content_by_asin,
+	get_amazon_listing_content_by_sku,
 )
 
 SNAPSHOT_MODULE = "navgold_custom.navgold_custom.doctype.amazon_pricing_snapshot.amazon_pricing_snapshot"
@@ -144,6 +145,43 @@ class TestAmazonListingContentLookup(IntegrationTestCase):
 			included_data="summaries,attributes",
 		)
 		save.assert_not_called()
+		self.assertEqual(result["title"], "Listing Title")
+		self.assertEqual(result["description"], "Listing description")
+		self.assertEqual(result["bullet_points"], ["Listing bullet"])
+
+	def test_sku_rpc_uses_listings_api_without_writing(self):
+		client = MagicMock()
+		client.get_listing_item.return_value = {
+			"sku": "SKU-1",
+			"summaries": [{"asin": "B0TEST12345", "itemName": "Listing Title"}],
+			"attributes": {
+				"product_description": [{"value": "Listing description"}],
+				"bullet_point": [{"value": "Listing bullet"}],
+			},
+		}
+		proxy_sku = MagicMock()
+		proxy_sku.asin = "B0TEST12345"
+
+		with (
+			patch.object(frappe.db, "exists", return_value=True) as exists,
+			patch.object(frappe, "get_doc", return_value=proxy_sku) as get_doc,
+			patch(
+				"navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku.Listings.from_amazon_settings",
+				return_value=client,
+			),
+			patch.object(frappe.db, "set_value") as set_value,
+		):
+			result = get_amazon_listing_content_by_sku("SKU-1")
+
+		exists.assert_called_once_with("Proxy SKU", "SKU-1")
+		get_doc.assert_called_once_with("Proxy SKU", "SKU-1")
+		proxy_sku.check_permission.assert_called_once_with("read")
+		client.get_listing_item.assert_called_once_with(
+			sku="SKU-1",
+			included_data="summaries,attributes",
+		)
+		set_value.assert_not_called()
+		self.assertEqual(result["seller_skus"], ["SKU-1"])
 		self.assertEqual(result["title"], "Listing Title")
 		self.assertEqual(result["description"], "Listing description")
 		self.assertEqual(result["bullet_points"], ["Listing bullet"])
