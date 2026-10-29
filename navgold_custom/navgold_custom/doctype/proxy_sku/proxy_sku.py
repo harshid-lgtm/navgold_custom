@@ -110,16 +110,7 @@ class ProxySKU(Document):
 	@frappe.whitelist()
 	def get_amazon_listing_content(self):
 		"""Read live Amazon listing content for this Proxy SKU without modifying ERP."""
-		listing = Listings.from_amazon_settings().get_listing_item(
-			sku=self.name,
-			included_data="summaries,attributes",
-		)
-		return _format_amazon_listing_content(
-			listing,
-			seller_skus=[self.name],
-			fallback_asin=self.asin,
-			source="Listings Items API",
-		)
+		return get_amazon_listing_content_by_sku(self.name)
 
 	@frappe.whitelist()
 	def fetch_fnsku(self):
@@ -218,6 +209,31 @@ def _format_amazon_listing_content(
 		"product_type": product_type,
 		"status": [value for value in status if value],
 	}
+
+
+@frappe.whitelist()
+def get_amazon_listing_content_by_sku(sku: str):
+	"""Read live Amazon listing content for a seller SKU already present as a Proxy SKU."""
+	sku = (sku or "").strip()
+	if not sku:
+		frappe.throw(_("Seller SKU is required"))
+
+	if not frappe.db.exists("Proxy SKU", sku):
+		frappe.throw(_("Seller SKU {0} is not present as a Proxy SKU in ERP").format(sku))
+
+	proxy_sku = frappe.get_doc("Proxy SKU", sku)
+	proxy_sku.check_permission("read")
+
+	payload = Listings.from_amazon_settings().get_listing_item(
+		sku=sku,
+		included_data="summaries,attributes",
+	)
+	return _format_amazon_listing_content(
+		payload,
+		seller_skus=[sku],
+		fallback_asin=proxy_sku.asin,
+		source="Listings Items API",
+	)
 
 
 @frappe.whitelist()
