@@ -292,7 +292,7 @@ function current_scan_action(frm) {
 		return {
 			label: __('Scan Tote'),
 			run: () =>
-				navgold.packing.open_scan_tote_dialog(frm, 'custom_tote', false),
+				navgold.packing.open_scan_tote_dialog(frm, 'custom_tote', false, false),
 		};
 	}
 
@@ -463,6 +463,23 @@ function pick_info_fields(row) {
 	];
 }
 
+async function save_pick_progress_silently(frm) {
+	const original_call = frappe.call;
+
+	frappe.call = function silent_pick_list_save(options) {
+		if (options?.method === 'frappe.desk.form.save.savedocs') {
+			options = { ...options, silent: true };
+		}
+		return original_call.call(this, options);
+	};
+
+	try {
+		await frm.save();
+	} finally {
+		frappe.call = original_call;
+	}
+}
+
 function show_pick_qty_dialog(frm, row) {
 	const current_picked = flt(row.picked_qty);
 	const required_qty = flt(row.stock_qty);
@@ -507,7 +524,7 @@ function show_pick_qty_dialog(frm, row) {
 			dialog.hide();
 
 			try {
-				await frm.save();
+				await save_pick_progress_silently(frm);
 			} catch {
 				frappe.show_alert(
 					{ message: __('Failed to save Pick List'), indicator: 'red' },
@@ -516,24 +533,9 @@ function show_pick_qty_dialog(frm, row) {
 				return;
 			}
 
-			frappe.show_alert({
-				message: __('Picked {0}: {1}/{2} {3}', [
-					row.item_code,
-					new_picked,
-					required_qty,
-					row.stock_uom,
-				]),
-				indicator: 'green',
-			});
-
 			const next_row = get_next_pending_row(frm, row);
 			if (next_row) {
 				show_pick_summary_dialog(frm, next_row);
-			} else {
-				frappe.show_alert(
-					{ message: __('All items have been picked!'), indicator: 'green' },
-					7,
-				);
 			}
 		},
 	});
