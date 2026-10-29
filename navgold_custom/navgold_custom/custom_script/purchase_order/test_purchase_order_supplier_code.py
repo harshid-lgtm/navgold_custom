@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import frappe
@@ -70,10 +71,10 @@ class TestPurchaseOrderSupplierCode(IntegrationTestCase):
 			)
 
 	def test_server_hook_clears_stale_value_when_no_match(self):
-		doc = frappe._dict(
+		doc = SimpleNamespace(
 			supplier="CLF Distribution",
 			items=[
-				frappe._dict(
+				SimpleNamespace(
 					item_code="NO-MATCH",
 					uom="Nos",
 					supplier_part_no="OLD-CODE",
