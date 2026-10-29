@@ -19,7 +19,12 @@ async function refresh_supplier_code(frm, cdt, cdn) {
 		},
 	});
 
-	await frappe.model.set_value(cdt, cdn, 'supplier_part_no', response.message || '');
+	await frappe.model.set_value(
+		cdt,
+		cdn,
+		'supplier_part_no',
+		response.message || '',
+	);
 }
 
 async function refresh_all_supplier_codes(frm) {
