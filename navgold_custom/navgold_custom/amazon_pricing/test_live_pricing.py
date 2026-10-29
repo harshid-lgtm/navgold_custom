@@ -12,7 +12,10 @@ from navgold_custom.navgold_custom.amazon_pricing.live_pricing_fetcher import (
 	parse_purchasable_offer,
 )
 from navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku import (
+	_format_amazon_buybox_response,
 	_format_amazon_listing_content,
+	get_amazon_buybox_by_asin,
+	get_amazon_buybox_by_sku,
 	get_amazon_listing_content_by_asin,
 	get_amazon_listing_content_by_sku,
 )
@@ -214,6 +217,148 @@ class TestAmazonListingContentLookup(IntegrationTestCase):
 		with patch.object(frappe, "get_all", return_value=[]):
 			with self.assertRaises(frappe.ValidationError):
 				get_amazon_listing_content_by_asin("B0NOTINERP")
+
+
+class TestAmazonBuyBoxLookup(IntegrationTestCase):
+	def offer_payload(self):
+		return {
+			"payload": {
+				"SKU": "SKU-1",
+				"ASIN": "B0TEST12345",
+				"status": "Success",
+				"ItemCondition": "New",
+				"Identifier": {
+					"MarketplaceId": "A1F83G8C2ARO7P",
+					"SellerSKU": "SKU-1",
+					"ASIN": "B0TEST12345",
+				},
+				"Summary": {
+					"TotalOfferCount": 2,
+					"BuyBoxEligibleOffers": [
+						{
+							"condition": "new",
+							"fulfillmentChannel": "Merchant",
+							"OfferCount": 1,
+						},
+						{
+							"condition": "new",
+							"fulfillmentChannel": "Amazon",
+							"OfferCount": 1,
+						},
+					],
+					"BuyBoxPrices": [
+						{
+							"condition": "new",
+							"sellerId": "COMPETITOR",
+							"ListingPrice": {"Amount": 9.5, "CurrencyCode": "GBP"},
+							"Shipping": {"Amount": 0, "CurrencyCode": "GBP"},
+							"LandedPrice": {"Amount": 9.5, "CurrencyCode": "GBP"},
+						}
+					],
+				},
+				"Offers": [
+					{
+						"SellerId": "COMPETITOR",
+						"ListingPrice": {"Amount": 9.5, "CurrencyCode": "GBP"},
+						"Shipping": {"Amount": 0, "CurrencyCode": "GBP"},
+						"IsFeaturedMerchant": True,
+						"IsBuyBoxWinner": True,
+						"IsFulfilledByAmazon": True,
+						"PrimeInformation": {"IsPrime": True, "IsNationalPrime": True},
+						"SellerFeedbackRating": {
+							"FeedbackCount": 500,
+							"SellerPositiveFeedbackRating": 99.2,
+						},
+						"SubCondition": "new",
+					},
+					{
+						"SellerId": "OURSELLER",
+						"MyOffer": True,
+						"ListingPrice": {"Amount": 9.99, "CurrencyCode": "GBP"},
+						"Shipping": {"Amount": 0, "CurrencyCode": "GBP"},
+						"IsFeaturedMerchant": True,
+						"IsBuyBoxWinner": False,
+						"IsFulfilledByAmazon": False,
+						"PrimeInformation": {"IsPrime": True, "IsNationalPrime": False},
+						"SellerFeedbackRating": {
+							"FeedbackCount": 1000,
+							"SellerPositiveFeedbackRating": 98.7,
+						},
+						"SubCondition": "new",
+					},
+				],
+				"marketplaceId": "A1F83G8C2ARO7P",
+			}
+		}
+
+	def test_format_buybox_response_identifies_winner_and_our_offer(self):
+		result = _format_amazon_buybox_response(
+			self.offer_payload(),
+			our_seller_id="OURSELLER",
+			fallback_sku="SKU-1",
+			fallback_asin="B0TEST12345",
+			source="Product Pricing API - getListingOffers",
+		)
+
+		self.assertEqual(result["total_offer_count"], 2)
+		self.assertEqual(len(result["buy_box_winners"]), 1)
+		self.assertEqual(result["buy_box_winners"][0]["seller_id"], "COMPETITOR")
+		self.assertTrue(result["buy_box_winners"][0]["is_fulfilled_by_amazon"])
+		self.assertTrue(result["buy_box_winners"][0]["is_prime"])
+		self.assertEqual(result["buy_box_winners"][0]["landed_price"]["amount"], 9.5)
+		self.assertFalse(result["our_is_buy_box_winner"])
+		self.assertTrue(result["our_is_featured_offer_eligible"])
+		self.assertEqual(result["our_offers"][0]["seller_id"], "OURSELLER")
+		self.assertEqual(result["our_offers"][0]["positive_feedback_percentage"], 98.7)
+
+	def test_sku_buybox_rpc_is_read_only(self):
+		client = MagicMock()
+		client.seller_id = "OURSELLER"
+		client.get_listing_offers.return_value = self.offer_payload()
+		proxy_sku = MagicMock()
+		proxy_sku.asin = "B0TEST12345"
+
+		with (
+			patch.object(frappe.db, "exists", return_value=True) as exists,
+			patch.object(frappe, "get_doc", return_value=proxy_sku) as get_doc,
+			patch(
+				"navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku.ProductPricing.from_amazon_settings",
+				return_value=client,
+			),
+			patch.object(frappe.db, "set_value") as set_value,
+		):
+			result = get_amazon_buybox_by_sku("SKU-1")
+
+		exists.assert_called_once_with("Proxy SKU", "SKU-1")
+		get_doc.assert_called_once_with("Proxy SKU", "SKU-1")
+		proxy_sku.check_permission.assert_called_once_with("read")
+		client.get_listing_offers.assert_called_once_with("SKU-1")
+		set_value.assert_not_called()
+		self.assertEqual(result["buy_box_winners"][0]["seller_id"], "COMPETITOR")
+
+	def test_asin_buybox_rpc_is_read_only(self):
+		client = MagicMock()
+		client.seller_id = "OURSELLER"
+		client.get_item_offers.return_value = self.offer_payload()
+		proxy_doc = MagicMock()
+
+		with (
+			patch.object(frappe, "get_all", return_value=["SKU-1", "SKU-2"]) as get_all,
+			patch.object(frappe, "get_doc", return_value=proxy_doc) as get_doc,
+			patch(
+				"navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku.ProductPricing.from_amazon_settings",
+				return_value=client,
+			),
+			patch.object(frappe.db, "set_value") as set_value,
+		):
+			result = get_amazon_buybox_by_asin("B0TEST12345")
+
+		get_all.assert_called_once_with("Proxy SKU", filters={"asin": "B0TEST12345"}, pluck="name")
+		self.assertEqual(get_doc.call_count, 2)
+		proxy_doc.check_permission.assert_called_with("read")
+		client.get_item_offers.assert_called_once_with("B0TEST12345")
+		set_value.assert_not_called()
+		self.assertEqual(result["linked_seller_skus"], ["SKU-1", "SKU-2"])
 
 
 class TestSnapshotPopulate(IntegrationTestCase):
