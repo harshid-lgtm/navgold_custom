@@ -7,6 +7,7 @@
 # For license information, please see license.txt
 import gzip
 import time
+from urllib.parse import quote
 
 import frappe
 from frappe.integrations.utils import make_get_request
@@ -556,6 +557,60 @@ class Listings(SPAPI):
 			)
 			items.extend(response.get("items") or [])
 		return items
+
+
+class ProductPricing(SPAPI):
+	"""Amazon Product Pricing API (v0) read-only offer lookups."""
+
+	BASE_URI = "/products/pricing/v0/"
+
+	def __init__(self, *args, seller_id: str = "", **kwargs):
+		super().__init__(*args, **kwargs)
+		self.seller_id = seller_id
+
+	@classmethod
+	def from_amazon_settings(cls, settings=None):
+		instance = super().from_amazon_settings(settings)
+		instance.seller_id = instance.settings.merchant_id
+		return instance
+
+	def get_listing_offers(
+		self,
+		sku: str,
+		marketplace_id: str | None = None,
+		item_condition: str = "New",
+		customer_type: str = "Consumer",
+	) -> dict:
+		"""Return live competitive offers for one seller SKU."""
+		if not marketplace_id:
+			marketplace_id = self.marketplace_id
+
+		append_to_base_uri = f"listings/{quote(sku, safe='')}/offers"
+		params = {
+			"MarketplaceId": marketplace_id,
+			"ItemCondition": item_condition,
+			"CustomerType": customer_type,
+		}
+		return self.make_request(append_to_base_uri=append_to_base_uri, params=params)
+
+	def get_item_offers(
+		self,
+		asin: str,
+		marketplace_id: str | None = None,
+		item_condition: str = "New",
+		customer_type: str = "Consumer",
+	) -> dict:
+		"""Return live competitive offers for one ASIN."""
+		if not marketplace_id:
+			marketplace_id = self.marketplace_id
+
+		append_to_base_uri = f"items/{quote(asin, safe='')}/offers"
+		params = {
+			"MarketplaceId": marketplace_id,
+			"ItemCondition": item_condition,
+			"CustomerType": customer_type,
+		}
+		return self.make_request(append_to_base_uri=append_to_base_uri, params=params)
 
 
 class FBAInventory(SPAPI):
