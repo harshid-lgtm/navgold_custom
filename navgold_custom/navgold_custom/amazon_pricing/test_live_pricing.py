@@ -113,7 +113,7 @@ class TestAmazonListingContentLookup(IntegrationTestCase):
 		self.assertEqual(result["product_type"], "FOOD")
 		self.assertEqual(result["status"], ["BUYABLE"])
 
-	def test_proxy_sku_lookup_uses_listings_api_without_writing(self):
+	def test_proxy_sku_lookup_delegates_to_standalone_rpc_without_writing(self):
 		doc = frappe.get_doc(
 			{
 				"doctype": "Proxy SKU",
@@ -123,31 +123,24 @@ class TestAmazonListingContentLookup(IntegrationTestCase):
 				"asin": "B0TEST12345",
 			}
 		)
-		client = MagicMock()
-		client.get_listing_item.return_value = {
-			"sku": "SKU-1",
-			"summaries": [{"asin": "B0TEST12345", "itemName": "Listing Title"}],
-			"attributes": {
-				"product_description": [{"value": "Listing description"}],
-				"bullet_point": [{"value": "Listing bullet"}],
-			},
+		expected = {
+			"seller_skus": ["SKU-1"],
+			"asin": "B0TEST12345",
+			"title": "Listing Title",
 		}
+
 		with (
 			patch(
-				"navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku.Listings.from_amazon_settings",
-				return_value=client,
-			),
+				"navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku.get_amazon_listing_content_by_sku",
+				return_value=expected,
+			) as lookup,
 			patch.object(doc, "save") as save,
 		):
 			result = doc.get_amazon_listing_content()
-		client.get_listing_item.assert_called_once_with(
-			sku="SKU-1",
-			included_data="summaries,attributes",
-		)
+
+		lookup.assert_called_once_with("SKU-1")
 		save.assert_not_called()
-		self.assertEqual(result["title"], "Listing Title")
-		self.assertEqual(result["description"], "Listing description")
-		self.assertEqual(result["bullet_points"], ["Listing bullet"])
+		self.assertEqual(result, expected)
 
 	def test_sku_rpc_uses_listings_api_without_writing(self):
 		client = MagicMock()
