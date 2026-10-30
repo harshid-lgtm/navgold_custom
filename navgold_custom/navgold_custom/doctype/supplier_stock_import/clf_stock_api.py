@@ -159,6 +159,14 @@ def get_product_stock(skus):
 	)
 
 
+def apply_clf_stock_buffer(stock_qty: int, buffer_qty: int) -> int:
+	stock_qty = max(cint(stock_qty), 0)
+	buffer_qty = max(cint(buffer_qty), 0)
+	if buffer_qty > 0 and stock_qty < buffer_qty:
+		return 0
+	return stock_qty
+
+
 def get_product_prices(skus):
 	prices = get_product_field(
 		skus, "GetProductData", "GetProductDataResult", "price", flt, _("price"), CLF_PRICE_BATCH_SIZE
@@ -264,6 +272,9 @@ def fetch_and_import_clf(metric):
 
 	skus = [record.supplier_part_number for record in records]
 	value_map = get_product_prices(skus) if metric == "price" else get_product_stock(skus)
+	clf_stock_buffer = (
+		cint(frappe.db.get_single_value("Navgold Settings", "clf_stock_buffer")) if metric == "stock" else 0
+	)
 
 	csv_rows = []
 	for record in records:
@@ -276,7 +287,9 @@ def fetch_and_import_clf(metric):
 			stock_value, price_value = "", value_map[record.supplier_part_number]
 		else:
 			# A SKU CLF no longer lists is out of stock, so default missing ones to 0.
-			stock_value, price_value = value_map.get(record.supplier_part_number, 0), ""
+			raw_stock = value_map.get(record.supplier_part_number, 0)
+			stock_value = apply_clf_stock_buffer(raw_stock, clf_stock_buffer)
+			price_value = ""
 
 		csv_rows.append(
 			[
