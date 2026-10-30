@@ -28,3 +28,38 @@
 		bottom: 5rem;
 	}
 }
+
+
+/*
+ * Zebra handhelds can report a CSS viewport wider than Frappe's native mobile
+ * breakpoint, which leaves Pick List rows in the desktop layout and pushes the
+ * status indicator off-screen. Keep this override scoped to Pick List list view
+ * and handheld/tablet widths only.
+ */
+@media (max-width: 991px) {
+	[data-page-route^="List/Pick List"] .list-row:not(.list-row-head) {
+		align-items: flex-start;
+	}
+
+	[data-page-route^="List/Pick List"] .list-row:not(.list-row-head) .level-left {
+		flex: 1 1 auto;
+		min-width: 0;
+	}
+
+	[data-page-route^="List/Pick List"] .list-row:not(.list-row-head) .level-right {
+		display: flex;
+		flex: 0 0 auto;
+		width: auto;
+		min-width: 0;
+		border-left: none;
+	}
+
+	[data-page-route^="List/Pick List"] .list-row:not(.list-row-head) .level-right .visible-xs {
+		display: flex !important;
+		margin-top: 1px;
+	}
+
+	[data-page-route^="List/Pick List"] .list-row:not(.list-row-head) .level-right .hidden-xs {
+		display: none !important;
+	}
+}
