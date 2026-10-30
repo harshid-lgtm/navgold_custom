@@ -273,9 +273,7 @@ def fetch_and_import_clf(metric):
 	skus = [record.supplier_part_number for record in records]
 	value_map = get_product_prices(skus) if metric == "price" else get_product_stock(skus)
 	clf_stock_buffer = (
-		cint(frappe.db.get_single_value("Navgold Settings", "clf_stock_buffer"))
-		if metric == "stock"
-		else 0
+		cint(frappe.db.get_single_value("Navgold Settings", "clf_stock_buffer")) if metric == "stock" else 0
 	)
 
 	csv_rows = []
