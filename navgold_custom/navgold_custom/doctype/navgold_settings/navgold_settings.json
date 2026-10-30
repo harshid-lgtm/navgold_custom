@@ -73,6 +73,8 @@
 		"stock_publishing_mode",
 		"zero_stock_items",
 		"stock_publishing_guard_section",
+		"enable_freestock_for_amazon",
+		"apply_freestock_state_now",
 		"stock_reserve_pct",
 		"max_publish_qty",
 		"clf_stock_buffer",
@@ -527,6 +529,19 @@
 			"fieldname": "stock_publishing_guard_section",
 			"fieldtype": "Section Break",
 			"label": "Stock Publishing Guard"
+		},
+		{
+			"default": "1",
+			"description": "When disabled, own warehouse/MFN FreeStock is treated as 0 for Amazon strategy selection and stock publishing. FBA/AFN and supplier stock are unaffected. Use Apply FreeStock State Now after changing this setting for an immediate refresh/push.",
+			"fieldname": "enable_freestock_for_amazon",
+			"fieldtype": "Check",
+			"label": "Enable FreeStock for Amazon"
+		},
+		{
+			"description": "Immediately refresh Amazon strategies using the current FreeStock setting, then render a Dry Run on Test or queue a live Amazon feed when Pricing Sync Mode is Live.",
+			"fieldname": "apply_freestock_state_now",
+			"fieldtype": "Button",
+			"label": "Apply FreeStock State Now"
 		},
 		{
 			"default": "0",
