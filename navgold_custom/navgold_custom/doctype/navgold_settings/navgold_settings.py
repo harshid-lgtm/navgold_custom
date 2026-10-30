@@ -43,6 +43,7 @@ class NavgoldSettings(Document):
 		default_prep_owner: DF.Literal["AMAZON", "SELLER", "NONE"]
 		default_stock_allocation_warehouse: DF.Link | None
 		enable_afn_stock_sync: DF.Check
+		enable_freestock_for_amazon: DF.Check
 		enable_loss_circuit_breaker: DF.Check
 		enable_pricing_sync: DF.Check
 		enable_telegram_alerts: DF.Check
@@ -184,6 +185,50 @@ class NavgoldSettings(Document):
 	@frappe.whitelist()
 	def generate_amazon_pricing_for_all(self):
 		return generate_amazon_pricing_for_proxy_skus()
+
+	@frappe.whitelist()
+	def apply_freestock_state_now(self):
+		frappe.only_for("System Manager")
+
+		from navgold_custom.navgold_custom.amazon_pricing.strategy_selector import bulk_refresh_strategies
+
+		refresh_result = bulk_refresh_strategies()
+
+		if self.pricing_sync_mode == "Dry Run":
+			from navgold_custom.navgold_custom.amazon_pricing.pricing_dry_run import dry_run_pricing
+
+			preview = dry_run_pricing(refresh_first=False)
+			return {
+				"mode": "dry_run",
+				"enabled": bool(self.enable_freestock_for_amazon),
+				"strategies_refreshed": refresh_result.get("total", 0),
+				"strategies_updated": refresh_result.get("updated", 0),
+				"snapshot": preview.get("snapshot"),
+				"message_count": preview.get("message_count", 0),
+			}
+
+		if self.freeze_amazon_outbound:
+			frappe.throw(_("Amazon outbound is frozen. Unfreeze it before applying the FreeStock state."))
+
+		job_id = "navgold.amazon_freestock_state_sync"
+		if is_job_enqueued(job_id):
+			frappe.throw(_("A FreeStock state sync is already in progress."))
+
+		frappe.enqueue(
+			job_id=job_id,
+			deduplicate=True,
+			method="navgold_custom.navgold_custom.amazon_pricing.amazon_feed_submitter.submit_active_pricing",
+			timeout=6000,
+			now=frappe.flags.in_test,
+		)
+
+		return {
+			"mode": "live",
+			"enabled": bool(self.enable_freestock_for_amazon),
+			"strategies_refreshed": refresh_result.get("total", 0),
+			"strategies_updated": refresh_result.get("updated", 0),
+			"queued": True,
+		}
 
 	@frappe.whitelist()
 	def submit_active_pricing_now(self):
