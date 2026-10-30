@@ -152,7 +152,6 @@ class TestPackAllocationStrategy(IntegrationTestCase):
 		self.assertEqual(select_strategy(pricing, stock_info=stock_info), pricing.backorder_strategy)
 
 
-
 class TestFreeStockAmazonSwitch(IntegrationTestCase):
 	@classmethod
 	def setUpClass(cls):
@@ -198,7 +197,6 @@ class TestFreeStockAmazonSwitch(IntegrationTestCase):
 
 		pricing = frappe.get_doc("Amazon Product Pricing", {"proxy_sku": proxy_sku})
 		self.assertEqual(select_strategy(pricing, stock_info=stock_info), pricing.fba_strategy)
-
 
 
 class TestStrategySelectorAFNBridge(IntegrationTestCase):
