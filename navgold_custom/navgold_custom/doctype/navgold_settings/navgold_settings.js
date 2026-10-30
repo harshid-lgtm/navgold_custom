@@ -227,6 +227,62 @@ frappe.ui.form.on('Navgold Settings', {
 		}
 	},
 
+	async apply_freestock_state_now(frm) {
+		if (frm.is_dirty()) await frm.save();
+
+		const enabling = Boolean(frm.doc.enable_freestock_for_amazon);
+		const confirmed = await navgold.confirm_dialog(
+			enabling
+				? __(
+						'Enable warehouse FreeStock for Amazon now? Strategies will be refreshed and current warehouse stock can be published again.',
+				  )
+				: __(
+						'DISABLE warehouse FreeStock for Amazon now? Own MFN/SFP stock will be treated as 0 and eligible listings can move to supplier/backorder fulfilment. FBA/AFN is unaffected.',
+				  ),
+		);
+		if (!confirmed) return;
+
+		const response = await frappe.call({
+			doc: frm.doc,
+			method: 'apply_freestock_state_now',
+			freeze: true,
+			freeze_message: enabling
+				? __('Enabling FreeStock and refreshing Amazon strategies...')
+				: __('Disabling FreeStock and refreshing Amazon strategies...'),
+		});
+
+		const result = response.message || {};
+		if (result.mode === 'dry_run') {
+			frappe.msgprint({
+				title: __('FreeStock State Applied — Dry Run Only'),
+				indicator: 'blue',
+				message: __(
+					'FreeStock is {0}. Refreshed {1} strategies and updated {2}. Nothing was pushed to Amazon. Dry-run snapshot: <a href="/app/amazon-pricing-snapshot/{3}">{3}</a>.',
+					[
+						result.enabled ? __('ENABLED') : __('DISABLED'),
+						result.strategies_refreshed || 0,
+						result.strategies_updated || 0,
+						result.snapshot,
+					],
+				),
+			});
+			return;
+		}
+
+		frappe.msgprint({
+			title: __('FreeStock State Applied'),
+			indicator: result.enabled ? 'green' : 'orange',
+			message: __(
+				'FreeStock is {0}. Refreshed {1} strategies and updated {2}. The Amazon feed has been queued.',
+				[
+					result.enabled ? __('ENABLED') : __('DISABLED'),
+					result.strategies_refreshed || 0,
+					result.strategies_updated || 0,
+				],
+			),
+		});
+	},
+
 	async group_strategies_into_pricing(frm) {
 		if (
 			!frm.doc.strategy_name_mapping ||

@@ -152,6 +152,53 @@ class TestPackAllocationStrategy(IntegrationTestCase):
 		self.assertEqual(select_strategy(pricing, stock_info=stock_info), pricing.backorder_strategy)
 
 
+class TestFreeStockAmazonSwitch(IntegrationTestCase):
+	@classmethod
+	def setUpClass(cls):
+		super().setUpClass()
+		cls.template_name = create_strategy_template()
+
+	@change_settings(
+		"Navgold Settings",
+		{"enable_freestock_for_amazon": 0, "enable_afn_stock_sync": 0},
+	)
+	def test_disabled_freestock_zeroes_single_and_batch_mfn_stock(self):
+		item_code = create_test_item()
+		proxy_sku = create_proxy_sku_for(item_code, "Nos")
+		apply_template_to_proxy_sku(self.template_name, proxy_sku)
+
+		with patch(
+			"navgold_custom.navgold_custom.amazon_pricing.strategy_selector.get_free_qty_map",
+			return_value={item_code: {"free_qty": 50, "actual_qty": 50}},
+		):
+			stock_info = get_stock_info(proxy_sku)
+			batch_info = get_stock_info_batch([proxy_sku])[proxy_sku]
+
+		self.assertEqual(stock_info["mfn_stock"], 0)
+		self.assertEqual(stock_info["total_stock"], 0)
+		self.assertEqual(batch_info["mfn_stock"], 0)
+		self.assertEqual(batch_info["total_stock"], 0)
+
+		pricing = frappe.get_doc("Amazon Product Pricing", {"proxy_sku": proxy_sku})
+		self.assertEqual(select_strategy(pricing, stock_info=stock_info), pricing.backorder_strategy)
+
+	@change_settings(
+		"Navgold Settings",
+		{"enable_freestock_for_amazon": 0, "enable_afn_stock_sync": 1},
+	)
+	def test_disabled_freestock_does_not_zero_fba_stock(self):
+		_item_code, proxy_sku = create_fba_fixture(self.template_name)
+		frappe.db.set_value("Proxy SKU", proxy_sku, "afn_stock", 7, update_modified=False)
+		frappe.clear_document_cache("Proxy SKU", proxy_sku)
+
+		stock_info = get_stock_info(proxy_sku)
+		self.assertEqual(stock_info["mfn_stock"], 0)
+		self.assertEqual(stock_info["fba_stock"], 7)
+
+		pricing = frappe.get_doc("Amazon Product Pricing", {"proxy_sku": proxy_sku})
+		self.assertEqual(select_strategy(pricing, stock_info=stock_info), pricing.fba_strategy)
+
+
 class TestStrategySelectorAFNBridge(IntegrationTestCase):
 	@classmethod
 	def setUpClass(cls):
