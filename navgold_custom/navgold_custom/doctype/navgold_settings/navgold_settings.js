@@ -227,7 +227,6 @@ frappe.ui.form.on('Navgold Settings', {
 		}
 	},
 
-
 	async apply_freestock_state_now(frm) {
 		if (frm.is_dirty()) await frm.save();
 
@@ -236,10 +235,10 @@ frappe.ui.form.on('Navgold Settings', {
 			enabling
 				? __(
 						'Enable warehouse FreeStock for Amazon now? Strategies will be refreshed and current warehouse stock can be published again.',
-					)
+				  )
 				: __(
 						'DISABLE warehouse FreeStock for Amazon now? Own MFN/SFP stock will be treated as 0 and eligible listings can move to supplier/backorder fulfilment. FBA/AFN is unaffected.',
-					),
+				  ),
 		);
 		if (!confirmed) return;
 
