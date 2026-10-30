@@ -87,7 +87,9 @@ def get_stock_info(proxy_sku: str) -> dict:
 	# item-level aggregate stops a sibling FBA SKU's stock from leaking into an MFN SKU.
 	# With the sync off, afn_stock is never refreshed, so treat FBA as out of stock rather
 	# than select it on a frozen value.
-	sync_on = frappe.get_cached_doc("Navgold Settings").enable_afn_stock_sync
+	settings = frappe.get_cached_doc("Navgold Settings")
+	sync_on = settings.enable_afn_stock_sync
+	freestock_enabled = bool(settings.enable_freestock_for_amazon)
 	fba_stock = flt(proxy.afn_stock) if sync_on else 0
 
 	buildable_map = get_buildable_bundle_qty_map([proxy.item])
@@ -100,6 +102,10 @@ def get_stock_info(proxy_sku: str) -> dict:
 		# An FBA SKU is dealt warehouse packs only once Amazon has run dry on it, so a SKU Amazon
 		# still stocks cannot take packs away from the SKUs that ship off our own shelves.
 		sellable_mfn_stock = get_pack_allocation_map({proxy.item: mfn_stock}).get(proxy_sku, 0)
+
+	if not freestock_enabled:
+		mfn_stock = 0
+		sellable_mfn_stock = 0
 
 	restock_info = check_pending_restock(proxy.item)
 
@@ -132,7 +138,9 @@ def get_stock_info_batch(proxy_sku_names: list) -> dict:
 		return {name: dict(empty) for name in proxy_sku_names}
 
 	# afn_stock is only refreshed while the sync is on; off means treat FBA as out of stock.
-	sync_on = frappe.get_cached_doc("Navgold Settings").enable_afn_stock_sync
+	settings = frappe.get_cached_doc("Navgold Settings")
+	sync_on = settings.enable_afn_stock_sync
+	freestock_enabled = bool(settings.enable_freestock_for_amazon)
 	mfn_stock_data = get_free_qty_map(all_item_codes)
 	restock_map = get_restock_data_map(all_item_codes)
 	buildable_map = get_buildable_bundle_qty_map(all_item_codes)
@@ -161,6 +169,10 @@ def get_stock_info_batch(proxy_sku_names: list) -> dict:
 			# mfn_stock stays the raw base-unit free qty: the feed builder publishes the pack count itself.
 			mfn_stock = mfn_stock_data.get(item_code, {}).get("free_qty", 0)
 			sellable_mfn_stock = allocation_map.get(proxy_sku_name, 0)
+		if not freestock_enabled:
+			mfn_stock = 0
+			sellable_mfn_stock = 0
+
 		restock_date = restock_map.get(item_code)
 
 		result[proxy_sku_name] = {
