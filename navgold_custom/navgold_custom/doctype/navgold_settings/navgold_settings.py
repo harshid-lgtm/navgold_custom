@@ -186,7 +186,7 @@ class NavgoldSettings(Document):
 	def generate_amazon_pricing_for_all(self):
 		return generate_amazon_pricing_for_proxy_skus()
 
-	@frappe.whitelist()
+	@frappe.whitelist(methods=["POST"])
 	def apply_freestock_state_now(self):
 		frappe.only_for("System Manager")
 
@@ -220,6 +220,7 @@ class NavgoldSettings(Document):
 			method="navgold_custom.navgold_custom.amazon_pricing.amazon_feed_submitter.submit_active_pricing",
 			timeout=6000,
 			now=frappe.flags.in_test,
+			enqueue_after_commit=True,
 		)
 
 		return {
