@@ -75,6 +75,7 @@
 		"stock_publishing_guard_section",
 		"stock_reserve_pct",
 		"max_publish_qty",
+		"clf_stock_buffer",
 		"afn_stock_sync_section",
 		"enable_afn_stock_sync",
 		"last_afn_stock_synced_at",
@@ -541,6 +542,14 @@
 			"fieldname": "max_publish_qty",
 			"fieldtype": "Int",
 			"label": "Max Publish Qty",
+			"non_negative": 1
+		},
+		{
+			"default": "0",
+			"description": "CLF stock below this quantity is stored as 0 during CLF stock imports. 0 disables the buffer. Stock equal to or above the buffer is stored at the actual CLF quantity. Prices are never changed.",
+			"fieldname": "clf_stock_buffer",
+			"fieldtype": "Int",
+			"label": "CLF Buffer Stock",
 			"non_negative": 1
 		},
 		{
