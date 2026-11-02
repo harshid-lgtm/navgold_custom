@@ -69,8 +69,8 @@ class AmazonProductPricing(Document):
 
 		if self.active_strategy:
 			strategy = frappe.get_cached_doc("Amazon Product Strategy", self.active_strategy)
-			self.current_min_price = strategy.calculated_min_price
-			self.current_max_price = strategy.calculated_max_price
+			self.current_min_price = strategy.approved_min_price
+			self.current_max_price = strategy.approved_max_price
 		else:
 			self.current_min_price = 0
 			self.current_max_price = 0
