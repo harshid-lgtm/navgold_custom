@@ -246,7 +246,7 @@ def get_strategy_map(pricing_records: list) -> dict:
 	rows = frappe.get_all(
 		"Amazon Product Strategy",
 		filters={"name": ["in", list(strategy_names)]},
-		fields=["name", "is_active", "calculated_min_price", "calculated_max_price"],
+		fields=["name", "is_active", "approved_min_price", "approved_max_price"],
 	)
 	return {row.name: row for row in rows}
 
@@ -261,8 +261,8 @@ def compute_pricing_update(
 		expected_max = flt(pricing.fixed_price_value)
 	else:
 		strategy = strategy_map.get(new_strategy) if new_strategy else None
-		expected_min = flt(strategy.calculated_min_price) if strategy else 0
-		expected_max = flt(strategy.calculated_max_price) if strategy else 0
+		expected_min = flt(strategy.approved_min_price) if strategy else 0
+		expected_max = flt(strategy.approved_max_price) if strategy else 0
 
 	if (
 		new_strategy == pricing.active_strategy
