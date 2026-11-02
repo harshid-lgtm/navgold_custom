@@ -141,8 +141,8 @@ def alert_price_approval_required(strategy_name: str) -> None:
 		"Pricing approval required",
 		[
 			f"SKU <b>{frappe.utils.escape_html(cstr(strategy.proxy_sku))}</b> · {frappe.utils.escape_html(cstr(strategy.strategy_name))}",
-			f"Approved: {format_money(strategy.approved_min_price)} – {format_money(strategy.approved_max_price)}",
-			f"Proposed: {format_money(strategy.calculated_min_price)} – {format_money(strategy.calculated_max_price)}",
+			f"Approved: {format_money(strategy.approved_min_price)} - {format_money(strategy.approved_max_price)}",
+			f"Proposed: {format_money(strategy.calculated_min_price)} - {format_money(strategy.calculated_max_price)}",
 			f"Review strategy <code>{frappe.utils.escape_html(strategy_name)}</code> in ERPNext.",
 		],
 		severity="warning",
