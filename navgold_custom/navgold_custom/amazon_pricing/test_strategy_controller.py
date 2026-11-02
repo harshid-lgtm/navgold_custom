@@ -130,6 +130,33 @@ class TestStrategyControllerCalculatedBand(IntegrationTestCase):
 		self.assertAlmostEqual(strategy.calculated_min_price, 5.56, places=2)
 		self.assertAlmostEqual(strategy.calculated_max_price, 6.25, places=2)
 
+	def test_new_strategy_initializes_approved_band(self):
+		proxy_sku = create_proxy_sku()
+		strategy = build_strategy(proxy_sku, min_margin=10, max_margin=20, purchase_cost_value=5.0)
+
+		with patch.object(price_calculator, "get_pricing_settings", return_value=FIXED_SETTINGS):
+			strategy.insert()
+
+		self.assertEqual(strategy.approval_status, "Approved")
+		self.assertAlmostEqual(strategy.approved_min_price, strategy.calculated_min_price, places=2)
+		self.assertAlmostEqual(strategy.approved_max_price, strategy.calculated_max_price, places=2)
+
+	def test_cost_change_becomes_pending_without_moving_approved_band(self):
+		proxy_sku = create_proxy_sku()
+		strategy = build_strategy(proxy_sku, min_margin=10, max_margin=20, purchase_cost_value=5.0)
+
+		with patch.object(price_calculator, "get_pricing_settings", return_value=FIXED_SETTINGS):
+			strategy.insert()
+			approved_min = strategy.approved_min_price
+			approved_max = strategy.approved_max_price
+			strategy.costs[0].value = 6.0
+			strategy.save()
+
+		self.assertEqual(strategy.approval_status, "Pending Approval")
+		self.assertAlmostEqual(strategy.approved_min_price, approved_min, places=2)
+		self.assertAlmostEqual(strategy.approved_max_price, approved_max, places=2)
+		self.assertNotEqual(strategy.calculated_max_price, approved_max)
+
 	def test_calculated_band_scales_with_cost(self):
 		# Absolute cost of 8, margins 10%/20%. numerator = 8, denominator = 1.
 		#   min = 8 / 0.90 = 8.8889 -> 8.89

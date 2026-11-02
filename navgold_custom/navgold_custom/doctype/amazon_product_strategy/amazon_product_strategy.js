@@ -4,6 +4,68 @@
 frappe.ui.form.on('Amazon Product Strategy', {
 	refresh(frm) {
 		refresh_value_editability(frm);
+
+		if (frm.doc.approval_status === 'Pending Approval') {
+			frm.set_intro(
+				__(
+					'Price approval required. Approved prices stay live until you approve the new calculated band or keep the current price and adjust margins.',
+				),
+				'orange',
+			);
+
+			frm.add_custom_button(
+				__('Approve Proposed Price'),
+				async () => {
+					const confirmed = await navgold.confirm_dialog(
+						__(
+							'Approve calculated Min {0} / Max {1}? These values will become the approved pricing band used by Amazon Pricing and Repricer on the next sync.',
+							[
+								format_currency(frm.doc.calculated_min_price),
+								format_currency(frm.doc.calculated_max_price),
+							],
+						),
+					);
+					if (!confirmed) return;
+
+					await frappe.call({
+						doc: frm.doc,
+						method: 'approve_proposed_price',
+						freeze: true,
+						freeze_message: __('Approving proposed price...'),
+					});
+					await frm.reload_doc();
+				},
+				__('Price Approval'),
+			);
+
+			frm.add_custom_button(
+				__('Keep Current Price / Adjust Margins'),
+				async () => {
+					const confirmed = await navgold.confirm_dialog(
+						__(
+							'Keep approved Min {0} / Max {1} and recalculate the strategy margins from the latest costs? This preserves the current commercial price while accepting the lower/higher resulting margin.',
+							[
+								format_currency(frm.doc.approved_min_price),
+								format_currency(frm.doc.approved_max_price),
+							],
+						),
+					);
+					if (!confirmed) return;
+
+					await frappe.call({
+						doc: frm.doc,
+						method: 'keep_approved_price',
+						freeze: true,
+						freeze_message: __(
+							'Adjusting margins to preserve approved prices...',
+						),
+					});
+					await frm.reload_doc();
+				},
+				__('Price Approval'),
+			);
+		}
+
 		if (!frm.is_new()) {
 			frm.add_custom_button(
 				__('Apply Cost Template'),

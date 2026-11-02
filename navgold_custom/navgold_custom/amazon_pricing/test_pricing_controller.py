@@ -130,7 +130,7 @@ class TestPricingControllerCurrentPrices(IntegrationTestCase):
 		self.assertEqual(pricing.current_min_price, 12.34)
 		self.assertEqual(pricing.current_max_price, 12.34)
 
-	def test_active_strategy_path_copies_calculated_band(self):
+	def test_active_strategy_path_copies_approved_band(self):
 		# No FBA/SFP/backorder slots, so select_strategy falls through to the default strategy.
 		# That strategy's band drives current prices. Absolute cost 5, margins 10%/20%:
 		#   calculated_min_price = 5 / (1 - 0.10) = 5 / 0.90 = 5.5556 -> 5.56
@@ -147,6 +147,26 @@ class TestPricingControllerCurrentPrices(IntegrationTestCase):
 		self.assertEqual(pricing.active_strategy, strategy.name)
 		self.assertAlmostEqual(pricing.current_min_price, 5.56, places=2)
 		self.assertAlmostEqual(pricing.current_max_price, 6.25, places=2)
+
+	def test_pending_strategy_change_keeps_current_approved_band(self):
+		proxy_sku = create_proxy_sku()
+
+		with patch.object(price_calculator, "get_pricing_settings", return_value=FIXED_SETTINGS):
+			strategy = create_strategy(proxy_sku, purchase_cost_value=5.0)
+			pricing = build_pricing(proxy_sku)
+			pricing.default_strategy = strategy.name
+			pricing.insert()
+
+			original_min = pricing.current_min_price
+			original_max = pricing.current_max_price
+			strategy.costs[0].value = 6.0
+			strategy.save()
+
+		pricing.reload()
+		strategy.reload()
+		self.assertEqual(strategy.approval_status, "Pending Approval")
+		self.assertAlmostEqual(pricing.current_min_price, original_min, places=2)
+		self.assertAlmostEqual(pricing.current_max_price, original_max, places=2)
 
 	def test_no_strategy_yields_zero_band(self):
 		# No slots at all -> active_strategy None -> current prices zeroed.

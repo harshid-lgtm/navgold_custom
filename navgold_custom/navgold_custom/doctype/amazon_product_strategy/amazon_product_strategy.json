@@ -17,6 +17,14 @@
 		"column_break_margin",
 		"calculated_min_price",
 		"calculated_max_price",
+		"price_approval_section",
+		"approved_min_price",
+		"approved_max_price",
+		"column_break_price_approval",
+		"approval_status",
+		"approval_requested_at",
+		"last_price_approved_by",
+		"last_price_approved_at",
 		"reverse_calc_section",
 		"target_price",
 		"calculated_margin",
@@ -105,6 +113,61 @@
 			"read_only": 1
 		},
 		{
+			"fieldname": "price_approval_section",
+			"fieldtype": "Section Break",
+			"label": "Price Approval",
+			"description": "Calculated prices are proposals. Approved prices are the values allowed to flow into Amazon Product Pricing and outbound pricing feeds."
+		},
+		{
+			"fieldname": "approved_min_price",
+			"fieldtype": "Currency",
+			"label": "Approved Min Price",
+			"precision": "2",
+			"read_only": 1,
+			"in_list_view": 1
+		},
+		{
+			"fieldname": "approved_max_price",
+			"fieldtype": "Currency",
+			"label": "Approved Max Price",
+			"precision": "2",
+			"read_only": 1,
+			"in_list_view": 1
+		},
+		{
+			"fieldname": "column_break_price_approval",
+			"fieldtype": "Column Break"
+		},
+		{
+			"default": "Approved",
+			"fieldname": "approval_status",
+			"fieldtype": "Select",
+			"label": "Approval Status",
+			"options": "Approved\nPending Approval",
+			"read_only": 1,
+			"in_list_view": 1,
+			"in_standard_filter": 1
+		},
+		{
+			"fieldname": "approval_requested_at",
+			"fieldtype": "Datetime",
+			"label": "Approval Requested At",
+			"read_only": 1
+		},
+		{
+			"fieldname": "last_price_approved_by",
+			"fieldtype": "Link",
+			"label": "Last Approved By",
+			"options": "User",
+			"read_only": 1
+		},
+		{
+			"fieldname": "last_price_approved_at",
+			"fieldtype": "Datetime",
+			"label": "Last Approved At",
+			"read_only": 1
+		},
+		{
 			"collapsible": 1,
 			"description": "Enter a target selling price to see what margin it would achieve",
 			"fieldname": "reverse_calc_section",
@@ -148,7 +211,7 @@
 	"grid_page_length": 50,
 	"index_web_pages_for_search": 1,
 	"links": [],
-	"modified": "2026-07-01 07:49:31.393333",
+	"modified": "2026-11-02 08:45:00.000000",
 	"modified_by": "Administrator",
 	"module": "Navgold Custom",
 	"name": "Amazon Product Strategy",

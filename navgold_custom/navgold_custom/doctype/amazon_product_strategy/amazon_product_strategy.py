@@ -82,12 +82,18 @@ class AmazonProductStrategy(Document):
 			AmazonProductCost,
 		)
 
+		approved_max_price: DF.Currency
+		approved_min_price: DF.Currency
+		approval_requested_at: DF.Datetime | None
+		approval_status: DF.Literal["Approved", "Pending Approval"]
 		calculated_margin: DF.Percent
 		calculated_max_price: DF.Currency
 		calculated_min_price: DF.Currency
 		calculated_profit: DF.Currency
 		costs: DF.Table[AmazonProductCost]
 		is_active: DF.Check
+		last_price_approved_at: DF.Datetime | None
+		last_price_approved_by: DF.Link | None
 		max_margin: DF.Percent
 		min_margin: DF.Percent
 		proxy_sku: DF.Link
@@ -106,6 +112,7 @@ class AmazonProductStrategy(Document):
 		self.pin_external_value_overrides(cost_sub_type_map)
 		self.populate_costs(cost_sub_type_map)
 		self.calculate_prices(cost_sub_type_map)
+		self.update_price_approval_state()
 		self.calculate_reverse_margin(cost_sub_type_map)
 
 	def pin_external_value_overrides(self, cost_sub_type_map: dict):
@@ -145,17 +152,106 @@ class AmazonProductStrategy(Document):
 			as_dict=True,
 		)
 
-		if not pricing or pricing.fixed_price or pricing.active_strategy != self.name:
+		if pricing and not pricing.fixed_price and pricing.active_strategy == self.name:
+			frappe.db.set_value(
+				"Amazon Product Pricing",
+				self.proxy_sku,
+				{
+					"current_min_price": self.approved_min_price,
+					"current_max_price": self.approved_max_price,
+				},
+				update_modified=False,
+			)
+
+		if self.flags.get("price_approval_became_pending") and not self.flags.get(
+			"suppress_price_approval_alert"
+		):
+			from navgold_custom.navgold_custom.amazon_pricing.alerts import alert_price_approval_required
+
+			alert_price_approval_required(self.name)
+
+	def update_price_approval_state(self):
+		proposed_min = flt(self.calculated_min_price, 2)
+		proposed_max = flt(self.calculated_max_price, 2)
+
+		# New strategies start with their first valid calculation approved. Existing strategies are
+		# backfilled by a post-model-sync patch, so deployment itself never creates approval noise.
+		if self.is_new():
+			self.approved_min_price = proposed_min
+			self.approved_max_price = proposed_max
+			self.approval_status = "Approved"
 			return
+
+		approved_min = flt(self.approved_min_price, 2)
+		approved_max = flt(self.approved_max_price, 2)
+		changed = proposed_min != approved_min or proposed_max != approved_max
+		was_pending = self.approval_status == "Pending Approval"
+
+		if changed:
+			self.approval_status = "Pending Approval"
+			if not was_pending:
+				self.approval_requested_at = frappe.utils.now_datetime()
+				self.flags.price_approval_became_pending = True
+		else:
+			self.approval_status = "Approved"
+			self.approval_requested_at = None
+
+	@frappe.whitelist(methods=["POST"])
+	def approve_proposed_price(self):
+		frappe.only_for("System Manager")
+		self.approved_min_price = flt(self.calculated_min_price, 2)
+		self.approved_max_price = flt(self.calculated_max_price, 2)
+		self.approval_status = "Approved"
+		self.approval_requested_at = None
+		self.last_price_approved_by = frappe.session.user
+		self.last_price_approved_at = frappe.utils.now_datetime()
+		self.flags.suppress_price_approval_alert = True
+		self.save(ignore_permissions=True)
+		return {
+			"approved_min_price": self.approved_min_price,
+			"approved_max_price": self.approved_max_price,
+		}
+
+	@frappe.whitelist(methods=["POST"])
+	def keep_approved_price(self):
+		frappe.only_for("System Manager")
+		cost_sub_type_map = get_cost_sub_type_map()
+		cost_data = get_cost_data(self, cost_sub_type_map=cost_sub_type_map)
+		if not cost_data:
+			frappe.throw(_("Cannot preserve the approved price because this strategy has no active costs."))
+
+		approved_min = flt(self.approved_min_price, 2)
+		approved_max = flt(self.approved_max_price, 2)
+		if approved_min <= 0 or approved_max <= 0:
+			frappe.throw(_("Approved Min and Max Price must both be greater than zero."))
+
+		min_result = calculate_margin_from_price(costs=cost_data, selling_price=approved_min)
+		max_result = calculate_margin_from_price(costs=cost_data, selling_price=approved_max)
+		self.min_margin = min_result.get("margin", 0)
+		self.max_margin = max_result.get("margin", 0)
+		self.flags.suppress_price_approval_alert = True
+		self.save(ignore_permissions=True)
+
+		# The approved band remains the commercial source of truth even if inverse calculation and
+		# currency rounding leave the proposal a penny away.
 		frappe.db.set_value(
-			"Amazon Product Pricing",
-			self.proxy_sku,
+			"Amazon Product Strategy",
+			self.name,
 			{
-				"current_min_price": self.calculated_min_price,
-				"current_max_price": self.calculated_max_price,
+				"approval_status": "Approved",
+				"approval_requested_at": None,
+				"last_price_approved_by": frappe.session.user,
+				"last_price_approved_at": frappe.utils.now_datetime(),
 			},
 			update_modified=False,
 		)
+		self.reload()
+		return {
+			"min_margin": self.min_margin,
+			"max_margin": self.max_margin,
+			"approved_min_price": self.approved_min_price,
+			"approved_max_price": self.approved_max_price,
+		}
 
 	def validate_margin(self):
 		if self.min_margin > self.max_margin:
@@ -296,12 +392,16 @@ def refresh_all_strategy_costs():
 
 def refresh_strategy_costs_chunk(strategy_names: list):
 	refreshed = 0
+	pending_approvals = []
 	missing_component_rates: list[tuple[str, str]] = []
 	for strategy_name in strategy_names:
 		try:
 			strategy = frappe.get_doc("Amazon Product Strategy", strategy_name)
 			strategy.flags.missing_bundle_component_rates = missing_component_rates
+			strategy.flags.suppress_price_approval_alert = True
 			strategy.save(ignore_permissions=True)
+			if strategy.approval_status == "Pending Approval":
+				pending_approvals.append(strategy.name)
 			refreshed += 1
 		except Exception as exception:
 			frappe.log_error(
@@ -310,5 +410,9 @@ def refresh_strategy_costs_chunk(strategy_names: list):
 			)
 
 	log_missing_bundle_component_rates(missing_component_rates)
+	if pending_approvals:
+		from navgold_custom.navgold_custom.amazon_pricing.alerts import alert_price_approvals_summary
+
+		alert_price_approvals_summary(pending_approvals, "strategy cost refresh")
 
 	return {"total": len(strategy_names), "refreshed": refreshed}
