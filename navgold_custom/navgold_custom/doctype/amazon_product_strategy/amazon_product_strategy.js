@@ -56,7 +56,9 @@ frappe.ui.form.on('Amazon Product Strategy', {
 						doc: frm.doc,
 						method: 'keep_approved_price',
 						freeze: true,
-						freeze_message: __('Adjusting margins to preserve approved prices...'),
+						freeze_message: __(
+							'Adjusting margins to preserve approved prices...',
+						),
 					});
 					await frm.reload_doc();
 				},
