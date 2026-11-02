@@ -7,7 +7,6 @@ from frappe import _
 from frappe.model.document import Document
 from frappe.utils import cstr, get_request_session
 
-
 DEFAULT_TEMU_EU_ENDPOINT = "https://openapi-b-eu.temu.com/openapi/router"
 
 
@@ -121,7 +120,7 @@ class TemuClient:
 def serialize_sign_value(value) -> str:
 	if isinstance(value, bool):
 		return "true" if value else "false"
-	if isinstance(value, (dict, list)):
+	if isinstance(value, dict | list):
 		return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
 	if value is None:
 		return ""
