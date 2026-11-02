@@ -78,6 +78,7 @@
 		"stock_reserve_pct",
 		"max_publish_qty",
 		"clf_stock_buffer",
+		"suma_stock_buffer",
 		"afn_stock_sync_section",
 		"enable_afn_stock_sync",
 		"last_afn_stock_synced_at",
@@ -565,6 +566,14 @@
 			"fieldname": "clf_stock_buffer",
 			"fieldtype": "Int",
 			"label": "CLF Buffer Stock",
+			"non_negative": 1
+		},
+		{
+			"default": "50",
+			"description": "Suma stock below this quantity is stored as 0 during Suma stock imports. 0 disables the buffer. Stock equal to or above the buffer is stored at the actual Suma quantity. Prices are never changed by the daily Suma stock import.",
+			"fieldname": "suma_stock_buffer",
+			"fieldtype": "Int",
+			"label": "Suma Buffer Stock",
 			"non_negative": 1
 		},
 		{
