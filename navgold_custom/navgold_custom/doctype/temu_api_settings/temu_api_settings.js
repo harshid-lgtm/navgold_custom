@@ -31,9 +31,10 @@ frappe.ui.form.on('Temu API Settings', {
 				frappe.msgprint({
 					title: __('Temu Order Fetch'),
 					message: order_count
-						? __('Temu returned {0} matching order result(s). Review Last Order Response below.', [
-							order_count,
-						])
+						? __(
+								'Temu returned {0} matching order result(s). Review Last Order Response below.',
+								[order_count],
+						  )
 						: __('Temu returned no matching orders for that Order ID.'),
 					indicator: order_count ? 'green' : 'orange',
 				});
