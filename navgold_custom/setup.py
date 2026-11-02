@@ -169,6 +169,33 @@ def get_sales_order_custom_fields():
 				"in_standard_filter": 1,
 				"description": "Amazon's LatestShipDate — SLA deadline to ship by",
 			},
+			{
+				"fieldname": "shipping_address_line_1",
+				"fieldtype": "Data",
+				"label": "Shipping Address Line 1",
+				"insert_after": "dispatch_date",
+				"read_only": 1,
+				"no_copy": 1,
+				"in_standard_filter": 1,
+			},
+			{
+				"fieldname": "shipping_city",
+				"fieldtype": "Data",
+				"label": "Shipping City",
+				"insert_after": "shipping_address_line_1",
+				"read_only": 1,
+				"no_copy": 1,
+				"in_standard_filter": 1,
+			},
+			{
+				"fieldname": "shipping_postcode",
+				"fieldtype": "Data",
+				"label": "Shipping Postcode",
+				"insert_after": "shipping_city",
+				"read_only": 1,
+				"no_copy": 1,
+				"in_standard_filter": 1,
+			},
 		],
 		"Sales Order Item": [
 			{

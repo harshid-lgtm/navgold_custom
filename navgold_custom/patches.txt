@@ -30,3 +30,4 @@ navgold_custom.patches.v1.set_over_order_allowance_for_pack_rounding
 navgold_custom.patches.v1.request_stock_for_orders_left_uncovered
 navgold_custom.patches.v1.top_up_orders_short_of_their_own_line
 navgold_custom.patches.v1.backfill_strategy_approved_prices
+navgold_custom.patches.v1.backfill_sales_order_shipping_search_fields

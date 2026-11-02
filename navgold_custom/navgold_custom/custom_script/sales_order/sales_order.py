@@ -22,6 +22,32 @@ from navgold_custom.navgold_custom.custom_script.material_request.material_reque
 from navgold_custom.navgold_custom.utils import get_free_qty_map
 
 
+def set_shipping_search_fields(doc, method=None):
+	"""Copy structured shipping address values onto Sales Order for fast list filtering."""
+	address_name = doc.get("shipping_address_name")
+	if not address_name:
+		doc.shipping_address_line_1 = None
+		doc.shipping_city = None
+		doc.shipping_postcode = None
+		return
+
+	address = frappe.db.get_value(
+		"Address",
+		address_name,
+		["address_line1", "city", "pincode"],
+		as_dict=True,
+	)
+	if not address:
+		doc.shipping_address_line_1 = None
+		doc.shipping_city = None
+		doc.shipping_postcode = None
+		return
+
+	doc.shipping_address_line_1 = address.address_line1
+	doc.shipping_city = address.city
+	doc.shipping_postcode = address.pincode
+
+
 def sales_order_on_submit(doc, method):
 	if doc.fulfillment_channel == "MFN":
 		create_material_request(doc)

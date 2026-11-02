@@ -306,6 +306,7 @@ doc_events = {
 		"on_update": "navgold_custom.navgold_custom.custom_script.supplier.supplier.propagate_sfp_eligibility",
 	},
 	"Sales Order": {
+		"before_validate": "navgold_custom.navgold_custom.custom_script.sales_order.sales_order.set_shipping_search_fields",
 		"on_submit": [
 			"navgold_custom.navgold_custom.custom_script.sales_order.sales_order.sales_order_on_submit",
 			# Real-time below-min loss detection + loss circuit breaker (auto-freeze).
