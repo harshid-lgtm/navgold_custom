@@ -22,7 +22,6 @@ from navgold_custom.navgold_custom.custom_script.material_request.material_reque
 from navgold_custom.navgold_custom.utils import get_free_qty_map
 
 
-
 def set_shipping_search_fields(doc, method=None):
 	"""Copy structured shipping address values onto Sales Order for fast list filtering."""
 	address_name = doc.get("shipping_address_name")
