@@ -120,6 +120,79 @@ def format_money(amount) -> str:
 	return fmt_money(flt(amount), currency="GBP")
 
 
+def alert_price_approval_required(strategy_name: str) -> None:
+	strategy = frappe.db.get_value(
+		"Amazon Product Strategy",
+		strategy_name,
+		[
+			"proxy_sku",
+			"strategy_name",
+			"approved_min_price",
+			"approved_max_price",
+			"calculated_min_price",
+			"calculated_max_price",
+		],
+		as_dict=True,
+	)
+	if not strategy:
+		return
+
+	notify(
+		"Pricing approval required",
+		[
+			f"SKU <b>{frappe.utils.escape_html(cstr(strategy.proxy_sku))}</b> · {frappe.utils.escape_html(cstr(strategy.strategy_name))}",
+			f"Approved: {format_money(strategy.approved_min_price)} – {format_money(strategy.approved_max_price)}",
+			f"Proposed: {format_money(strategy.calculated_min_price)} – {format_money(strategy.calculated_max_price)}",
+			f"Review strategy <code>{frappe.utils.escape_html(strategy_name)}</code> in ERPNext.",
+		],
+		severity="warning",
+		dedupe_key=f"price_approval:{strategy_name}:{flt(strategy.calculated_min_price, 2)}:{flt(strategy.calculated_max_price, 2)}",
+		dedupe_seconds=86400,
+	)
+
+
+def alert_price_approvals_summary(strategy_names: list[str], source: str) -> None:
+	strategy_names = list(dict.fromkeys(strategy_names))
+	if not strategy_names:
+		return
+
+	rows = frappe.get_all(
+		"Amazon Product Strategy",
+		filters={"name": ["in", strategy_names], "approval_status": "Pending Approval"},
+		fields=[
+			"name",
+			"proxy_sku",
+			"strategy_name",
+			"approved_max_price",
+			"calculated_max_price",
+		],
+	)
+	if not rows:
+		return
+
+	rows.sort(
+		key=lambda row: abs(flt(row.calculated_max_price) - flt(row.approved_max_price)),
+		reverse=True,
+	)
+	lines = [f"{len(rows)} strategy price change(s) require review after {frappe.utils.escape_html(source)}."]
+	for row in rows[:5]:
+		lines.append(
+			f"{frappe.utils.escape_html(cstr(row.proxy_sku))} · "
+			f"{frappe.utils.escape_html(cstr(row.strategy_name))}: "
+			f"{format_money(row.approved_max_price)} → {format_money(row.calculated_max_price)}"
+		)
+	if len(rows) > 5:
+		lines.append(f"…and {len(rows) - 5} more.")
+
+	notify(
+		"Pricing approvals required",
+		lines,
+		severity="warning",
+		dedupe_key=f"price_approval_batch:{source}:{len(rows)}",
+		dedupe_seconds=900,
+	)
+
+
 def alert_feed_error(log_name: str, error: str, channel: str = "Amazon") -> None:
 	notify(
 		f"{channel} feed FAILED",
