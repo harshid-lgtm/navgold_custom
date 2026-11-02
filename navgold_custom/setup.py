@@ -48,6 +48,31 @@ def setup_navgold_role_permissions():
 def after_migrate():
 	after_install()
 	enable_prepared_report_for_strategy_price_comparison()
+	ensure_pick_list_status_in_list_view()
+
+
+def ensure_pick_list_status_in_list_view():
+	"""Keep Pick List status visible after Frappe list-view layout changes."""
+	property_setter = frappe.db.get_value(
+		"Property Setter",
+		{"doc_type": "Pick List", "field_name": "status", "property": "in_list_view"},
+	)
+	if property_setter:
+		frappe.db.set_value("Property Setter", property_setter, "value", "1", update_modified=False)
+	else:
+		frappe.make_property_setter(
+			{
+				"doctype": "Pick List",
+				"doctype_or_field": "DocField",
+				"fieldname": "status",
+				"property": "in_list_view",
+				"value": "1",
+				"property_type": "Check",
+			},
+			ignore_validate=True,
+		)
+
+	frappe.clear_cache(doctype="Pick List")
 
 
 def enable_prepared_report_for_strategy_price_comparison():
