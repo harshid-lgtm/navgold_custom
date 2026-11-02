@@ -2,6 +2,7 @@ import frappe
 from frappe.query_builder import DocType
 from frappe.utils.data import flt, now_datetime
 
+from navgold_custom.navgold_custom.amazon_pricing.alerts import alert_price_approvals_summary
 from navgold_custom.navgold_custom.amazon_pricing.report_attachments import save_last_report_attachment
 from navgold_custom.navgold_custom.doctype.amazon_sp_api_settings.amazon_sp_api import Reports
 from navgold_custom.navgold_custom.doctype.proxy_sku.proxy_sku import parse_listings_tsv
@@ -56,6 +57,7 @@ def process_fba_fee_fetch():
 	unchanged = 0
 	skipped_manual = 0
 	failed = 0
+	pending_approvals = []
 
 	for row in pricing_records:
 		strategy_name = row["fba_strategy"]
@@ -77,7 +79,10 @@ def process_fba_fee_fetch():
 						cost.is_active = 1
 						cost.rank = 1
 						break
+				strategy.flags.suppress_price_approval_alert = True
 				strategy.save(ignore_permissions=True)
+				if strategy.approval_status == "Pending Approval":
+					pending_approvals.append(strategy.name)
 				updated += 1
 			else:
 				strategy = frappe.get_doc("Amazon Product Strategy", strategy_name)
@@ -92,7 +97,10 @@ def process_fba_fee_fetch():
 						"rank": 1,
 					},
 				)
+				strategy.flags.suppress_price_approval_alert = True
 				strategy.save(ignore_permissions=True)
+				if strategy.approval_status == "Pending Approval":
+					pending_approvals.append(strategy.name)
 				inserted += 1
 		except Exception as e:
 			failed += 1
@@ -102,6 +110,7 @@ def process_fba_fee_fetch():
 			)
 
 	frappe.db.commit()  # nosemgrep: frappe-manual-commit -- background job, persist before notifying user
+	alert_price_approvals_summary(pending_approvals, "FBA fee refresh")
 
 	frappe.publish_realtime(
 		"msgprint",
