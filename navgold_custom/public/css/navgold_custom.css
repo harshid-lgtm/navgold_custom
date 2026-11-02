@@ -63,3 +63,26 @@
 		display: none !important;
 	}
 }
+
+
+/*
+ * Purchase Order has a wide item grid, but the standard Desk form keeps the
+ * content column narrower than the available desktop viewport. Use more of the
+ * page width on Purchase Order only so fewer item columns require horizontal
+ * scrolling. Leave tablet/handheld layouts unchanged.
+ */
+@media (min-width: 992px) {
+	body:has([data-doctype="Purchase Order"]) .layout-main-section {
+		max-width: none;
+	}
+
+	body:has([data-doctype="Purchase Order"]) .form-layout,
+	body:has([data-doctype="Purchase Order"]) .form-page {
+		max-width: none;
+		width: 100%;
+	}
+
+	body:has([data-doctype="Purchase Order"]) .grid-field {
+		width: 100%;
+	}
+}
