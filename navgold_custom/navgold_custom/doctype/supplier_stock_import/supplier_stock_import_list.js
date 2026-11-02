@@ -39,12 +39,15 @@ frappe.listview_settings['Supplier Stock Import'] = {
 					primary_action_label: __('Import Stock'),
 					primary_action: async (values) => {
 						const response = await frappe.call({
-							method: 'navgold_custom.navgold_custom.doctype.supplier_stock_import.suma_stock_import.start_suma_stock_import',
+							method:
+								'navgold_custom.navgold_custom.doctype.supplier_stock_import.suma_stock_import.start_suma_stock_import',
 							args: { file_url: values.file_url },
 						});
 						dialog.hide();
 						frappe.show_alert({
-							message: __('Suma stock import started: {0}', [response.message.docname]),
+							message: __('Suma stock import started: {0}', [
+								response.message.docname,
+							]),
 							indicator: 'blue',
 						});
 					},
