@@ -1,0 +1,148 @@
+{
+	"actions": [],
+	"creation": "2026-11-02 23:20:00.000000",
+	"doctype": "DocType",
+	"engine": "InnoDB",
+	"issingle": 1,
+	"field_order": [
+		"is_active",
+		"credentials_section",
+		"app_key",
+		"app_secret",
+		"column_break_credentials",
+		"access_token",
+		"api_endpoint",
+		"setup_section",
+		"company",
+		"warehouse",
+		"column_break_setup",
+		"customer_group",
+		"territory",
+		"manual_test_section",
+		"get_order",
+		"last_order_id",
+		"last_order_response"
+	],
+	"fields": [
+		{
+			"default": "0",
+			"fieldname": "is_active",
+			"fieldtype": "Check",
+			"label": "Is Active"
+		},
+		{
+			"fieldname": "credentials_section",
+			"fieldtype": "Section Break",
+			"label": "Temu API Credentials"
+		},
+		{
+			"fieldname": "app_key",
+			"fieldtype": "Data",
+			"label": "App Key",
+			"reqd": 1
+		},
+		{
+			"fieldname": "app_secret",
+			"fieldtype": "Password",
+			"label": "App Secret",
+			"reqd": 1
+		},
+		{
+			"fieldname": "column_break_credentials",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "access_token",
+			"fieldtype": "Password",
+			"label": "Access Token",
+			"reqd": 1
+		},
+		{
+			"default": "https://openapi-b-eu.temu.com/openapi/router",
+			"description": "EU Open API endpoint for United Kingdom Temu stores.",
+			"fieldname": "api_endpoint",
+			"fieldtype": "Data",
+			"label": "API Endpoint",
+			"reqd": 1
+		},
+		{
+			"fieldname": "setup_section",
+			"fieldtype": "Section Break",
+			"label": "ERP Setup"
+		},
+		{
+			"fieldname": "company",
+			"fieldtype": "Link",
+			"label": "Company",
+			"options": "Company"
+		},
+		{
+			"fieldname": "warehouse",
+			"fieldtype": "Link",
+			"label": "Warehouse",
+			"options": "Warehouse"
+		},
+		{
+			"fieldname": "column_break_setup",
+			"fieldtype": "Column Break"
+		},
+		{
+			"fieldname": "customer_group",
+			"fieldtype": "Link",
+			"label": "Customer Group",
+			"options": "Customer Group"
+		},
+		{
+			"fieldname": "territory",
+			"fieldtype": "Link",
+			"label": "Territory",
+			"options": "Territory"
+		},
+		{
+			"fieldname": "manual_test_section",
+			"fieldtype": "Section Break",
+			"label": "Manual Test"
+		},
+		{
+			"description": "Fetch one Temu parent order by Order ID without creating an ERP Sales Order.",
+			"fieldname": "get_order",
+			"fieldtype": "Button",
+			"label": "Get Order"
+		},
+		{
+			"fieldname": "last_order_id",
+			"fieldtype": "Data",
+			"label": "Last Order ID",
+			"read_only": 1
+		},
+		{
+			"fieldname": "last_order_response",
+			"fieldtype": "Code",
+			"label": "Last Order Response",
+			"options": "JSON",
+			"read_only": 1
+		}
+	],
+	"links": [],
+	"modified": "2026-11-02 23:20:00.000000",
+	"modified_by": "Administrator",
+	"module": "Navgold Custom",
+	"name": "Temu API Settings",
+	"owner": "Administrator",
+	"permissions": [
+		{
+			"create": 1,
+			"delete": 1,
+			"email": 1,
+			"print": 1,
+			"read": 1,
+			"role": "System Manager",
+			"share": 1,
+			"write": 1
+		}
+	],
+	"sort_field": "modified",
+	"sort_order": "DESC",
+	"states": [],
+	"track_changes": 1
+}
