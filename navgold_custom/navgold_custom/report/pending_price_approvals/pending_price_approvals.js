@@ -23,7 +23,11 @@ frappe.query_reports['Pending Price Approvals'] = {
 
 		if (!data) return formatted;
 
-		if (['min_change', 'max_change', 'max_change_percent'].includes(column.fieldname)) {
+		if (
+			['min_change', 'max_change', 'max_change_percent'].includes(
+				column.fieldname,
+			)
+		) {
 			const numeric = flt(value);
 			if (numeric > 0) {
 				return `<span style="color:#b54708;font-weight:600">${formatted}</span>`;
@@ -56,7 +60,11 @@ async function approve_selected(report) {
 	);
 	if (!confirmed) return;
 
-	await run_approval(report, selected.map((row) => row.strategy), false);
+	await run_approval(
+		report,
+		selected.map((row) => row.strategy),
+		false,
+	);
 }
 
 async function approve_all(report) {
@@ -104,9 +112,9 @@ async function run_approval(report, strategy_names, approve_all_pending) {
 		const rows_html = skipped
 			.map(
 				(row) =>
-					`<tr><td>${frappe.utils.escape_html(row.strategy)}</td><td>${frappe.utils.escape_html(
-						row.reason,
-					)}</td></tr>`,
+					`<tr><td>${frappe.utils.escape_html(
+						row.strategy,
+					)}</td><td>${frappe.utils.escape_html(row.reason)}</td></tr>`,
 			)
 			.join('');
 
