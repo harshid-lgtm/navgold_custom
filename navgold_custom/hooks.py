@@ -299,10 +299,6 @@ doctype_js = {
 }
 
 doc_events = {
-	"*": {
-		"before_save": "navgold_custom.navgold_custom.license_gate.enforce",
-		"before_submit": "navgold_custom.navgold_custom.license_gate.enforce",
-	},
 	"Purchase Order": {
 		"before_validate": "navgold_custom.navgold_custom.custom_script.purchase_order.purchase_order.set_supplier_part_no",
 	},
@@ -356,13 +352,9 @@ after_install = "navgold_custom.install.after_install"
 after_migrate = "navgold_custom.setup.after_migrate"
 before_uninstall = "navgold_custom.setup.before_uninstall"
 
-extend_bootinfo = "navgold_custom.navgold_custom.license_gate.get_bootinfo"
 
 scheduler_events = {
 	"cron": {
-		"0 */6 * * *": [
-			"navgold_custom.navgold_custom.license_gate.check_license",
-		],
 		"*/15 * * * *": [
 			"navgold_custom.navgold_custom.amazon_pricing.feed_status_poller.poll_pending_feed_submissions",
 			# Proactive safety sweep: circuit-breaker re-check + alerts on feed errors,
