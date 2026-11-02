@@ -392,12 +392,16 @@ def refresh_all_strategy_costs():
 
 def refresh_strategy_costs_chunk(strategy_names: list):
 	refreshed = 0
+	pending_approvals = []
 	missing_component_rates: list[tuple[str, str]] = []
 	for strategy_name in strategy_names:
 		try:
 			strategy = frappe.get_doc("Amazon Product Strategy", strategy_name)
 			strategy.flags.missing_bundle_component_rates = missing_component_rates
+			strategy.flags.suppress_price_approval_alert = True
 			strategy.save(ignore_permissions=True)
+			if strategy.approval_status == "Pending Approval":
+				pending_approvals.append(strategy.name)
 			refreshed += 1
 		except Exception as exception:
 			frappe.log_error(
@@ -406,5 +410,9 @@ def refresh_strategy_costs_chunk(strategy_names: list):
 			)
 
 	log_missing_bundle_component_rates(missing_component_rates)
+	if pending_approvals:
+		from navgold_custom.navgold_custom.amazon_pricing.alerts import alert_price_approvals_summary
+
+		alert_price_approvals_summary(pending_approvals, "strategy cost refresh")
 
 	return {"total": len(strategy_names), "refreshed": refreshed}
