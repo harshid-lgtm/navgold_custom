@@ -93,9 +93,9 @@ def detect_columns(headers):
 		stock_found = column_map.get("stock") is not None
 		stock_help = ""
 		if not stock_found:
-			stock_help = _(
-				" Recognised stock headers are: {0}."
-			).format(", ".join(sorted(STOCK_HEADER_ALIASES)))
+			stock_help = " " + _("Recognised stock headers are: {0}.").format(
+				", ".join(sorted(STOCK_HEADER_ALIASES))
+			)
 
 		frappe.throw(
 			_("Suma raw file format is not recognised. Missing: {0}. Columns found: {1}.{2}").format(
@@ -121,12 +121,8 @@ def build_raw_indexes(rows, column_map):
 		supplier_code = normalize_supplier_code(
 			row[column_map["plcode"]] if len(row) > column_map["plcode"] else None
 		)
-		barcode = normalize_barcode(
-			row[column_map["barcode"]] if len(row) > column_map["barcode"] else None
-		)
-		stock = floor_stock_qty_nonneg(
-			row[column_map["stock"]] if len(row) > column_map["stock"] else None
-		)
+		barcode = normalize_barcode(row[column_map["barcode"]] if len(row) > column_map["barcode"] else None)
+		stock = floor_stock_qty_nonneg(row[column_map["stock"]] if len(row) > column_map["stock"] else None)
 
 		payload = {"supplier_code": supplier_code, "barcode": barcode, "stock": stock}
 
