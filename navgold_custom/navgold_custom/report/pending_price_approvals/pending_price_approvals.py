@@ -129,9 +129,7 @@ def get_data(filters: dict) -> list[dict]:
 		row["min_change"] = flt(row.calculated_min_price, 2) - flt(row.approved_min_price, 2)
 		row["max_change"] = flt(row.calculated_max_price, 2) - flt(row.approved_max_price, 2)
 		approved_max = flt(row.approved_max_price, 2)
-		row["max_change_percent"] = (
-			flt((row["max_change"] / approved_max) * 100, 2) if approved_max else 0
-		)
+		row["max_change_percent"] = flt((row["max_change"] / approved_max) * 100, 2) if approved_max else 0
 
 	return rows
 
