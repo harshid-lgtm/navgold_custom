@@ -31,35 +31,67 @@
 
 
 /*
- * Zebra handhelds can report a CSS viewport wider than Frappe's native mobile
- * breakpoint, which leaves Pick List rows in the desktop layout and pushes the
- * status indicator off-screen. Keep this override scoped to Pick List list view
- * and handheld/tablet widths only.
+ * Zebra handhelds can report a desktop-sized CSS viewport, so width-only
+ * breakpoints are not reliable. Apply the compact Pick List row treatment to
+ * either narrow screens OR coarse-pointer touch devices up to tablet width.
  */
-@media (max-width: 991px) {
+@media (max-width: 991px), (pointer: coarse) and (max-width: 1400px) {
 	[data-page-route^="List/Pick List"] .list-row:not(.list-row-head) {
+		display: flex;
 		align-items: flex-start;
+		gap: var(--margin-xs);
 	}
 
 	[data-page-route^="List/Pick List"] .list-row:not(.list-row-head) .level-left {
+		display: flex;
 		flex: 1 1 auto;
+		min-width: 0;
+		overflow: hidden;
+	}
+
+	[data-page-route^="List/Pick List"] .list-row:not(.list-row-head) .level-left .list-row-col {
 		min-width: 0;
 	}
 
 	[data-page-route^="List/Pick List"] .list-row:not(.list-row-head) .level-right {
-		display: flex;
+		display: flex !important;
 		flex: 0 0 auto;
-		width: auto;
-		min-width: 0;
+		width: auto !important;
+		min-width: fit-content;
+		margin-left: auto;
 		border-left: none;
 	}
 
 	[data-page-route^="List/Pick List"] .list-row:not(.list-row-head) .level-right .visible-xs {
 		display: flex !important;
 		margin-top: 1px;
+		white-space: nowrap;
 	}
 
 	[data-page-route^="List/Pick List"] .list-row:not(.list-row-head) .level-right .hidden-xs {
 		display: none !important;
+	}
+}
+
+
+/*
+ * Purchase Order has a wide item grid, but the standard Desk form keeps the
+ * content column narrower than the available desktop viewport. Use more of the
+ * page width on Purchase Order only so fewer item columns require horizontal
+ * scrolling. Leave tablet/handheld layouts unchanged.
+ */
+@media (min-width: 992px) {
+	body:has([data-doctype="Purchase Order"]) .layout-main-section {
+		max-width: none;
+	}
+
+	body:has([data-doctype="Purchase Order"]) .form-layout,
+	body:has([data-doctype="Purchase Order"]) .form-page {
+		max-width: none;
+		width: 100%;
+	}
+
+	body:has([data-doctype="Purchase Order"]) .grid-field {
+		width: 100%;
 	}
 }

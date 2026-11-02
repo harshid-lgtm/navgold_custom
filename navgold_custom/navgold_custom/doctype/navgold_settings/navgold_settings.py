@@ -37,6 +37,7 @@ class NavgoldSettings(Document):
 		clf_endpoint: DF.Data | None
 		clf_password: DF.Password | None
 		clf_stock_buffer: DF.Int
+		suma_stock_buffer: DF.Int
 		clf_username: DF.Data | None
 		commission_threshold: DF.Float
 		default_label_owner: DF.Literal["AMAZON", "SELLER", "NONE"]
