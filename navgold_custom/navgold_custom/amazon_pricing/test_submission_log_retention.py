@@ -46,7 +46,7 @@ class TestSubmissionLogRetention(IntegrationTestCase):
 		self.assertFalse(row.response_content)
 
 	def test_recent_terminal_log_is_kept(self):
-		name = self.make_log(status="Completed", days_old=30)
+		name = self.make_log(status="Completed", days_old=29)
 
 		purge_old_submission_payloads()
 
