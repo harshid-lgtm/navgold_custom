@@ -399,6 +399,7 @@ scheduler_events = {
 		"navgold_custom.navgold_custom.doctype.amazon_product_strategy.amazon_product_strategy.refresh_all_strategy_costs",
 		"navgold_custom.navgold_custom.amazon_pricing.fba_fee_fetcher.bulk_fetch_fba_fees",
 		"navgold_custom.navgold_custom.amazon_pricing.daily_order_stats.sync_daily_order_stats",
+		"navgold_custom.navgold_custom.amazon_pricing.submission_log_retention.scheduled_purge_old_submission_payloads",
 		# Morning known-good price capture the panic-restore rolls back to
 		"navgold_custom.navgold_custom.doctype.amazon_pricing_snapshot.amazon_pricing_snapshot.daily_pricing_snapshot",
 		# erpnext's Close button writes status through db_set, so no document hook sees it;
