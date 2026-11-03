@@ -182,6 +182,28 @@ class AmazonProductStrategy(Document):
 			self.approval_status = "Approved"
 			return
 
+		before = self.get_doc_before_save()
+		margin_changed = bool(
+			before
+			and (
+				flt(self.min_margin) != flt(before.min_margin)
+				or flt(self.max_margin) != flt(before.max_margin)
+			)
+		)
+
+		# A deliberate margin edit is itself the commercial approval decision. Approve the resulting
+		# band immediately; the gate is meant to catch system/cost-driven price movement, not block a
+		# user who is explicitly changing the strategy margins.
+		if margin_changed:
+			self.approved_min_price = proposed_min
+			self.approved_max_price = proposed_max
+			self.approval_status = "Approved"
+			self.approval_requested_at = None
+			self.last_price_approved_by = frappe.session.user
+			self.last_price_approved_at = frappe.utils.now_datetime()
+			self.flags.suppress_price_approval_alert = True
+			return
+
 		approved_min = flt(self.approved_min_price, 2)
 		approved_max = flt(self.approved_max_price, 2)
 		changed = proposed_min != approved_min or proposed_max != approved_max
