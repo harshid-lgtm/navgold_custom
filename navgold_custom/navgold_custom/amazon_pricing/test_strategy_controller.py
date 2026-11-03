@@ -157,6 +157,21 @@ class TestStrategyControllerCalculatedBand(IntegrationTestCase):
 		self.assertAlmostEqual(strategy.approved_max_price, approved_max, places=2)
 		self.assertNotEqual(strategy.calculated_max_price, approved_max)
 
+	def test_manual_margin_change_approves_the_new_band_immediately(self):
+		proxy_sku = create_proxy_sku()
+		strategy = build_strategy(proxy_sku, min_margin=10, max_margin=20, purchase_cost_value=5.0)
+
+		with patch.object(price_calculator, "get_pricing_settings", return_value=FIXED_SETTINGS):
+			strategy.insert()
+			strategy.min_margin = 12
+			strategy.max_margin = 24
+			strategy.save()
+
+		self.assertEqual(strategy.approval_status, "Approved")
+		self.assertAlmostEqual(strategy.approved_min_price, strategy.calculated_min_price, places=2)
+		self.assertAlmostEqual(strategy.approved_max_price, strategy.calculated_max_price, places=2)
+		self.assertIsNone(strategy.approval_requested_at)
+
 	def test_calculated_band_scales_with_cost(self):
 		# Absolute cost of 8, margins 10%/20%. numerator = 8, denominator = 1.
 		#   min = 8 / 0.90 = 8.8889 -> 8.89
