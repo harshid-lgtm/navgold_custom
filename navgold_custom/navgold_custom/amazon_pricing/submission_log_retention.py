@@ -8,7 +8,13 @@ from frappe.utils import add_days, now_datetime
 
 RETENTION_DAYS = 30
 TERMINAL_STATUSES = ("Completed", "Error", "Dry Run", "Skipped")
-HEAVY_FIELDS = ("feed_content", "response_content")
+HEAVY_FIELDS = (
+	"feed_content",
+	"response_content",
+	"pricing_records",
+	"blocked_records",
+	"supplier_swap_notes",
+)
 
 
 def purge_old_submission_payloads(retention_days: int = RETENTION_DAYS) -> int:
@@ -24,10 +30,7 @@ def purge_old_submission_payloads(retention_days: int = RETENTION_DAYS) -> int:
 			"status": ["in", list(TERMINAL_STATUSES)],
 			"creation": ["<", cutoff],
 		},
-		or_filters=[
-			["feed_content", "!=", ""],
-			["response_content", "!=", ""],
-		],
+		or_filters=[[field, "!=", ""] for field in HEAVY_FIELDS],
 		pluck="name",
 	)
 
@@ -39,10 +42,7 @@ def purge_old_submission_payloads(retention_days: int = RETENTION_DAYS) -> int:
 		frappe.db.set_value(
 			"Amazon Pricing Submission Log",
 			{"name": ["in", batch]},
-			{
-				"feed_content": None,
-				"response_content": None,
-			},
+			{field: None for field in HEAVY_FIELDS},
 			update_modified=False,
 		)
 
