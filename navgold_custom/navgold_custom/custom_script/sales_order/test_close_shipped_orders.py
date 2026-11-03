@@ -145,6 +145,11 @@ class TestCloseShippedOrdersWithoutDelivery(IntegrationTestCase):
 		self.assertIn(delivery_note.name, recovered)
 		self.assertEqual(frappe.db.get_value("Delivery Note", delivery_note.name, "docstatus"), 1)
 		self.assertEqual(frappe.db.get_value("Sales Order", sales_order.name, "per_delivered"), 100)
+		self.assertEqual(
+			frappe.db.get_value("Sales Order", sales_order.name, "status"),
+			"Closed",
+			"recovered Amazon orders should not remain in To Bill",
+		)
 
 	def test_unshipped_order_does_not_recover_draft_delivery_note(self):
 		self.receive_stock(2)
