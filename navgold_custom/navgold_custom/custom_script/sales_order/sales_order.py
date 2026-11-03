@@ -432,6 +432,19 @@ def reconcile_shipped_draft_delivery_notes(sales_orders: list[str]) -> list[str]
 				message=frappe.get_traceback(),
 				title=f"Auto Delivery Note Recovery Failed - {delivery_note.name}",
 			)
+			continue
+
+		# A fully delivered Amazon order otherwise becomes "To Bill" because ERPNext still expects
+		# an invoice. These marketplace orders are already settled externally, so mirror the existing
+		# manual workflow and close the Sales Order once the recovered Delivery Note has submitted.
+		try:
+			close_or_unclose_sales_orders(frappe.as_json([sales_order]), "Closed")
+			retire_demand_for_sales_orders([sales_order])
+		except Exception:
+			frappe.log_error(
+				message=frappe.get_traceback(),
+				title=f"Auto Sales Order Close Failed - {sales_order}",
+			)
 
 	return submitted
 
