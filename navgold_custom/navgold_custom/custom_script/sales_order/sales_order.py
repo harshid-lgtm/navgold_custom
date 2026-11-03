@@ -328,9 +328,10 @@ def get_orders_on_open_pick_lists(sales_orders: list[str]) -> set[str]:
 
 
 def close_shipped_orders_without_delivery() -> list[str]:
-	# Amazon has the goods with the customer, but with no Delivery Note erpnext keeps the order's
-	# reservation in Bin for good, and every shortage reading counts it as stock spoken for.
-	# Partly delivered orders are left open on purpose.
+	# Amazon has already handed these orders to the carrier. First heal the common stranded state:
+	# a warehouse-created Draft Delivery Note that never submitted. Submit it normally so ERPNext
+	# updates stock, delivery progress and Pick List status through the standard hooks. Anything that
+	# cannot pass normal validation is left untouched and logged for review.
 	sales_orders = frappe.get_all(
 		"Sales Order",
 		filters={
@@ -345,8 +346,23 @@ def close_shipped_orders_without_delivery() -> list[str]:
 	if not sales_orders:
 		return []
 
-	# a draft Delivery Note or an open pick list means the warehouse is still working the order,
-	# and closing it would block that Delivery Note from submitting
+	reconcile_shipped_draft_delivery_notes(sales_orders)
+
+	# Refresh after recovery: successfully submitted Delivery Notes may have completed their Sales
+	# Orders and Pick Lists. The remaining no-DN cases keep the previous safety behaviour.
+	sales_orders = frappe.get_all(
+		"Sales Order",
+		filters={
+			"name": ("in", sales_orders),
+			"docstatus": 1,
+			"status": ("not in", ("Closed", "Completed")),
+			"per_delivered": 0,
+		},
+		pluck="name",
+	)
+	if not sales_orders:
+		return []
+
 	still_being_packed = get_orders_on_open_pick_lists(sales_orders) | get_orders_with_delivery_notes(
 		sales_orders
 	)
@@ -358,6 +374,66 @@ def close_shipped_orders_without_delivery() -> list[str]:
 	retire_demand_for_sales_orders(closable)
 
 	return closable
+
+
+def reconcile_shipped_draft_delivery_notes(sales_orders: list[str]) -> list[str]:
+	"""Submit safe stranded Draft Delivery Notes for Amazon orders already marked Shipped.
+
+	Only a one-to-one Draft Delivery Note is eligible: every DN row must reference the same Sales
+	Order, the order must be on a submitted/open Delivery Pick List, and the note must not be a
+	return. We deliberately do not bypass any ERPNext validation.
+	"""
+	if not sales_orders:
+		return []
+
+	open_pick_orders = get_orders_on_open_pick_lists(sales_orders)
+	if not open_pick_orders:
+		return []
+
+	draft_delivery_notes = frappe.get_all(
+		"Delivery Note Item",
+		filters={
+			"against_sales_order": ("in", list(open_pick_orders)),
+			"docstatus": 0,
+		},
+		fields=["parent", "against_sales_order"],
+		order_by="parent",
+	)
+	if not draft_delivery_notes:
+		return []
+
+	orders_by_delivery_note = {}
+	for row in draft_delivery_notes:
+		orders_by_delivery_note.setdefault(row.parent, set()).add(row.against_sales_order)
+
+	submitted = []
+	for delivery_note_name, linked_orders in orders_by_delivery_note.items():
+		# A mixed Delivery Note could ship multiple orders; do not auto-submit that from one Amazon
+		# status alone. Also reject notes with unlinked rows below.
+		if len(linked_orders) != 1:
+			continue
+		sales_order = next(iter(linked_orders))
+
+		delivery_note = frappe.get_doc("Delivery Note", delivery_note_name)
+		if delivery_note.docstatus != 0 or delivery_note.is_return:
+			continue
+
+		item_orders = {row.against_sales_order for row in delivery_note.items if row.against_sales_order}
+		if item_orders != {sales_order} or any(not row.against_sales_order for row in delivery_note.items):
+			continue
+
+		try:
+			frappe.db.savepoint("auto_recover_delivery_note")
+			delivery_note.submit()
+			submitted.append(delivery_note.name)
+		except Exception:
+			frappe.db.rollback(save_point="auto_recover_delivery_note")
+			frappe.log_error(
+				message=frappe.get_traceback(),
+				title=f"Auto Delivery Note Recovery Failed - {delivery_note.name}",
+			)
+
+	return submitted
 
 
 def get_orders_with_delivery_notes(sales_orders: list[str]) -> set[str]:
