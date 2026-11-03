@@ -423,10 +423,11 @@ def reconcile_shipped_draft_delivery_notes(sales_orders: list[str]) -> list[str]
 			continue
 
 		try:
+			frappe.db.savepoint("auto_recover_delivery_note")
 			delivery_note.submit()
 			submitted.append(delivery_note.name)
 		except Exception:
-			frappe.db.rollback()
+			frappe.db.rollback(save_point="auto_recover_delivery_note")
 			frappe.log_error(
 				message=frappe.get_traceback(),
 				title=f"Auto Delivery Note Recovery Failed - {delivery_note.name}",
