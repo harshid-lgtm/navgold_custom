@@ -85,7 +85,7 @@ def create_afn_material_issue(doc, method):
 	)
 	material_issue.set_posting_time = 1
 	material_issue.posting_date = posted_at.date()
-	material_issue.posting_time = posted_at.time()
+	material_issue.posting_time = posted_at.strftime("%H:%M:%S.%f")
 
 	for row in transferred_rows:
 		material_issue.append(
