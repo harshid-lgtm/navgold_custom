@@ -6,7 +6,7 @@ from __future__ import annotations
 import frappe
 from frappe.utils import add_days, now_datetime
 
-RETENTION_DAYS = 90
+RETENTION_DAYS = 60
 TERMINAL_STATUSES = ("Completed", "Error", "Dry Run", "Skipped")
 HEAVY_FIELDS = ("feed_content", "response_content")
 
