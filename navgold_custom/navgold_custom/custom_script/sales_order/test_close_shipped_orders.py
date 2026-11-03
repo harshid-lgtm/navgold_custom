@@ -11,6 +11,7 @@ from navgold_custom.navgold_custom.custom_script.material_request.test_retire_de
 )
 from navgold_custom.navgold_custom.custom_script.sales_order.sales_order import (
 	close_shipped_orders_without_delivery,
+	reconcile_shipped_draft_delivery_notes,
 )
 from navgold_custom.navgold_custom.custom_script.stock_entry.test_fba_clearing import (
 	COMPANY,
@@ -64,6 +65,28 @@ class TestCloseShippedOrdersWithoutDelivery(IntegrationTestCase):
 		receipt.insert()
 		receipt.submit()
 
+	def make_open_pick_list(self, sales_order, qty):
+		pick_list = frappe.new_doc("Pick List")
+		pick_list.company = COMPANY
+		pick_list.purpose = "Delivery"
+		pick_list.append(
+			"locations",
+			{
+				"item_code": self.item_code,
+				"qty": qty,
+				"stock_qty": qty,
+				"picked_qty": qty,
+				"uom": "Nos",
+				"conversion_factor": 1,
+				"warehouse": self.warehouse,
+				"sales_order": sales_order.name,
+				"sales_order_item": sales_order.items[0].name,
+			},
+		)
+		pick_list.insert()
+		frappe.db.set_value("Pick List", pick_list.name, {"docstatus": 1, "status": "Open"})
+		return pick_list
+
 	def status_of(self, sales_order):
 		return frappe.db.get_value("Sales Order", sales_order.name, "status")
 
@@ -98,7 +121,7 @@ class TestCloseShippedOrdersWithoutDelivery(IntegrationTestCase):
 
 		self.assertEqual(self.status_of(sales_order), "To Deliver and Bill")
 
-	def test_an_order_with_a_draft_delivery_note_is_left_open(self):
+	def test_a_draft_delivery_note_without_open_pick_list_is_left_open(self):
 		sales_order = self.make_sales_order(qty=2)
 		make_delivery_note(sales_order.name).insert()
 
@@ -107,8 +130,33 @@ class TestCloseShippedOrdersWithoutDelivery(IntegrationTestCase):
 		self.assertEqual(
 			self.status_of(sales_order),
 			"To Deliver and Bill",
-			"closing would stop the draft Delivery Note from ever submitting",
+			"a standalone Draft Delivery Note is not enough evidence to auto-submit",
 		)
+
+	def test_shipped_order_with_open_pick_list_recovers_draft_delivery_note(self):
+		self.receive_stock(2)
+		sales_order = self.make_sales_order(qty=2)
+		self.make_open_pick_list(sales_order, 2)
+		delivery_note = make_delivery_note(sales_order.name)
+		delivery_note.insert()
+
+		recovered = reconcile_shipped_draft_delivery_notes([sales_order.name])
+
+		self.assertIn(delivery_note.name, recovered)
+		self.assertEqual(frappe.db.get_value("Delivery Note", delivery_note.name, "docstatus"), 1)
+		self.assertEqual(frappe.db.get_value("Sales Order", sales_order.name, "per_delivered"), 100)
+
+	def test_unshipped_order_does_not_recover_draft_delivery_note(self):
+		self.receive_stock(2)
+		sales_order = self.make_sales_order(qty=2, amazon_order_status="Unshipped")
+		self.make_open_pick_list(sales_order, 2)
+		delivery_note = make_delivery_note(sales_order.name)
+		delivery_note.insert()
+
+		recovered = reconcile_shipped_draft_delivery_notes([])
+
+		self.assertEqual(recovered, [])
+		self.assertEqual(frappe.db.get_value("Delivery Note", delivery_note.name, "docstatus"), 0)
 
 	def test_an_order_on_an_open_pick_list_is_left_open(self):
 		self.receive_stock(2)
