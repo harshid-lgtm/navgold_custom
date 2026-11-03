@@ -8,7 +8,13 @@ from frappe.utils import add_days, now_datetime
 
 RETENTION_DAYS = 30
 TERMINAL_STATUSES = ("Completed", "Error", "Dry Run", "Skipped")
-HEAVY_FIELDS = ("feed_content", "response_content", "pricing_records", "blocked_records", "supplier_swap_notes")
+HEAVY_FIELDS = (
+	"feed_content",
+	"response_content",
+	"pricing_records",
+	"blocked_records",
+	"supplier_swap_notes",
+)
 
 
 def purge_old_submission_payloads(retention_days: int = RETENTION_DAYS) -> int:
